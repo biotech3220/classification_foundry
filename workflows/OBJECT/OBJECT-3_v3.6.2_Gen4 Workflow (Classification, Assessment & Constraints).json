@@ -6,7 +6,7 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -672,
+        -1248,
         0
       ],
       "id": "c5f7a9b0-c0c2-43e2-9ef0-0a486362b6b1",
@@ -35,7 +35,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -224,
+        -800,
         0
       ],
       "id": "fcd56201-8e40-457a-99e0-dc8303df7394",
@@ -54,7 +54,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -32,
+        -608,
         0
       ],
       "id": "7473f4e2-a912-4867-99f3-4cb1cb60c66c",
@@ -91,7 +91,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        832,
+        1248,
         0
       ],
       "credentials": {
@@ -112,7 +112,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1040,
+        1456,
         0
       ],
       "id": "d627de2c-aaf9-4caf-9153-59ae1d16355e",
@@ -155,13 +155,13 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse Dual-Standard LLM Response\n// Extracts BOTH Standard A (ANZSRC) and Standard B (OECD FOS) classifications\n\nconst llmResponse = $input.first().json;\n\n// Only fetch the fields we actually need downstream\nconst promptData = $('Prepare Dual-Standard LLM Prompt').first().json;\n\n// Extract content from LLM response\nlet content;\n\nif (llmResponse.choices?.[0]?.message?.content) {\n  content = llmResponse.choices[0].message.content;\n} else if (llmResponse.text) {\n  content = llmResponse.text;\n} else if (llmResponse.output) {\n  content = llmResponse.output;\n} else if (Array.isArray(llmResponse) && llmResponse[0]?.text) {\n  content = llmResponse[0].text;\n} else {\n  throw new Error(`Unexpected LLM response structure: ${JSON.stringify(llmResponse).slice(0, 200)}`);\n}\n\nif (!content) {\n  throw new Error('No content in LLM response');\n}\n\n// Parse JSON from response\nlet parsed;\ntry {\n  let cleanContent = content.trim();\n  if (cleanContent.startsWith('```json')) {\n    cleanContent = cleanContent.slice(7);\n  } else if (cleanContent.startsWith('```')) {\n    cleanContent = cleanContent.slice(3);\n  }\n  if (cleanContent.endsWith('```')) {\n    cleanContent = cleanContent.slice(0, -3);\n  }\n  \n  parsed = JSON.parse(cleanContent.trim());\n} catch (e) {\n  throw new Error(`Failed to parse LLM response as JSON: ${e.message}\\nContent: ${content.slice(0, 500)}`);\n}\n\n// Validate structure\nif (!parsed.standard_a?.classifications) {\n  throw new Error('LLM response missing standard_a.classifications');\n}\n\nconst CONFIDENCE_THRESHOLD = 0.70;\n\n// Process Standard A (ANZSRC)\nconst standardAClassifications = (parsed.standard_a.classifications || [])\n  .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n  .map(c => ({\n    code: String(c.code),\n    name: c.name || 'Unknown',\n    confidence: Math.min(1.0, Math.max(0.0, c.confidence)),\n    justification: c.justification || '',\n    evidence: c.evidence || []\n  }))\n  .sort((a, b) => b.confidence - a.confidence);\n\n// Process Standard B (OECD FOS)\nconst standardBClassifications = (parsed.standard_b?.classifications || [])\n  .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n  .map(c => ({\n    code: String(c.code),\n    name: c.name || 'Unknown',\n    confidence: Math.min(1.0, Math.max(0.0, c.confidence)),\n    justification: c.justification || ''\n  }))\n  .sort((a, b) => b.confidence - a.confidence);\n\nconsole.log(`✅ Standard A: ${standardAClassifications.length} codes`);\nconsole.log(`✅ Standard B: ${standardBClassifications.length} codes`);\n\nreturn [{\n  json: {\n    // Core identifiers (needed for storage)\n    asset_id: promptData.asset_id,\n    name: promptData.name,\n    orcid: promptData.orcid,\n    institution: promptData.institution,\n    qdrant_point_id: promptData.qdrant_point_id,\n    \n    // Standard A classifications\n    classifications: standardAClassifications,\n    classification_count: standardAClassifications.length,\n    \n    // Standard B classifications\n    standard_b_classifications: standardBClassifications,\n    standard_b_count: standardBClassifications.length,\n    \n    // Reasoning\n    reasoning: parsed.reasoning || '',\n    \n    // LLM metadata\n    model: llmResponse.model || 'openai/gpt-4o'\n  }\n}];"
+        "jsCode": "// ============================================================\n// Node: Parse LLM Response (with Retry Support)\n// Extracts BOTH Standard A (ANZSRC) and Standard B (OECD FOS) classifications\n// Added: Error handling with retry flag\n// ============================================================\n\nconst llmResponse = $input.first().json;\nconst promptData = $('Prepare Dual-Standard LLM Prompt').first().json;\n\n// Track retry attempts\nconst currentRetryCount = promptData.llm_retry_count || 0;\nconst MAX_RETRIES = 2;\n\n// Extract content from LLM response\nlet content;\n\ntry {\n  if (llmResponse.choices?.[0]?.message?.content) {\n    content = llmResponse.choices[0].message.content;\n  } else if (llmResponse.text) {\n    content = llmResponse.text;\n  } else if (llmResponse.output) {\n    content = llmResponse.output;\n  } else if (Array.isArray(llmResponse) && llmResponse[0]?.text) {\n    content = llmResponse[0].text;\n  } else {\n    throw new Error(`Unexpected LLM response structure: ${JSON.stringify(llmResponse).slice(0, 200)}`);\n  }\n\n  if (!content) {\n    throw new Error('No content in LLM response');\n  }\n\n  // Parse JSON from response\n  let parsed;\n  let cleanContent = content.trim();\n  \n  // Remove markdown code blocks if present\n  if (cleanContent.startsWith('```json')) {\n    cleanContent = cleanContent.slice(7);\n  } else if (cleanContent.startsWith('```')) {\n    cleanContent = cleanContent.slice(3);\n  }\n  if (cleanContent.endsWith('```')) {\n    cleanContent = cleanContent.slice(0, -3);\n  }\n  \n  parsed = JSON.parse(cleanContent.trim());\n\n  // Validate structure\n  if (!parsed.standard_a?.classifications) {\n    throw new Error('LLM response missing standard_a.classifications');\n  }\n\n  const CONFIDENCE_THRESHOLD = 0.70;\n\n  // Process Standard A (ANZSRC)\n  const standardAClassifications = (parsed.standard_a.classifications || [])\n    .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n    .map(c => ({\n      code: String(c.code),\n      name: c.name || 'Unknown',\n      confidence: Math.min(1.0, Math.max(0.0, c.confidence)),\n      justification: c.justification || '',\n      evidence: c.evidence || []\n    }))\n    .sort((a, b) => b.confidence - a.confidence);\n\n  // Process Standard B (OECD FOS)\n  const standardBClassifications = (parsed.standard_b?.classifications || [])\n    .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n    .map(c => ({\n      code: String(c.code),\n      name: c.name || 'Unknown',\n      confidence: Math.min(1.0, Math.max(0.0, c.confidence)),\n      justification: c.justification || ''\n    }))\n    .sort((a, b) => b.confidence - a.confidence);\n\n  console.log(`✅ Standard A: ${standardAClassifications.length} codes`);\n  console.log(`✅ Standard B: ${standardBClassifications.length} codes`);\n\n  return [{\n    json: {\n      // Core identifiers\n      asset_id: promptData.asset_id,\n      name: promptData.name,\n      orcid: promptData.orcid,\n      institution: promptData.institution,\n      qdrant_point_id: promptData.qdrant_point_id,\n      \n      // Parse success\n      parse_success: true,\n      needs_retry: false,\n      \n      // Standard A classifications\n      classifications: standardAClassifications,\n      classification_count: standardAClassifications.length,\n      \n      // Standard B classifications\n      standard_b_classifications: standardBClassifications,\n      standard_b_count: standardBClassifications.length,\n      \n      // Reasoning\n      reasoning: parsed.reasoning || '',\n      \n      // LLM metadata\n      model: llmResponse.model || 'openai/gpt-4o',\n      llm_retry_count: currentRetryCount\n    }\n  }];\n\n} catch (parseError) {\n  // JSON parsing failed - check if we can retry\n  console.log(`⚠️ LLM Parse Error for ${promptData.name}: ${parseError.message}`);\n  console.log(`   Retry count: ${currentRetryCount}/${MAX_RETRIES}`);\n  \n  if (currentRetryCount < MAX_RETRIES) {\n    // Flag for retry\n    return [{\n      json: {\n        // Pass through all original data for retry\n        ...promptData,\n        \n        // Retry flags\n        parse_success: false,\n        needs_retry: true,\n        llm_retry_count: currentRetryCount + 1,\n        \n        // Error details\n        parse_error: parseError.message,\n        failed_content_preview: content ? content.slice(0, 500) : 'No content',\n        \n        // Will be used by retry logic\n        retry_reason: 'JSON parse failure - truncated or malformed response'\n      }\n    }];\n  } else {\n    // Max retries exceeded - route to failed\n    return [{\n      json: {\n        asset_id: promptData.asset_id,\n        name: promptData.name,\n        orcid: promptData.orcid,\n        institution: promptData.institution,\n        qdrant_point_id: promptData.qdrant_point_id,\n        \n        // Failure flags\n        parse_success: false,\n        needs_retry: false,\n        classification_failed: true,\n        \n        // Error details\n        parse_error: parseError.message,\n        failed_content_preview: content ? content.slice(0, 500) : 'No content',\n        llm_retry_count: currentRetryCount,\n        failure_reason: `Max retries (${MAX_RETRIES}) exceeded - JSON parse failure`\n      }\n    }];\n  }\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -880,
-        624
+        -1584,
+        608
       ],
       "id": "9516d93a-5487-4fab-8adb-6a4093174aaf",
       "name": "Parse LLM Response"
@@ -245,7 +245,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ $json.qdrant_payload }}",
-        "options": {}
+        "options": {
+          "allowUnauthorizedCerts": true
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -295,7 +297,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -448,
+        -1024,
         0
       ],
       "id": "6e3de52f-2281-47bf-9c34-9de018af6e66",
@@ -394,7 +396,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        400,
+        816,
         0
       ],
       "id": "383ec761-9c3d-470a-b5e2-248a2230caf8",
@@ -413,7 +415,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        608,
+        1024,
         0
       ],
       "id": "f73fe5a1-0d61-4867-8b5e-7c37c91c2996",
@@ -426,7 +428,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        176,
+        560,
         0
       ],
       "id": "36b164a4-8703-4b95-ac60-311e0139fcc4",
@@ -588,7 +590,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// CF1 Hierarchical Consistency Check\n// Validates classification hierarchy and checks for constraint violations\n\nconst inputData = $input.first().json;\n\nif (!inputData.classifications || inputData.classifications.length === 0) {\n  throw new Error('No classifications to assess');\n}\n\n// Extract hierarchy info from each code\nconst classificationDetails = inputData.classifications.map(c => {\n  const code = String(c.code);\n  return {\n    ...c,\n    division_code: code.substring(0, 2),\n    group_code: code.substring(0, 4),\n    field_code: code\n  };\n});\n\n// Get unique divisions and groups\nconst divisionsFound = [...new Set(classificationDetails.map(c => c.division_code))];\nconst groupsFound = [...new Set(classificationDetails.map(c => c.group_code))];\n\n// === CF1 RULE 1: Check parent-child conflicts ===\nconst violations = [];\nconst codes = classificationDetails.map(c => c.code);\n\nfor (const c of classificationDetails) {\n  for (const other of codes) {\n    if (other !== c.code) {\n      // Check if one code is parent of another\n      if (c.code.startsWith(other) && c.code.length > other.length) {\n        violations.push({\n          rule: 'parent_child_conflict',\n          parent: other,\n          child: c.code,\n          action: `Remove parent code ${other}, keep specific code ${c.code}`\n        });\n      }\n    }\n  }\n}\n\n// === CF1 RULE 2: Check code specificity (warn on broad codes) ===\nconst flags = [];\nfor (const c of classificationDetails) {\n  if (c.code.length === 2) {\n    flags.push({\n      rule: 'broad_code_warning',\n      code: c.code,\n      message: '2-digit code is very broad, consider more specific classification'\n    });\n  } else if (c.code.length === 4) {\n    flags.push({\n      rule: 'group_code_warning',\n      code: c.code,\n      message: '4-digit group code used instead of 6-digit field code'\n    });\n  }\n}\n\n// === CF1 RULE 3: Check sibling overlap (multiple codes under same parent) ===\nconst parentGroups = {};\nfor (const c of classificationDetails) {\n  if (c.code.length === 6) {\n    const parent = c.group_code;\n    if (!parentGroups[parent]) {\n      parentGroups[parent] = [];\n    }\n    parentGroups[parent].push(c.code);\n  }\n}\n\nfor (const [parent, children] of Object.entries(parentGroups)) {\n  if (children.length > 2) {\n    flags.push({\n      rule: 'sibling_overlap',\n      parent: parent,\n      siblings: children,\n      message: `Multiple codes (${children.length}) under group ${parent} may indicate over-classification`\n    });\n  }\n}\n\n// === Calculate penalty ===\nlet penalty = 0.0;\n\n// Parent-child violations: -0.10 each\npenalty += violations.length * 0.10;\n\n// Broad code warnings: -0.05 each\npenalty += flags.filter(f => f.rule === 'broad_code_warning').length * 0.05;\n\n// Determine pass/fail\nconst passed = violations.length === 0;\n\n// === Build adjusted classifications ===\n// Remove parent codes if child exists\nconst codesToRemove = new Set(violations.map(v => v.parent));\n\nconst adjustedClassifications = classificationDetails\n  .filter(c => !codesToRemove.has(c.code))\n  .map(c => ({\n    code: c.code,\n    name: c.name,\n    confidence: c.confidence,\n    justification: c.justification,\n    evidence: c.evidence,\n    division_code: c.division_code,\n    group_code: c.group_code,\n    cf1_validated: passed\n  }));\n\n// === Enforce min/max code counts ===\nconst MIN_CODES = 3;\nconst MAX_CODES = 10;\n\nif (adjustedClassifications.length < MIN_CODES) {\n  flags.push({\n    rule: 'under_classification',\n    count: adjustedClassifications.length,\n    message: `Only ${adjustedClassifications.length} codes assigned, minimum is ${MIN_CODES}`\n  });\n}\n\nif (adjustedClassifications.length > MAX_CODES) {\n  // Truncate to top MAX_CODES by confidence\n  adjustedClassifications.sort((a, b) => b.confidence - a.confidence);\n  adjustedClassifications.splice(MAX_CODES);\n  flags.push({\n    rule: 'over_classification_truncated',\n    message: `Truncated to ${MAX_CODES} highest-confidence codes`\n  });\n}\n\nconsole.log(`✅ CF1 Assessment: ${passed ? 'PASSED' : 'FAILED'}`);\nconsole.log(`   Violations: ${violations.length}, Flags: ${flags.length}, Penalty: ${penalty}`);\n\nreturn [{\n  json: {\n    // Core data (pass through)\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    reasoning: inputData.reasoning,\n    model: inputData.model,\n    \n    // Crosswalk assessment (pass through)\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    \n    // CRE assessment (pass through) - NEW\n    cre_assessment: inputData.cre_assessment,\n    \n    // Standard B classifications (pass through)\n    standard_b_classifications: inputData.standard_b_classifications,\n    standard_b_count: inputData.standard_b_count,\n    \n    // CF1 Assessment results (ANZSRC hierarchy - local check)\n    cf1_assessment: {\n      passed: passed,\n      violations: violations,\n      flags: flags,\n      penalty: penalty,\n      divisions_found: divisionsFound,\n      groups_found: groupsFound\n    },\n    \n    // Adjusted Standard A classifications\n    classifications: adjustedClassifications,\n    classification_count: adjustedClassifications.length\n  }\n}];"
+        "jsCode": "// ============================================================\n// CF1 Hierarchical Consistency Check\n// Validates classification hierarchy and checks for constraint violations\n// UPDATED: Handle empty classifications gracefully\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// === Handle empty classifications (candidate mismatch) ===\nif (!inputData.classifications || inputData.classifications.length === 0) {\n  console.log(`⚠️ No ANZSRC classifications for ${inputData.name} - routing to HITL`);\n  \n  // Check if we have Standard B classifications (OECD FOS)\n  const hasStandardB = inputData.standard_b_classifications && \n                       inputData.standard_b_classifications.length > 0;\n  \n  return [{\n    json: {\n      // Core data (pass through)\n      asset_id: inputData.asset_id,\n      name: inputData.name,\n      qdrant_point_id: inputData.qdrant_point_id,\n      reasoning: inputData.reasoning,\n      model: inputData.model,\n      \n      // Crosswalk assessment (pass through)\n      crosswalk_assessment: inputData.crosswalk_assessment,\n      \n      // CRE assessment (pass through)\n      cre_assessment: inputData.cre_assessment,\n      \n      // Standard B classifications (pass through)\n      standard_b_classifications: inputData.standard_b_classifications,\n      standard_b_count: inputData.standard_b_count,\n      \n      // Empty Standard A - this is the problem\n      classifications: [],\n      classification_count: 0,\n      \n      // CF1 Assessment - mark as failed due to no classifications\n      cf1_assessment: {\n        passed: false,\n        violations: [],\n        flags: [{\n          rule: 'no_anzsrc_classifications',\n          message: 'LLM could not assign any ANZSRC codes from candidates - likely candidate mismatch',\n          has_standard_b: hasStandardB,\n          standard_b_count: inputData.standard_b_count || 0\n        }],\n        penalty: 0.5,\n        divisions_found: [],\n        groups_found: []\n      },\n      \n      // Route to HITL\n      requires_hitl: true,\n      hitl_reason: 'No ANZSRC classifications - vector search returned irrelevant candidates',\n      classification_failed: false,\n      candidate_mismatch: true\n    }\n  }];\n}\n\n// === Normal processing continues below ===\n\n// Extract hierarchy info from each code\nconst classificationDetails = inputData.classifications.map(c => {\n  const code = String(c.code);\n  return {\n    ...c,\n    division_code: code.substring(0, 2),\n    group_code: code.substring(0, 4),\n    field_code: code\n  };\n});\n\n// Get unique divisions and groups\nconst divisionsFound = [...new Set(classificationDetails.map(c => c.division_code))];\nconst groupsFound = [...new Set(classificationDetails.map(c => c.group_code))];\n\n// === CF1 RULE 1: Check parent-child conflicts ===\nconst violations = [];\nconst codes = classificationDetails.map(c => c.code);\n\nfor (const c of classificationDetails) {\n  for (const other of codes) {\n    if (other !== c.code) {\n      if (c.code.startsWith(other) && c.code.length > other.length) {\n        violations.push({\n          rule: 'parent_child_conflict',\n          parent: other,\n          child: c.code,\n          action: `Remove parent code ${other}, keep specific code ${c.code}`\n        });\n      }\n    }\n  }\n}\n\n// === CF1 RULE 2: Check code specificity (warn on broad codes) ===\nconst flags = [];\nfor (const c of classificationDetails) {\n  if (c.code.length === 2) {\n    flags.push({\n      rule: 'broad_code_warning',\n      code: c.code,\n      message: '2-digit code is very broad, consider more specific classification'\n    });\n  } else if (c.code.length === 4) {\n    flags.push({\n      rule: 'group_code_warning',\n      code: c.code,\n      message: '4-digit group code used instead of 6-digit field code'\n    });\n  }\n}\n\n// === CF1 RULE 3: Check sibling overlap ===\nconst parentGroups = {};\nfor (const c of classificationDetails) {\n  if (c.code.length === 6) {\n    const parent = c.group_code;\n    if (!parentGroups[parent]) {\n      parentGroups[parent] = [];\n    }\n    parentGroups[parent].push(c.code);\n  }\n}\n\nfor (const [parent, children] of Object.entries(parentGroups)) {\n  if (children.length > 2) {\n    flags.push({\n      rule: 'sibling_overlap',\n      parent: parent,\n      siblings: children,\n      message: `Multiple codes (${children.length}) under group ${parent} may indicate over-classification`\n    });\n  }\n}\n\n// === Calculate penalty ===\nlet penalty = 0.0;\npenalty += violations.length * 0.10;\npenalty += flags.filter(f => f.rule === 'broad_code_warning').length * 0.05;\n\nconst passed = violations.length === 0;\n\n// === Build adjusted classifications ===\nconst codesToRemove = new Set(violations.map(v => v.parent));\n\nconst adjustedClassifications = classificationDetails\n  .filter(c => !codesToRemove.has(c.code))\n  .map(c => ({\n    code: c.code,\n    name: c.name,\n    confidence: c.confidence,\n    justification: c.justification,\n    evidence: c.evidence,\n    division_code: c.division_code,\n    group_code: c.group_code,\n    cf1_validated: passed\n  }));\n\n// === Enforce min/max code counts ===\nconst MIN_CODES = 3;\nconst MAX_CODES = 10;\n\nif (adjustedClassifications.length < MIN_CODES) {\n  flags.push({\n    rule: 'under_classification',\n    count: adjustedClassifications.length,\n    message: `Only ${adjustedClassifications.length} codes assigned, minimum is ${MIN_CODES}`\n  });\n}\n\nif (adjustedClassifications.length > MAX_CODES) {\n  adjustedClassifications.sort((a, b) => b.confidence - a.confidence);\n  adjustedClassifications.splice(MAX_CODES);\n  flags.push({\n    rule: 'over_classification_truncated',\n    message: `Truncated to ${MAX_CODES} highest-confidence codes`\n  });\n}\n\nconsole.log(`✅ CF1 Assessment: ${passed ? 'PASSED' : 'FAILED'}`);\nconsole.log(`   Violations: ${violations.length}, Flags: ${flags.length}, Penalty: ${penalty}`);\n\nreturn [{\n  json: {\n    // Core data (pass through)\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    reasoning: inputData.reasoning,\n    model: inputData.model,\n    \n    // Crosswalk assessment (pass through)\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    \n    // CRE assessment (pass through)\n    cre_assessment: inputData.cre_assessment,\n    \n    // Standard B classifications (pass through)\n    standard_b_classifications: inputData.standard_b_classifications,\n    standard_b_count: inputData.standard_b_count,\n    \n    // CF1 Assessment results\n    cf1_assessment: {\n      passed: passed,\n      violations: violations,\n      flags: flags,\n      penalty: penalty,\n      divisions_found: divisionsFound,\n      groups_found: groupsFound\n    },\n    \n    // Adjusted Standard A classifications\n    classifications: adjustedClassifications,\n    classification_count: adjustedClassifications.length,\n    \n    // Normal path - no HITL override\n    requires_hitl: false,\n    candidate_mismatch: false\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -657,7 +659,7 @@
     },
     {
       "parameters": {
-        "model": "openai/gpt-oss-20b",
+        "model": "openai/gpt-oss-120b",
         "options": {}
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
@@ -892,14 +894,305 @@
       ],
       "id": "977dd199-bc9d-47a6-a8da-c590bbaa5ba6",
       "name": "Parse Vector Search Results1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -320,
+        -384
+      ],
+      "id": "46ab1843-9191-44dd-9167-a70fcbffcb0d",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        1808,
+        64
+      ],
+      "id": "7c77930d-99a7-4018-9a07-0b689a9b58e0"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Check Data Quality\n// Purpose: Route sparse-data researchers to HITL before classification\n// Insert: After SplitInBatches, before Prepare Status Update to Classifying\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// Extract data quality indicators from parsed Neo4j response\nconst denseViewParsed = inputData.dense_view_parsed || {};\nconst denseViewText = inputData.dense_view_text || '';\n\n// Check research content availability\nconst researchDomains = denseViewParsed.research_domains || [];\nconst researchThemes = denseViewParsed.research_themes || [];\nconst publicationCount = denseViewParsed.publication_count || 0;\nconst patentCount = denseViewParsed.patent_count || 0;\n\n// Calculate data sufficiency\nconst hasResearchDomains = researchDomains.length > 0;\nconst hasResearchThemes = researchThemes.length > 0;\nconst hasPublications = publicationCount > 0;\nconst hasPatents = patentCount > 0;\nconst hasDenseViewContent = denseViewText.trim().length > 150;\n\n// Require at least ONE substantive research indicator\nconst hasSufficientData = hasResearchDomains || hasResearchThemes || hasPublications || hasPatents;\n\n// Build data quality report\nconst dataQuality = {\n  research_domains_count: researchDomains.length,\n  research_themes_count: researchThemes.length,\n  publication_count: publicationCount,\n  patent_count: patentCount,\n  dense_view_length: denseViewText.length,\n  sufficient: hasSufficientData\n};\n\nif (!hasSufficientData) {\n  console.log(`⚠️ SPARSE DATA: ${inputData.name} - skipping classification`);\n  \n  return [{\n    json: {\n      ...inputData,\n      classification_skipped: true,\n      skip_reason: 'Insufficient data for automated classification',\n      data_quality: dataQuality,\n      \n      // Pre-set routing for downstream (bypasses LLM entirely)\n      routing_decision: 'SPARSE_DATA_HITL',\n      requires_hitl: true,\n      status: 'pending_review',\n      queue: 'human_review_queue',\n      confidence: 0,\n      routing_reason: `Sparse data: ${publicationCount} publications, ${researchDomains.length} domains, ${researchThemes.length} themes`\n    }\n  }];\n}\n\nconsole.log(`✅ DATA OK: ${inputData.name} - proceeding to classification`);\n\nreturn [{\n  json: {\n    ...inputData,\n    classification_skipped: false,\n    data_quality: dataQuality\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        16
+      ],
+      "id": "76e8f491-f81f-4966-807f-080825cc87eb",
+      "name": "Check Data Quality"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "eaf1b00f-6064-48cb-862c-48270ad1671a",
+              "leftValue": "={{ $json.classification_skipped }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        208,
+        16
+      ],
+      "id": "d765c00f-085f-49f6-92e2-012689b14311",
+      "name": "Handle Sparse Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Sparse Update (Neo4j)\n// Purpose: Build Neo4j query to update sparse-data researcher status\n// ============================================================\n\nconst inputData = $input.first().json;\n\nreturn [{\n  json: {\n    // Pass through all existing data\n    ...inputData,\n    \n    // Neo4j update payload\n    neo4j_sparse_update: {\n      statement: `\n        MATCH (fat:FATObject {asset_id: $asset_id})\n        SET fat.status = 'pending_review',\n            fat.requires_hitl = true,\n            fat.hitl_reason = $hitl_reason,\n            fat.data_quality = $data_quality,\n            fat.routed_at = datetime()\n        RETURN fat.asset_id AS asset_id, \n               fat.name AS name, \n               fat.status AS status\n      `,\n      parameters: {\n        asset_id: inputData.asset_id,\n        hitl_reason: inputData.routing_reason || 'Sparse data - manual classification required',\n        data_quality: JSON.stringify(inputData.data_quality || {})\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -256
+      ],
+      "id": "991b8cda-ae00-41ac-871e-6ddd2f3c442f",
+      "name": "Update Neo4j Status (Sparse)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Sparse Queue Insert\n// Purpose: Build PostgreSQL payload for sparse-data HITL routing\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// Generate UUID for queue entry\nconst generateUUID = () => {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n};\n\nconst queueEntryId = generateUUID();\n\n// Build PostgreSQL payload matching validation_queue schema\nconst postgresPayload = {\n  queue_entry_id: queueEntryId,\n  asset_id: inputData.asset_id,\n  queue: 'human_review_queue',\n  status: 'pending_review',\n  confidence: 0,\n  threshold_applied: 'SPARSE_DATA',\n  routing_reason: inputData.routing_reason || 'Sparse data - manual classification required',\n  \n  // Assessment flags\n  assessment_flags: {\n    data_quality: inputData.data_quality,\n    sparse_data: true\n  },\n  \n  // Escalation flags\n  escalation_flags: ['sparse_data_hitl'],\n  \n  // CRE fields (not applicable for sparse data, but include for schema consistency)\n  cre_blocking_failures: [],\n  cre_penalising_failures: [],\n  cre_requires_hitl: true,\n  blocked_by_cre: false,\n  \n  // HITL validation metadata\n  hitl_validation: null,\n  \n  // Workflow tracking\n  synced: false,\n  routed_at: new Date().toISOString(),\n  approved_at: null,\n  classification_version: 'v3.6.2',\n  routing_version: 'v3.5_sparse'\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    queue_entry_id: queueEntryId,\n    postgres_payload: postgresPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        -256
+      ],
+      "id": "b5c2fc02-99b2-42af-8a86-eeec46137fd3",
+      "name": "Prepare Sparse Queue Insert"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ $json.postgres_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        -256
+      ],
+      "id": "23ca4262-d38f-4327-a122-1485404979b8",
+      "name": "Write to Validation Queue (Sparse)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "eaf1b00f-6064-48cb-862c-48270ad1671a",
+              "leftValue": "={{ $json.needs_retry }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1376,
+        608
+      ],
+      "id": "0ea75c45-b131-434a-96b2-cf2327a7424d",
+      "name": "Check Parse Success"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update FATObject status to classification_failed in Neo4j\nconst inputData = $input.first().json;\n\nreturn [{\n  json: {\n    ...inputData,\n    neo4j_failure_update: {\n      statement: `\n        MATCH (fat:FATObject {asset_id: $asset_id})\n        SET fat.status = 'classification_failed',\n            fat.classification_error = $error_message,\n            fat.classification_failed_at = datetime(),\n            fat.llm_retry_count = $retry_count\n        RETURN fat.asset_id, fat.status, fat.classification_error\n      `,\n      parameters: {\n        asset_id: inputData.asset_id,\n        error_message: inputData.failure_reason || inputData.parse_error || 'Unknown error',\n        retry_count: inputData.llm_retry_count || 0\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1568,
+        992
+      ],
+      "id": "2eaab08f-9799-4597-ae0b-fbb49a26a0e8",
+      "name": "Prepare Failure Update (Neo4j)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_sparse_update }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -256
+      ],
+      "id": "422f35e2-0e93-469b-8e9e-5f2ddb78bc10",
+      "name": "Execute Status Update to (Sparse Data)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_failure_update }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1280,
+        992
+      ],
+      "id": "0720f9c6-2654-4fd6-89a4-b311e2eead20",
+      "name": "Execute Status Update to (Sparse Data)1",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "eaf1b00f-6064-48cb-862c-48270ad1671a",
+              "leftValue": "={{ $json.classification_failed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1088,
+        624
+      ],
+      "id": "9d99c214-0e45-4f7e-944a-4e7b3ef08ecc",
+      "name": "Classification Failed"
     }
   ],
   "pinData": {
     "When clicking ‘Execute workflow’": [
       {
-        "json": {
-          "asset_id": "fat:researcher:colin_barrow"
-        }
+        "json": {}
       }
     ]
   },
@@ -930,7 +1223,7 @@
       "main": [
         [
           {
-            "node": "Prepare Status Update to Classifying",
+            "node": "Loop Over Items",
             "type": "main",
             "index": 0
           }
@@ -968,7 +1261,7 @@
       "main": [
         [
           {
-            "node": "Prepare Crosswalk Assessment Query",
+            "node": "Check Parse Success",
             "type": "main",
             "index": 0
           }
@@ -1120,7 +1413,13 @@
     },
     "Final Output": {
       "main": [
-        []
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Prepare PostgreSQL Classification Log": {
@@ -1314,13 +1613,161 @@
           }
         ]
       ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Check Data Quality",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        []
+      ]
+    },
+    "Check Data Quality": {
+      "main": [
+        [
+          {
+            "node": "Handle Sparse Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Sparse Data": {
+      "main": [
+        [
+          {
+            "node": "Update Neo4j Status (Sparse)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Status Update to Classifying",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Neo4j Status (Sparse)": {
+      "main": [
+        [
+          {
+            "node": "Execute Status Update to (Sparse Data)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sparse Queue Insert": {
+      "main": [
+        [
+          {
+            "node": "Write to Validation Queue (Sparse)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Validation Queue (Sparse)": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Parse Success": {
+      "main": [
+        [
+          {
+            "node": "Pass 2: LLM Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classification Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Status Update to (Sparse Data)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sparse Queue Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Failure Update (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Execute Status Update to (Sparse Data)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Status Update to (Sparse Data)1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classification Failed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Failure Update (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Crosswalk Assessment Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "8de3407b-c942-4f74-8fcf-ac0a5c7b3794",
+  "versionId": "7ecf27ba-f1e2-467c-9402-10c497c5d516",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
