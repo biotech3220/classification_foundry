@@ -1,0 +1,505 @@
+{
+  "name": "OBJECT-5 Worklfow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "582cb7bd-b748-4763-889f-3c6edb182853",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e664c63-414c-438e-8c63-d2b86b2c1236",
+              "leftValue": "={{ $json.queue_entry_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        192,
+        0
+      ],
+      "id": "d668bdff-7e2a-458f-a99b-d5a9a9c1be32",
+      "name": "IF - Has Items to Process?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// OBJECT-5: Prepare Neo4j query to activate FATObject\n\nconst validatorType = $json.status === 'auto_approved' \n  ? 'auto' \n  : ($json.curator_id || 'curator');\n\nconst cypherPayload = {\n  statement: `\n    MATCH (obj:FATObject {asset_id: $asset_id})\n    WHERE obj.status = 'classified'\n    SET obj.status = 'active',\n        obj.lifecycle_status = 'active',\n        obj.validated_at = datetime(),\n        obj.validated_by = $validator_type\n    \n    WITH obj\n    \n    MATCH (obj)-[r:CLASSIFIED_AS]->(:Standard)\n    SET r.validation_state = 'VALIDATED',\n        r.validated_at = datetime(),\n        r.validated_by = $validator_type\n    \n    RETURN obj.asset_id AS asset_id,\n           obj.status AS new_status,\n           count(r) AS relationships_validated\n  `,\n  parameters: {\n    asset_id: $json.asset_id,\n    validator_type: validatorType\n  }\n};\n\nreturn {\n  queue_entry_id: $json.queue_entry_id,\n  asset_id: $json.asset_id,\n  queue: $json.queue,\n  status: $json.status,\n  confidence: $json.confidence,\n  curator_id: $json.curator_id,\n  neo4j_payload: cypherPayload,\n  validator_type: validatorType\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -16
+      ],
+      "id": "bf4e8a84-695e-41e4-8852-ca53b8234435",
+      "name": "Prepare Neo4j Activation Query"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// OBJECT-5: Prepare Qdrant scroll request\n\nconst values = $json.data?.values || [];\n\nif (values.length === 0) {\n  const upstream = $('Prepare Neo4j Activation Query').item.json;\n  return {\n    queue_entry_id: upstream.queue_entry_id,\n    asset_id: upstream.asset_id,\n    error: true,\n    error_message: \"Neo4j activation failed - FATObject not found with status=classified\",\n    skipped: true,\n    qdrant_scroll_request: {\n      filter: { must: [{ key: \"asset_id\", match: { value: \"SKIP\" } }] },\n      limit: 1,\n      with_payload: false,\n      with_vector: false\n    }\n  };\n}\n\nconst inputData = $('Prepare Neo4j Activation Query').item.json;\nconst newStatus = values[0][1];\nconst relationshipsValidated = values[0][2];\n\nconst qdrantScrollRequest = {\n  filter: {\n    must: [{\n      key: \"asset_id\",\n      match: { value: inputData.asset_id }\n    }]\n  },\n  limit: 1,\n  with_payload: true,\n  with_vector: false\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  status: inputData.status,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: true,\n  new_status: newStatus,\n  relationships_validated: relationshipsValidated,\n  qdrant_scroll_request: qdrantScrollRequest,\n  error: false\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        304
+      ],
+      "id": "dee1b695-fc5e-4b06-a95b-b225ca0e7b7e",
+      "name": "Prepare Qdrant Point Lookup"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// OBJECT-5: Prepare SAFE Qdrant payload update\n\nconst inputData = $('Prepare Qdrant Point Lookup').item.json;\n\nif (inputData.error) {\n  return { ...inputData, skipped: true };\n}\n\nconst points = $json.result?.points || [];\n\nif (points.length === 0) {\n  return {\n    queue_entry_id: inputData.queue_entry_id,\n    asset_id: inputData.asset_id,\n    error: true,\n    error_message: \"Qdrant point not found\",\n    skipped: true\n  };\n}\n\nconst point = points[0];\nconst pointId = point.id;\nconst existingPayload = point.payload || {};\n\nconst mergedPayload = {\n  ...existingPayload,\n  status: \"active\",\n  validated_at: new Date().toISOString(),\n  validated_by: inputData.validator_type,\n  validation_state: \"VALIDATED\"\n};\n\nconst qdrantUpdatePayload = {\n  payload: mergedPayload,\n  points: [pointId]\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: inputData.neo4j_success,\n  new_status: inputData.new_status,\n  relationships_validated: inputData.relationships_validated,\n  qdrant_point_id: pointId,\n  qdrant_update_payload: qdrantUpdatePayload,\n  error: false\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        304
+      ],
+      "id": "6fbba977-6caa-44d0-86d1-3cef7774bc52",
+      "name": "Prepare Qdrant Status Update"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/payload",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_update_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        528,
+        304
+      ],
+      "id": "b7c63304-e1d9-41b7-b6ae-9bbd48056e2d",
+      "name": "Update Qdrant Status",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// OBJECT-5: Prepare Supabase update\n\nconst inputData = $('Prepare Qdrant Status Update').item.json;\n\nif (inputData.error) {\n  return {\n    queue_entry_id: inputData.queue_entry_id,\n    asset_id: inputData.asset_id,\n    error: true,\n    error_message: inputData.error_message,\n    skipped: true\n  };\n}\n\nconst supabaseUpdate = {\n  synced: true,\n  synced_at: new Date().toISOString()\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: inputData.neo4j_success,\n  new_status: inputData.new_status,\n  relationships_validated: inputData.relationships_validated,\n  qdrant_point_id: inputData.qdrant_point_id,\n  supabase_update: supabaseUpdate,\n  error: false\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        304
+      ],
+      "id": "085cb31c-24d8-4bb4-9faf-fe63d73ffe70",
+      "name": "Prepare Supabase Sync Update"
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "*"
+            },
+            {
+              "name": "status",
+              "value": "in.(auto_approved,curator_approved)"
+            },
+            {
+              "name": "synced",
+              "value": "eq.false"
+            },
+            {
+              "name": "order",
+              "value": "created_at.asc"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -16,
+        0
+      ],
+      "id": "c1400576-8f3a-4b12-99cd-b3f5b062cd5d",
+      "name": "Fetch Approved Items (Postgre)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_scroll_request }}",
+        "options": {}
+      },
+      "id": "9f933bc7-7f43-4c15-99fe-1882aa20ef2f",
+      "name": "Fetch Researcher Point (Qdrant)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        48,
+        304
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "queue_entry_id",
+              "value": "=eq.{{ $json.queue_entry_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_update }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -208,
+        528
+      ],
+      "id": "cd46ecdd-1290-44b5-a23b-9cca11bcb1d6",
+      "name": "Update Queue Synced Status",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// OBJECT-5: Final Output Summary\n\nconst inputData = $('Prepare Supabase Sync Update').item.json;\n\nif (inputData.error || inputData.skipped) {\n  return {\n    asset_id: inputData.asset_id,\n    queue_entry_id: inputData.queue_entry_id,\n    status: \"failed\",\n    error: true,\n    error_message: inputData.error_message || \"Skipped due to upstream error\",\n    metadata: {\n      workflow: \"OBJECT-5\",\n      version: \"Gen2_v3.5\",\n      completed_at: new Date().toISOString()\n    }\n  };\n}\n\nconst supabaseRecord = Array.isArray($json) ? $json[0] : $json;\n\nreturn {\n  asset_id: inputData.asset_id,\n  previous_status: \"classified\",\n  new_status: inputData.new_status,\n  lifecycle_status: \"active\",\n  validation: {\n    queue: inputData.queue,\n    confidence: inputData.confidence,\n    validator_type: inputData.validator_type,\n    curator_id: inputData.curator_id || null,\n    synced: true,\n    synced_at: supabaseRecord?.synced_at || new Date().toISOString()\n  },\n  storage: {\n    neo4j: { status: \"success\", relationships_validated: inputData.relationships_validated },\n    qdrant: { status: \"success\", point_id: inputData.qdrant_point_id },\n    supabase: { status: \"success\", queue_entry_id: inputData.queue_entry_id }\n  },\n  metadata: {\n    workflow: \"OBJECT-5\",\n    workflow_name: \"Human Validation Sync Engine\",\n    version: \"Gen2_v3.5\",\n    completed_at: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        528
+      ],
+      "id": "6f39f144-7792-432c-99ec-77e530d90aa4",
+      "name": "Final Output"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        -16
+      ],
+      "id": "97206a21-4a73-41b5-9cd0-488bae607a67",
+      "name": "Activate FATObject (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-12-03T23:09:27.503+11:00",
+          "Readable date": "December 3rd 2025, 11:09:27 pm",
+          "Readable time": "11:09:27 pm",
+          "Day of week": "Wednesday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "03",
+          "Hour": "23",
+          "Minute": "09",
+          "Second": "27",
+          "Timezone": "Australia/Melbourne (UTC+11:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Approved Items (Postgre)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Items to Process?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Activation Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Activation Query": {
+      "main": [
+        [
+          {
+            "node": "Activate FATObject (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Point Lookup": {
+      "main": [
+        [
+          {
+            "node": "Fetch Researcher Point (Qdrant)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Status Update": {
+      "main": [
+        [
+          {
+            "node": "Update Qdrant Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Qdrant Status": {
+      "main": [
+        [
+          {
+            "node": "Prepare Supabase Sync Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Approved Items (Postgre)": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Items to Process?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Researcher Point (Qdrant)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Supabase Sync Update": {
+      "main": [
+        [
+          {
+            "node": "Update Queue Synced Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Queue Synced Status": {
+      "main": [
+        [
+          {
+            "node": "Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activate FATObject (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Point Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "54bd234f-7c2f-4228-b57c-d3af68fc42fa",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "W4CJf01ppBD4iaoU",
+  "tags": []
+}

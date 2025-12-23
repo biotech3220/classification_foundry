@@ -1,0 +1,1021 @@
+{
+  "name": "GOVERN-3 Workflow (Re-Fabrication Orchestration)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Check if there are pending entries to process\n\nconst items = $input.all();\n\nif (items.length === 0 || (items.length === 1 && items[0].json.message)) {\n  return [{\n    json: {\n      has_entries: false,\n      count: 0,\n      message: 'No pending refabrication entries'\n    }\n  }];\n}\n\n// Convert items back to array of entries\nconst entries = items.map(item => item.json);\n\nreturn [{\n  json: {\n    has_entries: true,\n    count: entries.length,\n    entries: entries\n  }\n}];"
+      },
+      "id": "153621f8-4f18-40b7-8077-354988745634",
+      "name": "Check Has Entries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1744,
+        -1440
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.has_entries }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    },
+                    "id": "087d16c5-5c1c-424b-af86-51aac9e48a4b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "has_entries"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "a6e5e829-068a-4ec6-a335-e05dbbd4c1bd",
+      "name": "Has Pending Entries?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1520,
+        -1440
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "9602834e-a5fe-4995-b631-20cc8b3203a5",
+      "name": "No Pending Entries",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1280,
+        -1328
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split entries for loop processing\n\nconst data = $input.first().json;\nconst entries = data.entries || [];\n\nreturn entries.map(entry => ({ json: entry }));"
+      },
+      "id": "b540eed7-edc7-4910-b6b1-933382c81d27",
+      "name": "Split Entries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        -1568
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/refabrication_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "asset_id",
+              "value": "=eq.{{ $json.asset_id }}"
+            },
+            {
+              "name": "queue_status",
+              "value": "eq.in_progress"
+            },
+            {
+              "name": "select",
+              "value": "queue_entry_id"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "be7ac994-6a13-4ae4-983f-e08cb871966d",
+      "name": "Check Asset Lock",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -848,
+        -1568
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if asset is locked (another refabrication in progress)\n\nconst lockCheckResult = $input.first().json;\nconst currentEntry = $('Loop Through Entries').first().json;\n\n// If the response is an array with entries, asset is locked\nconst inProgressEntries = Array.isArray(lockCheckResult) ? lockCheckResult : [];\nconst isLocked = inProgressEntries.length > 0;\n\nreturn [{\n  json: {\n    lock_status: isLocked ? 'locked' : 'unlocked',  // String instead of boolean\n    current_entry: currentEntry,\n    lock_holder: isLocked ? inProgressEntries[0].queue_entry_id : null\n  }\n}];"
+      },
+      "id": "168359d6-ef5d-415b-b4c6-057550769e98",
+      "name": "Evaluate Lock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        -1568
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.is_locked }}",
+                    "rightValue": "locked",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "7afbbaf5-061b-4c32-9127-8ad5b5da6e47"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "locked"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "2c6b080e-9a63-46e6-aacc-9e7cb38b0c4c",
+      "name": "Is Asset Locked?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -400,
+        -1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Asset is locked - skip this entry and continue loop\n\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    action: 'skipped',\n    reason: 'asset_locked',\n    asset_id: data.current_entry.asset_id,\n    lock_holder: data.lock_holder,\n    queue_entry_id: data.current_entry.queue_entry_id\n  }\n}];"
+      },
+      "id": "da4dce8e-0086-47b0-8a31-13009479eb64",
+      "name": "Skip Locked Entry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -1680
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j query to fetch current FATObject version\n\nconst data = $input.first().json;\nconst entry = data.current_entry;\n\n// asset_id in queue is 'fat:researcher:colin_barrow'\nconst assetId = entry.asset_id;\n\nreturn [{\n  json: {\n    current_entry: entry,\n    neo4j_payload: {\n      statement: `\n        MATCH (fat:FATObject {asset_id: $asset_id})\n        WHERE fat.status IN ['active', 'fabricated']\n        RETURN fat.asset_id AS asset_id, \n               fat.version AS version, \n               fat.status AS status\n        ORDER BY fat.version DESC\n        LIMIT 1\n      `,\n      parameters: {\n        asset_id: assetId\n      }\n    }\n  }\n}];"
+      },
+      "id": "5117ab49-a49b-4a16-97d1-769dbfd52d38",
+      "name": "Prepare Fetch Version",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -1440
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "id": "cea15266-eb35-4a6e-a176-fa4834f6c123",
+      "name": "Fetch Current Version",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2384,
+        -832
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Neo4j response and calculate new version\n\nconst neo4jResponse = $input.first().json;\nconst currentEntry = $('Prepare Fetch Version').first().json.current_entry;\n\n// Parse Neo4j response\nlet currentVersion = 'v0.0'; // Default if no existing version\nlet currentStatus = null;\n\nif (neo4jResponse.data && neo4jResponse.data.values && neo4jResponse.data.values.length > 0) {\n  const row = neo4jResponse.data.values[0];\n  // row format: [asset_id, version, status]\n  currentVersion = row[1] || 'v0.0';\n  currentStatus = row[2];\n}\n\n// Calculate new version (increment major)\nfunction incrementVersion(version) {\n  // Parse version like 'v1.0' or 'v2.0'\n  const match = version.match(/v(\\d+)\\.(\\d+)/);\n  if (match) {\n    const major = parseInt(match[1], 10);\n    return `v${major + 1}.0`;\n  }\n  // Default to v1.0 if parsing fails\n  return 'v1.0';\n}\n\nconst newVersion = incrementVersion(currentVersion);\n\nreturn [{\n  json: {\n    current_entry: currentEntry,\n    current_version: currentVersion,\n    current_status: currentStatus,\n    new_version: newVersion,\n    asset_id: currentEntry.asset_id,\n    thin_asset_id: currentEntry.asset_id.replace(/^fat:/, 'thin:')\n  }\n}];"
+      },
+      "id": "c7f20030-739c-47c3-895d-39180cc674f9",
+      "name": "Calculate New Version",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2144,
+        -832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/refabrication_queue?queue_entry_id=eq.{{ $json.current_entry.queue_entry_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue_status\": \"in_progress\",\n  \"started_at\": \"{{ $now.toISO() }}\",\n  \"current_version\": \"{{ $json.current_version }}\",\n  \"new_version\": \"{{ $json.new_version }}\"\n}",
+        "options": {}
+      },
+      "id": "82e7f8b2-dd3c-41eb-9e0a-8cfd80d4aab7",
+      "name": "Set Status: In Progress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1904,
+        -832
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare OBJECT-2 webhook payload for refabrication\n\nconst versionData = $('Calculate New Version').first().json;\nconst currentEntry = versionData.current_entry;\n\nconst webhookPayload = {\n  mode: 'refabrication',\n  asset_id: versionData.asset_id,\n  new_version: versionData.new_version,\n  previous_version: versionData.current_version,\n  refabrication_reason: currentEntry.refabrication_reason || `${currentEntry.severity}_change`,\n  changed_fields: currentEntry.changed_fields || [],\n  source_queue_entry_id: currentEntry.queue_entry_id\n};\n\nreturn [{\n  json: {\n    webhook_payload: webhookPayload,\n    version_data: versionData,\n    started_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "2732474f-65cc-4259-be94-d703b60cdf6c",
+      "name": "Prepare OBJECT-2 Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1664,
+        -832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mbcrc.app.n8n.cloud/webhook/object-2-fabricate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.webhook_payload }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "7a45badb-5059-42f1-8f1a-fe94d5e23f08",
+      "name": "Invoke OBJECT-2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1424,
+        -832
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate OBJECT-2 response\n\nconst response = $input.first().json;\nconst prepareData = $('Prepare OBJECT-2 Payload').first().json;\nconst versionData = prepareData.version_data;\nconst startedAt = prepareData.started_at;\n\n// Calculate duration\nconst endedAt = new Date().toISOString();\nconst durationMs = new Date(endedAt) - new Date(startedAt);\nconst durationSeconds = Math.round(durationMs / 1000);\n\n// Check if OBJECT-2 succeeded\nconst success = response.success === true && response.status === 'fabricated';\n\nreturn [{\n  json: {\n    success: success,\n    object2_response: response,\n    version_data: versionData,\n    duration_seconds: durationSeconds,\n    error_message: success ? null : (response.error || response.message || 'Unknown error')\n  }\n}];"
+      },
+      "id": "8b179589-154b-4537-9f4b-5835695f17e0",
+      "name": "Evaluate Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        -832
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.success }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "success"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "b238789e-c394-40ac-a31c-fae32391fa97",
+      "name": "Refabrication Success?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -944,
+        -832
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j query to create [:SUPERSEDES] relationship and deprecate old version\n\nconst data = $input.first().json;\nconst versionData = data.version_data;\n\nreturn [{\n  json: {\n    ...data,\n    neo4j_payload: {\n      statement: `\n        // Match old and new FATObject versions\n        MATCH (old:FATObject {asset_id: $asset_id, version: $old_version})\n        MATCH (new:FATObject {asset_id: $asset_id, version: $new_version})\n        \n        // Create [:SUPERSEDES] relationship (idempotent)\n        MERGE (new)-[:SUPERSEDES]->(old)\n        \n        // Deprecate old version\n        SET old.status = 'deprecated',\n            old.deprecated_at = datetime(),\n            old.superseded_by = $new_version\n        \n        // Ensure new version has lineage metadata\n        SET new.previous_version = $old_version\n        \n        RETURN old.asset_id AS old_asset_id, \n               old.version AS old_version, \n               old.status AS old_status,\n               new.version AS new_version,\n               new.status AS new_status\n      `,\n      parameters: {\n        asset_id: versionData.asset_id,\n        old_version: versionData.current_version,\n        new_version: versionData.new_version\n      }\n    }\n  }\n}];"
+      },
+      "id": "5bf7dbc9-de95-4aa0-8e0d-e8f89d34469e",
+      "name": "Prepare Version Transition",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        -960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "id": "4a8b2ee6-4053-4c23-818f-ff0df05aafbc",
+      "name": "Execute Version Transition",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        -960
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare queue completion update\n\nconst versionTransitionResponse = $input.first().json;\nconst prepareData = $('Prepare Version Transition').first().json;\nconst versionData = prepareData.version_data;\nconst durationSeconds = prepareData.duration_seconds;\n\nreturn [{\n  json: {\n    queue_entry_id: versionData.current_entry.queue_entry_id,\n    asset_id: versionData.asset_id,\n    new_version: versionData.new_version,\n    previous_version: versionData.current_version,\n    duration_seconds: durationSeconds,\n    version_transition_result: versionTransitionResponse\n  }\n}];"
+      },
+      "id": "f3034bee-59b4-4964-a0e5-79cc032e9672",
+      "name": "Prepare Completion Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/refabrication_queue?queue_entry_id=eq.{{ $json.queue_entry_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue_status\": \"completed\",\n  \"completed_at\": \"{{ $now.toISO() }}\",\n  \"pipeline_duration_seconds\": {{ $json.duration_seconds }}\n}",
+        "options": {}
+      },
+      "id": "d2bae13b-7e6f-4542-af36-31a0418684ec",
+      "name": "Set Status: Completed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -704,
+        -464
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log successful refabrication\n\nconst completionData = $('Prepare Completion Update').first().json;\n\nreturn [{\n  json: {\n    action: 'completed',\n    asset_id: completionData.asset_id,\n    old_version: completionData.previous_version,\n    new_version: completionData.new_version,\n    duration_seconds: completionData.duration_seconds,\n    queue_entry_id: completionData.queue_entry_id\n  }\n}];"
+      },
+      "id": "8c411414-cef5-4e62-8da9-27f83bd9f6d7",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        -464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle OBJECT-2 failure\n\nconst data = $input.first().json;\nconst versionData = data.version_data;\nconst currentEntry = versionData.current_entry;\n\n// Increment retry count\nconst currentRetryCount = currentEntry.retry_count || 0;\nconst newRetryCount = currentRetryCount + 1;\nconst maxRetries = 3;\n\n// Determine new status\nlet newStatus;\nif (newRetryCount >= maxRetries) {\n  newStatus = 'abandoned';\n} else {\n  newStatus = 'failed';\n}\n\nreturn [{\n  json: {\n    queue_entry_id: currentEntry.queue_entry_id,\n    asset_id: versionData.asset_id,\n    error_message: data.error_message,\n    retry_count: newRetryCount,\n    new_status: newStatus,\n    max_retries_exceeded: newRetryCount >= maxRetries\n  }\n}];"
+      },
+      "id": "c35a2a0e-4190-4c03-a1f0-4a6afbc61e0c",
+      "name": "Handle Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/refabrication_queue?queue_entry_id=eq.{{ $json.queue_entry_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue_status\": \"{{ $json.new_status }}\",\n  \"retry_count\": {{ $json.retry_count }},\n  \"last_error\": \"{{ $json.error_message }}\"\n}",
+        "options": {}
+      },
+      "id": "29692198-fcf9-408e-b082-618d02197d42",
+      "name": "Set Status: Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        -720
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log failure\n\nconst failureData = $('Handle Failure').first().json;\n\nreturn [{\n  json: {\n    action: failureData.max_retries_exceeded ? 'abandoned' : 'failed',\n    asset_id: failureData.asset_id,\n    error: failureData.error_message,\n    retry_count: failureData.retry_count,\n    queue_entry_id: failureData.queue_entry_id\n  }\n}];"
+      },
+      "id": "cbde1a0f-0bdc-4f09-b223-f008d577f9e7",
+      "name": "Log Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge all processing results for summary\n\nconst input = $input.all();\n\nreturn [{\n  json: {\n    item_result: input[0]?.json || { action: 'unknown' }\n  }\n}];"
+      },
+      "id": "3adce9c9-90f7-4144-8352-7551c668087a",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        -464
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 60
+            }
+          ]
+        }
+      },
+      "id": "ffc169f1-ac73-4e0a-bea7-6ac131112fa9",
+      "name": "Schedule Trigger1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2176,
+        -1440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate processing summary\n\nconst timestamp = new Date().toISOString();\n\n// Count results from this execution\n// In a full implementation, we'd aggregate across all loop iterations\n\nreturn [{\n  json: {\n    workflow: 'GOVERN-3',\n    completed_at: timestamp,\n    message: 'Refabrication orchestration cycle complete'\n  }\n}];"
+      },
+      "id": "44d46e0d-dc6b-49e9-8274-090769301f47",
+      "name": "Log Processing Summary1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        -1952
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/refabrication_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "queue_status",
+              "value": "eq.pending_refabrication"
+            },
+            {
+              "name": "order",
+              "value": "severity.desc,priority.desc,queued_at.asc"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10f8a861-6bd5-48b3-ba06-2dc1e04a1d32",
+      "name": "Fetch Pending Entries",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1968,
+        -1440
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "b5dc769b-36d7-4f15-9ff8-7105c54dc9e2",
+      "name": "Loop Through Entries",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1056,
+        -1568
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Check Has Entries": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Entries?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Entries?": {
+      "main": [
+        [
+          {
+            "node": "Split Entries",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Pending Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Entries": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Asset Lock": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Lock": {
+      "main": [
+        [
+          {
+            "node": "Is Asset Locked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Asset Locked?": {
+      "main": [
+        [
+          {
+            "node": "Skip Locked Entry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Fetch Version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Locked Entry": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Version": {
+      "main": [
+        [
+          {
+            "node": "Fetch Current Version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Current Version": {
+      "main": [
+        [
+          {
+            "node": "Calculate New Version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate New Version": {
+      "main": [
+        [
+          {
+            "node": "Set Status: In Progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status: In Progress": {
+      "main": [
+        [
+          {
+            "node": "Prepare OBJECT-2 Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare OBJECT-2 Payload": {
+      "main": [
+        [
+          {
+            "node": "Invoke OBJECT-2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoke OBJECT-2": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Response": {
+      "main": [
+        [
+          {
+            "node": "Refabrication Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refabrication Success?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Version Transition",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Version Transition": {
+      "main": [
+        [
+          {
+            "node": "Execute Version Transition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Version Transition": {
+      "main": [
+        [
+          {
+            "node": "Prepare Completion Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Completion Update": {
+      "main": [
+        [
+          {
+            "node": "Set Status: Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status: Completed": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Success": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Failure": {
+      "main": [
+        [
+          {
+            "node": "Set Status: Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status: Failed": {
+      "main": [
+        [
+          {
+            "node": "Log Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Failure": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pending Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pending Entries": {
+      "main": [
+        [
+          {
+            "node": "Check Has Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Through Entries": {
+      "main": [
+        [
+          {
+            "node": "Log Processing Summary1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Asset Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "26d7d5fd-7c75-41f0-91e4-e4c55c0b2edf",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "NItgSBi3o0vs13cg",
+  "tags": []
+}

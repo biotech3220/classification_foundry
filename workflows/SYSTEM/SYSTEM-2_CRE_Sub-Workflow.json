@@ -1,0 +1,149 @@
+{
+  "name": "SYSTEM-2 CRE Assessment Sub-Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "57282115-d644-42ce-81f4-7e7887a6763e",
+      "typeVersion": 1.1,
+      "name": "SYSTEM-2_CRE_Assessment",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -224,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\n// Validate required fields\nif (!input.asset_id) {\n  throw new Error(\"Missing required field: asset_id\");\n}\n\nif (!input.entity_data) {\n  throw new Error(\"Missing required field: entity_data\");\n}\n\n// Set defaults for optional fields\nconst validated = {\n  asset_id: input.asset_id,\n  classification_confidence: input.classification_confidence || 0.5,\n  entity_data: {\n    trl_level: input.entity_data.trl_level || null,\n    certifications: input.entity_data.certifications || [],\n    inference_type: input.entity_data.inference_type || \"keyword\"\n  },\n  requirements: {\n    required_trl: input.requirements?.required_trl || null,\n    required_certifications: input.requirements?.required_certifications || []\n  }\n};\n\nreturn [{\n  json: validated\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -16
+      ],
+      "id": "491eb922-b44b-4cd7-8159-eea8ba6cd4f0",
+      "name": "Validate Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (cf:ConstraintFamily)\n        WHERE cf.id IN ['CF1', 'CF5', 'CF12']\n        RETURN cf.id AS family_id,\n               cf.gate_mode AS gate_mode,\n               cf.pass_condition AS pass_condition,\n               cf.pass_confidence AS pass_confidence,\n               cf.fail_confidence AS fail_confidence,\n               cf.fail_action AS fail_action\n      `,\n      parameters: {}\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        -16
+      ],
+      "id": "368bbb1a-3e11-4fb3-943d-48cf1ad19545",
+      "name": "Create Fetch Constraints Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        -16
+      ],
+      "id": "41cd2bb3-0b8d-40ea-b96c-1a98329f6a4a",
+      "name": "Fetch Constraints (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Validate Input').first().json;\nconst neo4jResult = $input.first().json;\n\n// Parse Neo4j response\nconst constraints = {};\nconst rows = neo4jResult.data?.values || [];\n\nfor (const row of rows) {\n  constraints[row[0]] = {\n    family_id: row[0],\n    gate_mode: row[1],\n    pass_condition: row[2],\n    pass_confidence: row[3],\n    fail_confidence: row[4],\n    fail_action: row[5]\n  };\n}\n\n// Initialize results\nconst constraint_results = {};\nconst blocking_failures = [];\nconst penalising_failures = [];\nlet requires_hitl = false;\nlet total_penalty = 0;\n\n// ===========================================\n// ASSESS CF1 - Technology Readiness Level\n// ===========================================\nif (constraints.CF1 && input.requirements.required_trl !== null) {\n  const entity_trl = input.entity_data.trl_level || 0;\n  const required_trl = input.requirements.required_trl;\n  \n  if (entity_trl >= required_trl) {\n    constraint_results.CF1 = {\n      passed: true,\n      entity_value: entity_trl,\n      required_value: required_trl\n    };\n  } else {\n    constraint_results.CF1 = {\n      passed: false,\n      entity_value: entity_trl,\n      required_value: required_trl,\n      reason: `TRL gap: required ${required_trl}, entity has ${entity_trl}`\n    };\n    \n    // CF1 is blocking\n    if (constraints.CF1.gate_mode === 'block') {\n      blocking_failures.push('CF1');\n    } else if (constraints.CF1.gate_mode === 'penalise') {\n      penalising_failures.push('CF1');\n      total_penalty += 0.05;\n    }\n  }\n} else {\n  constraint_results.CF1 = { passed: true, skipped: true, reason: \"No TRL requirement\" };\n}\n\n// ===========================================\n// ASSESS CF5 - Regulatory Compliance\n// ===========================================\nif (constraints.CF5 && input.requirements.required_certifications.length > 0) {\n  const entity_certs = input.entity_data.certifications || [];\n  const required_certs = input.requirements.required_certifications;\n  \n  const missing_certs = required_certs.filter(cert => !entity_certs.includes(cert));\n  \n  if (missing_certs.length === 0) {\n    constraint_results.CF5 = {\n      passed: true,\n      entity_certifications: entity_certs,\n      required_certifications: required_certs\n    };\n  } else {\n    constraint_results.CF5 = {\n      passed: false,\n      entity_certifications: entity_certs,\n      required_certifications: required_certs,\n      missing: missing_certs,\n      reason: `Missing certifications: ${missing_certs.join(', ')}`\n    };\n    \n    // CF5 is blocking\n    if (constraints.CF5.gate_mode === 'block') {\n      blocking_failures.push('CF5');\n    } else if (constraints.CF5.gate_mode === 'penalise') {\n      penalising_failures.push('CF5');\n      total_penalty += 0.05;\n    }\n  }\n} else {\n  constraint_results.CF5 = { passed: true, skipped: true, reason: \"No certification requirement\" };\n}\n\n// ===========================================\n// ASSESS CF12 - Inference Confidence\n// ===========================================\nif (constraints.CF12) {\n  const inference_type = input.entity_data.inference_type || \"keyword\";\n  \n  // Map inference type to code\n  const inference_map = {\n    \"explicit\": \"INF_EXPLICIT\",\n    \"publication\": \"INF_PUBLICATION\",\n    \"patent\": \"INF_PATENT\",\n    \"keyword\": \"INF_KEYWORD\",\n    \"crossdomain\": \"INF_CROSSDOMAIN\",\n    \"equipment\": \"INF_EQUIPMENT\",\n    \"collaboration\": \"INF_COLLABORATION\",\n    \"undisclosed\": \"INF_UNDISCLOSED\"\n  };\n  \n  const inference_code = inference_map[inference_type] || \"INF_KEYWORD\";\n  \n  if (inference_code === \"INF_EXPLICIT\") {\n    constraint_results.CF12 = {\n      passed: true,\n      inference_type: inference_code,\n      confidence_modifier: 1.0\n    };\n  } else {\n    constraint_results.CF12 = {\n      passed: false,\n      inference_type: inference_code,\n      confidence_modifier: 0.85,\n      reason: `Capability inferred via ${inference_type}, not explicitly declared`\n    };\n    \n    // CF12 always flags HITL when not explicit\n    requires_hitl = true;\n  }\n}\n\n// ===========================================\n// CALCULATE FINAL MODIFIER\n// ===========================================\nlet final_confidence_modifier = 0;\n\nif (blocking_failures.length > 0) {\n  // Blocking failure = confidence floors at 0\n  final_confidence_modifier = -input.classification_confidence;\n} else if (total_penalty > 0) {\n  final_confidence_modifier = -total_penalty;\n}\n\n// ===========================================\n// RETURN CRE OUTPUT\n// ===========================================\nreturn [{\n  json: {\n    asset_id: input.asset_id,\n    constraint_results: constraint_results,\n    blocking_failures: blocking_failures,\n    penalising_failures: penalising_failures,\n    requires_hitl: requires_hitl,\n    final_confidence_modifier: final_confidence_modifier\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -16
+      ],
+      "id": "485511a2-b34b-4acd-b5f4-20c3d5fe7bf0",
+      "name": "Assess Constraints"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "SYSTEM-2_CRE_Assessment": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Create Fetch Constraints Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Fetch Constraints Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Constraints (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Constraints (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Assess Constraints",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2148ff6d-0945-4efb-8161-541dd65d79d8",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "7wgDbsjDcjLdQNSJ",
+  "tags": []
+}

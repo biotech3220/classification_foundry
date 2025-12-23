@@ -1,0 +1,1416 @@
+{
+  "name": "INSTANCE-1_v3.3",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst enrichedItems = [];\n\nfor (const item of items) {\n  const code = item.json.code;\n  const name = item.json.name;\n  const level = item.json.level;\n  \n  // Parse provenance from JSON string\n  let provenance;\n  try {\n    provenance = typeof item.json.provenance === 'string' \n      ? JSON.parse(item.json.provenance) \n      : item.json.provenance;\n  } catch (e) {\n    provenance = {\n      source: 'OECD_FOS_2007_Frascati',\n      created_at: new Date().toISOString(),\n      ingestion_method: 'csv_cloud_load'\n    };\n  }\n  \n  // OECD FOS has 2 levels: group (1) and field (2)\n  let hierarchy = {};\n  \n  if (level === 1) {\n    // Group level (e.g., \"1\", \"2\")\n    hierarchy = {\n      level: \"group\",\n      group_code: code,\n      group_name: name,\n      field_code: null,\n      field_name: null\n    };\n  } else if (level === 2) {\n    // Field level (e.g., \"1.1\", \"2.3\")\n    hierarchy = {\n      level: \"field\",\n      group_code: item.json.parent_code,\n      group_name: null,  // Will be enriched later\n      field_code: code,\n      field_name: name\n    };\n  }\n  \n  const enriched = {\n    asset_id: item.json.asset_id,\n    code: code,\n    name: name,\n    standard_version: item.json.standard_version || \"OECD_FOS_2007\",\n    hierarchy: hierarchy,\n    hierarchy_json: JSON.stringify(hierarchy),\n    provenance: provenance,\n    parent_code: item.json.parent_code,\n    taxonomy_role: item.json.taxonomy_role,\n    pass1_timestamp: new Date().toISOString()\n  };\n  \n  enrichedItems.push({ json: enriched });\n}\n\nreturn enrichedItems;"
+      },
+      "id": "40d7b95d-8be2-4b7f-9614-b06528a60cb3",
+      "name": "Pass 1: Structural Enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1504,
+        496
+      ],
+      "notes": "Deterministic hierarchy parsing. Extract division/group/field structure from ANZSRC codes."
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3216,
+        -144
+      ],
+      "id": "62c34d52-2222-46ca-97e4-a11c0c21164a",
+      "name": "Start Field Enrichment"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Fetch Thin Standards (OECD FOS Domain Hub)\nconst batchSize = 30;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:OECD_FOS:DomainHub)\n        WHERE s.status = $status\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          standard_version: s.standard_version,\n          provenance: s.provenance,\n          level: s.level,\n          parent_code: s.parent_code,\n          taxonomy_role: s.taxonomy_role\n        } as standard_data\n        ORDER BY s.code\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"thin\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2240,
+        496
+      ],
+      "id": "b3b2d5da-bb47-407d-bb11-9b9d6a6106d2",
+      "name": "Prepare Neo4j Query for Standards"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1968,
+        496
+      ],
+      "id": "81925837-c109-434b-a8a6-13afce81eb70",
+      "name": "Fetch Thin Standards",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst allStandards = [];\n\nfor (const item of items) {\n  const response = item.json;\n  \n  // Check for Neo4j errors\n  if (response.errors && response.errors.length > 0) {\n    console.error('Neo4j errors:', response.errors);\n    throw new Error(`Neo4j query failed: ${response.errors[0].message}`);\n  }\n  \n  // Neo4j HTTP response is wrapped in an array\n  const resultWrapper = Array.isArray(response) ? response[0] : response;\n  const dataArray = resultWrapper?.data;\n  \n  if (!dataArray) {\n    console.warn('No data returned from Neo4j');\n    continue;\n  }\n  \n  const values = dataArray.values;\n  \n  if (!values || values.length === 0) {\n    console.warn('No values in Neo4j response');\n    continue;\n  }\n  \n  // Parse each row\n  for (const valueRow of values) {\n    const standardData = valueRow[0];\n    \n    allStandards.push({\n      json: {\n        asset_id: standardData.asset_id,\n        code: standardData.code,\n        name: standardData.name,\n        standard_version: standardData.standard_version || \"OECD_FOS_2007\",\n        provenance: standardData.provenance,\n        level: standardData.level,\n        parent_code: standardData.parent_code,\n        taxonomy_role: standardData.taxonomy_role\n      }\n    });\n  }\n}\n\nconsole.log(`Parsed ${allStandards.length} OECD FOS standards`);\n\nreturn allStandards;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1760,
+        496
+      ],
+      "id": "41cd4fb7-0fa1-4d7d-bbc4-55cc12f434e7",
+      "name": "Parse Neo4j HTTP Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst allUpdates = items.map(item => ({\n  asset_id: item.json.asset_id,\n  status: \"enriching\"\n}));\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        UNWIND $updates AS update\n        MATCH (s:Standard:OECD_FOS:DomainHub {asset_id: update.asset_id})\n        SET s.status = update.status,\n            s.updated_at = datetime()\n        RETURN s.asset_id as asset_id\n      `,\n      parameters: {\n        updates: allUpdates\n      }\n    },\n    original_items: items.map(i => i.json)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1264,
+        496
+      ],
+      "id": "ae84be43-5e0c-42bc-8d82-1b7d99294e74",
+      "name": "Update Status to enriching"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1040,
+        496
+      ],
+      "id": "07b076d5-21ad-4cdd-8335-8dfede78f690",
+      "name": "Execute Update to enriching",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": " // Get original_items from the \"Update Status to enriching\" node (before HTTP request)\nconst updateNode = $('Update Status to enriching').first().json;\nconst items = updateNode.original_items;\n\nconst llmPrompts = [];\n\nfor (const item of items) {\n  const hierarchy = item.hierarchy;\n  \n  const parentInfo = item.parent_code \n    ? `\\nParent Group: ${item.parent_code}`\n    : '\\nThis is a top-level group (no parent).';\n  \n  const prompt = `You are a research classification domain expert. Your task is to enrich the OECD Fields of Science (Frascati Manual) taxonomy code.\n\nThis is a DOMAIN HUB standard - a universal taxonomy that other classification standards map to for cross-domain interoperability.\n\nStandard Code: ${item.code}\nStandard Name: ${item.name}\nHierarchy Level: ${hierarchy.level}${parentInfo}\n\nProvide the following enrichment in valid JSON format:\n{\n  \"scope_description\": \"2-3 sentences describing what research areas this code covers\",\n  \"disambiguation_signals\": [\"5-7 signals indicating what does NOT belong to this code\"],\n  \"example_topics\": [\"7-10 specific research topics that fall under this code\"],\n  \"coverage_breadth\": \"broad\",\n  \"domain_synonyms\": [\"5-7 alternative names or academic synonyms\"],\n  \"related_concepts\": [\"5-7 related research concepts\"]\n}\n\nCRITICAL: Respond ONLY with valid JSON. No markdown, no code blocks.`;\n\n  llmPrompts.push({\n    json: {\n      asset_id: item.asset_id,\n      code: item.code,\n      name: item.name,\n      standard_version: item.standard_version,\n      hierarchy: hierarchy,\n      parent_code: item.parent_code,\n      provenance: item.provenance,\n      taxonomy_role: item.taxonomy_role,\n      pass1_timestamp: item.pass1_timestamp,\n      llm_prompt: prompt\n    }\n  });\n}\n\nreturn llmPrompts;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2480,
+        928
+      ],
+      "id": "baf83a55-a154-415f-93f9-52c029058a80",
+      "name": "Prepare for Pass 2 LLM"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -2224,
+        1136
+      ],
+      "id": "5ab51905-b04d-46c5-a9f8-f1df72069c0d",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get original data from Prepare for Pass 2 node\nconst originalItems = $('Prepare for Pass 2 LLM').all();\nconst llmItems = $input.all();\n\nconst processedItems = [];\n\nfor (let i = 0; i < originalItems.length; i++) {\n  try {\n    const llmResponse = llmItems[i].json.output || \n                       llmItems[i].json.message?.content || \n                       llmItems[i].json.text || \n                       llmItems[i].json.content ||\n                       llmItems[i].json.response;\n    \n    let contextData;\n    try {\n      contextData = JSON.parse(llmResponse);\n    } catch (e) {\n      // Try extracting JSON from markdown code blocks\n      const jsonMatch = llmResponse.match(/```json\\n([\\s\\S]*?)\\n```/);\n      if (jsonMatch) {\n        contextData = JSON.parse(jsonMatch[1]);\n      } else {\n        throw new Error('Failed to parse LLM response as JSON');\n      }\n    }\n    \n    // Definition Card aligned fields\n    const enriched = {\n      ...originalItems[i].json,\n      domain_context: {\n        scope_description: contextData.scope_description || '',\n        disambiguation_signals: contextData.disambiguation_signals || [],\n        example_topics: contextData.example_topics || [],\n        coverage_breadth: contextData.coverage_breadth || 'broad',\n        domain_synonyms: contextData.domain_synonyms || [],\n        related_concepts: contextData.related_concepts || []\n      },\n      pass2_timestamp: new Date().toISOString()\n    };\n    \n    // Remove llm_prompt to keep data clean\n    delete enriched.llm_prompt;\n    \n    processedItems.push({ json: enriched });\n  } catch (error) {\n    console.error('Error processing item:', error);\n    processedItems.push({ \n      json: { \n        ...originalItems[i].json,\n        pass2_error: error.message,\n        pass2_timestamp: new Date().toISOString()\n      } \n    });\n  }\n}\n\nreturn processedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1872,
+        928
+      ],
+      "id": "fa0f82c8-c31f-4ba1-8a45-3203534ee537",
+      "name": "Parse Pass 2 LLM Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reference Pass 2 output\nconst items = $('Parse Pass 2 LLM Response').all();\n\nconst disambiguationPrompts = [];\n\nfor (const item of items) {\n  const context = item.json.domain_context || {};\n  \n  const relatedConcepts = (context.related_concepts || []).slice(0, 5).join(', ');\n  const exampleTopics = (context.example_topics || []).slice(0, 5).join(', ');\n  \n  const prompt = `You are a research classification expert. Define disambiguation signals for this OECD Fields of Science (Domain Hub) code.\n\nStandard Code: ${item.json.code}\nStandard Name: ${item.json.name}\nScope: ${context.scope_description || item.json.name}\nExample Topics: ${exampleTopics}\nRelated Concepts: ${relatedConcepts}\n\nThis is a DOMAIN HUB standard used as a universal reference for cross-domain mapping.\n\nProvide disambiguation signals in valid JSON format:\n{\n  \"positive_signals\": [\n    \"List 5-7 specific indicators that research DOES belong to this classification\"\n  ],\n  \"negative_signals\": [\n    \"List 5-7 specific indicators that research does NOT belong here\"\n  ],\n  \"boundary_notes\": \"Write 2-3 sentences explaining edge cases and overlaps with related codes\"\n}\n\nCRITICAL: Respond ONLY with valid JSON. No markdown, no code blocks.`;\n\n  disambiguationPrompts.push({\n    json: {\n      // Preserve all existing data\n      asset_id: item.json.asset_id,\n      code: item.json.code,\n      name: item.json.name,\n      standard_version: item.json.standard_version,\n      hierarchy: item.json.hierarchy,\n      parent_code: item.json.parent_code,\n      provenance: item.json.provenance,\n      taxonomy_role: item.json.taxonomy_role,\n      pass1_timestamp: item.json.pass1_timestamp,\n      domain_context: item.json.domain_context,\n      pass2_timestamp: item.json.pass2_timestamp,\n      // Add new prompt\n      llm_prompt_pass3: prompt\n    }\n  });\n}\n\nreturn disambiguationPrompts;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1632,
+        928
+      ],
+      "id": "18fd9a25-b36a-466b-b8fb-29df53d256ff",
+      "name": "Prepare Pass 3 Disambiguation Prompts"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1392,
+        1152
+      ],
+      "id": "7b29d9fb-2ad9-4ae0-a1b1-77ce02730f37",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.llm_prompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -2224,
+        928
+      ],
+      "id": "043feed8-dd4b-48f2-8012-cb03db2745c8",
+      "name": "Pass 2: LLM Context Enhancement"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.llm_prompt_pass3 }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -1392,
+        928
+      ],
+      "id": "93fdd3bd-7e26-4994-9f0d-9cea66e6b2be",
+      "name": "Pass 3: Disambiguation Signals"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reference Pass 2 complete data AND Pass 3 LLM response\nconst pass2Items = $('Parse Pass 2 LLM Response').all();\nconst llmItems = $input.all();\n\nconst processedItems = [];\n\nfor (let i = 0; i < pass2Items.length; i++) {\n  try {\n    const llmResponse = llmItems[i].json.output || \n                       llmItems[i].json.message?.content || \n                       llmItems[i].json.text || \n                       llmItems[i].json.content ||\n                       llmItems[i].json.response;\n    \n    let disambiguationData;\n    try {\n      disambiguationData = JSON.parse(llmResponse);\n    } catch (e) {\n      const jsonMatch = llmResponse.match(/```json\\n([\\s\\S]*?)\\n```/);\n      if (jsonMatch) {\n        disambiguationData = JSON.parse(jsonMatch[1]);\n      } else {\n        throw new Error('Failed to parse disambiguation response as JSON');\n      }\n    }\n    \n    // Merge with complete Pass 2 data\n    const enriched = {\n      ...pass2Items[i].json,\n      disambiguation: {\n        positive_signals: disambiguationData.positive_signals || [],\n        negative_signals: disambiguationData.negative_signals || [],\n        boundary_notes: disambiguationData.boundary_notes || ''\n      },\n      pass3_timestamp: new Date().toISOString()\n    };\n    \n    processedItems.push({ json: enriched });\n  } catch (error) {\n    console.error('Error processing disambiguation:', error);\n    processedItems.push({ \n      json: { \n        ...pass2Items[i].json,\n        pass3_error: error.message,\n        pass3_timestamp: new Date().toISOString()\n      } \n    });\n  }\n}\n\nreturn processedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        928
+      ],
+      "id": "c245d6f7-1dd3-4ebe-b4c1-9cab609a9ca7",
+      "name": "Parse Pass 3 Disambiguation Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass 4: Canonical Normalisation - Generate ICF structure and three views\nconst crypto = require('crypto');\nconst items = $input.all();\nconst icfStandards = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // Generate dense view (800-1200 tokens)\n  const denseView = generateDenseView(data);\n  \n  // Generate embedding view (300-800 tokens)\n  const embeddingView = generateEmbeddingView(data);\n  \n  // Generate graph view structure\n  const graphView = generateGraphView(data);\n  \n  // Build complete ICF structure\n  const icf = {\n    asset_id: data.asset_id,\n    asset_type: \"standard\",\n    domain: \"research_classification\",\n    version: \"v1.0\",\n    status: \"fabricated\",\n    taxonomy_role: \"domain_hub\",\n    \n    provenance: {\n      source: data.provenance?.source || \"OECD_FOS_2007_Frascati\",\n      source_url: data.provenance?.source_url || \"https://www.oecd.org/sti/inno/frascati-manual.htm\",\n      created_at: data.provenance?.created_at || new Date().toISOString(),\n      ingestion_method: data.provenance?.ingestion_method || \"csv_cloud_load\",\n      fabrication_pipeline_version: \"v6.4.1\",\n      pass1_timestamp: data.pass1_timestamp,\n      pass2_timestamp: data.pass2_timestamp,\n      pass3_timestamp: data.pass3_timestamp,\n      pass4_timestamp: new Date().toISOString(),\n      enrichment_model: \"gpt-4o\",\n      source_references: [\"OECD_FOS_2007_Frascati\"]\n    },\n    \n    core_attributes: {\n      code: data.code,\n      name: data.name,\n      standard_version: data.standard_version,\n      hierarchy: data.hierarchy,\n      parent_code: data.parent_code || null,\n      domain_context: data.domain_context || {},\n      disambiguation: data.disambiguation || {}\n    },\n    \n    views: {\n      dense: denseView,\n      embedding: embeddingView,\n      graph: graphView\n    },\n    \n    metadata: {\n      created_at: data.provenance?.created_at || new Date().toISOString(),\n      updated_at: new Date().toISOString(),\n      fabricated_at: new Date().toISOString(),\n      checksum: generateChecksum(denseView.content),\n      tags: [\"active\", \"fabricated\", \"oecd_fos_2007\", \"domain_hub\"]\n    }\n  };\n  \n  // Add lifecycle_status (Standards only)\n  icf.lifecycle_status = \"active\";\n  \n  icfStandards.push({ json: icf });\n}\n\nreturn icfStandards;\n\n// ============================================================================\n// HELPER FUNCTIONS\n// ============================================================================\n\nfunction generateDenseView(data) {\n  const hierarchy = data.hierarchy || {};\n  const context = data.domain_context || {};\n  const disambiguation = data.disambiguation || {};\n  \n  let text = `${data.name} (${data.code})\\n\\n`;\n  \n  // Hierarchy path - OECD FOS has 2 levels: group and field\n  if (hierarchy.level === 'field') {\n    text += `Classification Path: Group ${hierarchy.group_code} > Field ${hierarchy.field_code}\\n\\n`;\n  } else if (hierarchy.level === 'group') {\n    text += `Classification Level: Group ${hierarchy.group_code}\\n\\n`;\n  }\n  \n  // Scope description (Definition Card aligned)\n  if (context.scope_description) {\n    text += `Scope: ${context.scope_description}\\n\\n`;\n  }\n  \n  // Coverage breadth\n  if (context.coverage_breadth) {\n    text += `Coverage Breadth: ${context.coverage_breadth}\\n\\n`;\n  }\n  \n  // Domain synonyms\n  if (context.domain_synonyms && context.domain_synonyms.length > 0) {\n    text += `Synonyms: ${context.domain_synonyms.join(', ')}\\n\\n`;\n  }\n  \n  // Example topics\n  if (context.example_topics && context.example_topics.length > 0) {\n    text += `Example Topics: ${context.example_topics.join(', ')}\\n\\n`;\n  }\n  \n  // Related concepts\n  if (context.related_concepts && context.related_concepts.length > 0) {\n    text += `Related Concepts: ${context.related_concepts.join(', ')}\\n\\n`;\n  }\n  \n  // Disambiguation signals (positive)\n  if (disambiguation.positive_signals && disambiguation.positive_signals.length > 0) {\n    text += `Classification Applies When:\\n`;\n    disambiguation.positive_signals.forEach(signal => {\n      text += `  • ${signal}\\n`;\n    });\n    text += `\\n`;\n  }\n  \n  // Disambiguation signals (negative)\n  if (disambiguation.negative_signals && disambiguation.negative_signals.length > 0) {\n    text += `Classification Does NOT Apply When:\\n`;\n    disambiguation.negative_signals.forEach(signal => {\n      text += `  • ${signal}\\n`;\n    });\n    text += `\\n`;\n  }\n  \n  // Boundary notes\n  if (disambiguation.boundary_notes) {\n    text += `Boundary Notes: ${disambiguation.boundary_notes}\\n`;\n  }\n  \n  return {\n    format: \"text\",\n    token_count: estimateTokens(text),\n    content: text,\n    storage: \"neo4j\",\n    chunking_metadata: {\n      chunk_id: `${data.asset_id}:dense:v1`,\n      position: 1,\n      total_chunks: 1\n    }\n  };\n}\n\nfunction generateEmbeddingView(data) {\n  const context = data.domain_context || {};\n  \n  // Condensed version for vector search (300-800 tokens)\n  let text = `${data.name} (${data.code}). `;\n  \n  if (context.scope_description) {\n    text += `${context.scope_description.substring(0, 250)}. `;\n  }\n  \n  if (context.domain_synonyms && context.domain_synonyms.length > 0) {\n    text += `Synonyms: ${context.domain_synonyms.slice(0, 5).join(', ')}. `;\n  }\n  \n  if (context.example_topics && context.example_topics.length > 0) {\n    text += `Topics: ${context.example_topics.slice(0, 5).join(', ')}. `;\n  }\n  \n  if (context.related_concepts && context.related_concepts.length > 0) {\n    text += `Related: ${context.related_concepts.slice(0, 5).join(', ')}.`;\n  }\n  \n  return {\n    format: \"text\",\n    token_count: estimateTokens(text),\n    content: text,\n    storage: \"qdrant\",\n    vector_metadata: {\n      model: \"text-embedding-3-large\",\n      dimensions: 3072,  // ⭐ CRITICAL: 768 for Domain Hub per Definition Card\n      qdrant_collection: \"standards_oecd_fos_2007\"\n    }\n  };\n}\n\nfunction generateGraphView(data) {\n  const hierarchy = data.hierarchy || {};\n  const relationships = [];\n  \n  // Parent relationship (BELONGS_TO)\n  if (data.parent_code) {\n    relationships.push({\n      type: \"BELONGS_TO\",\n      target: `oecd_fos:${data.parent_code}`,\n      direction: \"outgoing\",\n      properties: {}\n    });\n  }\n  \n  return {\n    format: \"cypher\",\n    storage: \"neo4j\",\n    node_labels: [\"Standard\", \"OECD_FOS\", \"DomainHub\"],  // ⭐ Definition Card aligned\n    properties: {\n      code: data.code,\n      name: data.name,\n      level: hierarchy.level || \"field\",\n      taxonomy_role: \"domain_hub\",\n      standard_version: data.standard_version\n    },\n    relationships: relationships\n  };\n}\n\nfunction estimateTokens(text) {\n  return Math.ceil(text.length / 4);\n}\n\nfunction generateChecksum(content) {\n  return crypto.createHash('sha256').update(content).digest('hex');\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        928
+      ],
+      "id": "a43c2e53-714a-4864-a661-f3aa7f48e46a",
+      "name": "Pass 4: Canonical Normalisation (ICF)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Storage Payloads - Format data for Neo4j, Qdrant, and PostgreSQL\nconst items = $input.all();\nconst preparedItems = [];\n\nfor (const item of items) {\n  const icf = item.json;\n  \n  // Prepare payload for all three databases\n  const storagePayload = {\n    // Original ICF structure (for reference)\n    icf: icf,\n    \n    // Neo4j payload (direct ICF structure)\n    neo4j: {\n      asset_id: icf.asset_id,\n      status: icf.status,\n      lifecycle_status: icf.lifecycle_status,\n      taxonomy_role: icf.taxonomy_role,\n      core_attributes: JSON.stringify(icf.core_attributes),\n      views: JSON.stringify(icf.views),\n      provenance: JSON.stringify(icf.provenance),\n      metadata: JSON.stringify(icf.metadata),\n      fabricated_at: icf.metadata.fabricated_at,\n      updated_at: icf.metadata.updated_at\n    },\n    \n    // Text for embedding generation (extracted here for OpenRouter API)\n    embedding_text: icf.views.embedding.content,\n    \n    // Qdrant payload structure (vector will be added after embedding generation)\n    qdrant_base: {\n      id: icf.asset_id,\n      payload: {\n        asset_id: icf.asset_id,\n        code: icf.core_attributes.code,\n        name: icf.core_attributes.name,\n        embedding_text: icf.views.embedding.content,\n        asset_type: icf.asset_type,\n        taxonomy_role: icf.taxonomy_role,\n        standard_version: icf.core_attributes.standard_version,\n        fabricated_at: icf.metadata.fabricated_at,\n        level: icf.core_attributes.hierarchy.level,\n        group_code: icf.core_attributes.hierarchy.group_code,\n        field_code: icf.core_attributes.hierarchy.field_code || null\n      }\n    },\n    \n    // PostgreSQL payload (operational metadata)\n    postgresql: {\n      asset_id: icf.asset_id,\n      code: icf.core_attributes.code,\n      name: icf.core_attributes.name,\n      status: icf.status,\n      lifecycle_status: icf.lifecycle_status,\n      taxonomy_role: icf.taxonomy_role,\n      standard_version: icf.core_attributes.standard_version,\n      fabricated_at: icf.metadata.fabricated_at,\n      checksum: icf.metadata.checksum,\n      provenance_json: JSON.stringify(icf.provenance),\n      level: icf.core_attributes.hierarchy.level,\n      group_code: icf.core_attributes.hierarchy.group_code,\n      field_code: icf.core_attributes.hierarchy.field_code || null\n    }\n  };\n  \n  preparedItems.push({ json: storagePayload });\n}\n\nreturn preparedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        928
+      ],
+      "id": "cba22713-5d8f-4f53-89a6-6c8b434674c3",
+      "name": "Prepare Storage Payloads"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge generated embeddings back into storage payloads\nconst crypto = require('crypto');\nconst preparedData = $('Prepare Storage Payloads').all();\nconst embeddingResults = $input.all();\n\nconst mergedItems = [];\n\n// UUID v5 generator (deterministic)\nfunction generateUUIDv5(name, namespace = '6ba7b810-9dad-11d1-80b4-00c04fd430c8') {\n  // Using DNS namespace as base\n  const nsBytes = namespace.replace(/-/g, '');\n  const nsBuffer = Buffer.from(nsBytes, 'hex');\n  const nameBuffer = Buffer.from(name, 'utf8');\n  const combined = Buffer.concat([nsBuffer, nameBuffer]);\n  \n  const hash = crypto.createHash('sha1').update(combined).digest();\n  \n  // Set version (5) and variant bits\n  hash[6] = (hash[6] & 0x0f) | 0x50;\n  hash[8] = (hash[8] & 0x3f) | 0x80;\n  \n  const hex = hash.toString('hex').slice(0, 32);\n  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20,32)}`;\n}\n\nfor (let i = 0; i < preparedData.length; i++) {\n  const item = preparedData[i].json;\n  const embeddingResult = embeddingResults[i].json;\n  \n  // Extract the embedding vector from OpenRouter API response\n  const vector = embeddingResult.data?.[0]?.embedding || null;\n  \n  if (!vector || !Array.isArray(vector) || vector.length !== 3072) {\n    console.error(`Failed to generate valid embedding for ${item.qdrant_base.payload.asset_id}`);\n  }\n  \n  // ⭐ SYSTEM-1: Generate deterministic UUID from asset_id\n  const qdrantUUID = generateUUIDv5(item.qdrant_base.payload.asset_id);\n  \n  // Build complete Qdrant payload\n  const qdrantPayload = {\n    id: qdrantUUID,  // UUID string\n    vector: vector,\n    payload: item.qdrant_base.payload\n  };\n  \n  // Merge everything together\n  const mergedPayload = {\n    icf: item.icf,\n    neo4j: item.neo4j,\n    postgresql: item.postgresql,\n    qdrant: qdrantPayload,\n    qdrant_uuid: qdrantUUID,  // Store for reference\n    embedding_generated: vector !== null,\n    embedding_dimensions: vector?.length || 0,\n    embedding_timestamp: new Date().toISOString()\n  };\n  \n  mergedItems.push({ json: mergedPayload });\n}\n\nreturn mergedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2496,
+        1376
+      ],
+      "id": "466e1213-f1de-4027-a462-81d814c7babc",
+      "name": "Merge Embeddings with Payloads"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2000,
+        1376
+      ],
+      "id": "fd024af8-64da-4577-9a93-508583e5966c",
+      "name": "Store in Neo4j",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j Cypher Statement for OECD FOS Domain Hub\nconst items = $input.all();\n\nconst allUpdates = items.map(item => {\n  const icf = item.json.icf;\n  const hierarchy = icf.core_attributes.hierarchy;\n  const domainContext = icf.core_attributes.domain_context || {};\n  const disambiguation = icf.core_attributes.disambiguation || {};\n  \n  return {\n    asset_id: icf.asset_id,\n    code: icf.core_attributes.code,  // String - keeps decimal format (1, 1.1, 2.10)\n    name: icf.core_attributes.name,\n    level: hierarchy.level,\n    // OECD FOS is 2-level: group → field (no division)\n    group_code: hierarchy.group_code || null,\n    group_name: hierarchy.group_name || null,\n    field_code: hierarchy.field_code || null,\n    field_name: hierarchy.field_name || null,\n    // Domain context\n    synonyms: domainContext.synonyms || [],\n    industry_terms: domainContext.industry_terms || [],\n    related_concepts: domainContext.related_concepts || [],\n    typical_methods: domainContext.common_methods || [],\n    typical_outputs: domainContext.typical_outputs || [],\n    description_extended: domainContext.description_extended || \"\",\n    disambiguation: JSON.stringify(disambiguation),\n    // Views\n    dense_view: icf.views.dense.content,\n    dense_token_count: icf.views.dense.token_count,\n    embedding_text: icf.views.embedding.content,\n    // Status and metadata\n    status: icf.status,\n    lifecycle_status: icf.lifecycle_status,\n    taxonomy: \"oecd_fos_2007\",\n    taxonomy_role: \"domain_hub\",  // Key differentiator from Primary Standards\n    standard_version: icf.core_attributes.standard_version,\n    fabricated_at: icf.metadata.fabricated_at,\n    checksum: icf.metadata.checksum,\n    parent_code: icf.core_attributes.parent_code || null,\n    parent_name: icf.core_attributes.parent_name || null\n  };\n});\n\n// Neo4j Cypher with OECD FOS labels\nconst neo4jPayload = {\n  statement: `\n    UNWIND $updates AS update\n    MERGE (s:Standard:OECD_FOS:DomainHub {asset_id: update.asset_id})\n    SET s.code = update.code,\n        s.name = update.name,\n        s.level = update.level,\n        s.group_code = update.group_code,\n        s.group_name = update.group_name,\n        s.field_code = update.field_code,\n        s.field_name = update.field_name,\n        s.synonyms = update.synonyms,\n        s.industry_terms = update.industry_terms,\n        s.related_concepts = update.related_concepts,\n        s.typical_methods = update.typical_methods,\n        s.typical_outputs = update.typical_outputs,\n        s.description_extended = update.description_extended,\n        s.disambiguation = update.disambiguation,\n        s.dense_view = update.dense_view,\n        s.dense_token_count = update.dense_token_count,\n        s.embedding_text = update.embedding_text,\n        s.status = update.status,\n        s.lifecycle_status = update.lifecycle_status,\n        s.taxonomy = update.taxonomy,\n        s.taxonomy_role = update.taxonomy_role,\n        s.standard_version = update.standard_version,\n        s.fabricated_at = update.fabricated_at,\n        s.checksum = update.checksum,\n        s.parent_code = update.parent_code,\n        s.parent_name = update.parent_name,\n        s.created_at = coalesce(s.created_at, datetime()),\n        s.updated_at = datetime()\n    RETURN s.asset_id as asset_id, s.code as code, s.status as status\n  `,\n  parameters: {\n    updates: allUpdates\n  }\n};\n\n// Return payload with Qdrant and PostgreSQL data passed through\nreturn [{\n  json: {\n    neo4j_payload: neo4jPayload,\n    qdrant_payloads: items.map(i => i.json.qdrant),\n    postgresql_payloads: items.map(i => i.json.postgresql),\n    original_items: items.map(i => i.json)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2240,
+        1376
+      ],
+      "id": "fb4dfb3b-5639-46d1-b6bb-5baa35c2bcbd",
+      "name": "Prepare Neo4j Cypher"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_oecd_fos_2007/points?wait=true",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n     {\n       \"points\": $json.qdrant_payloads\n     }\n   }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1984,
+        1568
+      ],
+      "id": "5c72fdfd-9424-4ba9-94de-e796137daaf0",
+      "name": "Qdrant - Store Embedding",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare PostgreSQL Batch Insert - Match working n8n pattern\nconst item = $input.first().json;\nconst postgresqlPayloads = item.postgresql_payloads;\n\n// Build the payload for Supabase REST API\nconst supabasePayload = postgresqlPayloads.map(payload => ({\n  asset_id: payload.asset_id,\n  code: payload.code,\n  name: payload.name,\n  status: payload.status,\n  lifecycle_status: payload.lifecycle_status,\n  standard_version: payload.standard_version,\n  level: payload.level,\n  division_code: payload.division_code,\n  group_code: payload.group_code,\n  field_code: payload.field_code,\n  fabricated_at: payload.fabricated_at,\n  checksum: payload.checksum,\n  provenance_json: payload.provenance_json\n}));\n\nreturn [{\n  json: {\n    supabase_payload: supabasePayload,\n    total_records: supabasePayload.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1984,
+        1776
+      ],
+      "id": "3afbbdff-9bac-4e9a-a2c0-39dae1d4298b",
+      "name": "Prepare PostgreSQL Batch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Storage Summary Statistics\nconst items = $input.all();\n\nlet neo4jResult = null;\nlet qdrantResult = null;\nlet supabaseResults = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  if (!data) continue;\n  \n  // Identify Neo4j result (has 'data' with 'fields' and 'bookmarks')\n  if (data.data && data.data.fields && data.bookmarks) {\n    neo4jResult = data;\n  }\n  // Identify Qdrant result (has 'result' with 'operation_id' and 'time')\n  else if (data.result && data.result.operation_id !== undefined && data.time !== undefined) {\n    qdrantResult = data;\n  }\n  // Identify Supabase result (has 'id', 'asset_id', 'code', 'fabricated_at')\n  else if (data.id !== undefined && data.asset_id && data.code && data.fabricated_at) {\n    supabaseResults.push(data);\n  }\n}\n\nconst summary = {\n  workflow: \"Workflow_2_FAT_Standards_Fabrication\",\n  timestamp: new Date().toISOString(),\n  \n  neo4j: {\n    success: neo4jResult !== null,\n    records_updated: neo4jResult?.data?.values?.length || 0,\n    sample_asset: neo4jResult?.data?.values?.[0]?.[0] || null,\n    sample_status: neo4jResult?.data?.values?.[0]?.[1] || null\n  },\n  \n  qdrant: {\n    success: qdrantResult !== null && qdrantResult.status === 'ok',\n    operation_id: qdrantResult?.result?.operation_id || null,\n    status: qdrantResult?.result?.status || 'unknown',\n    time_seconds: qdrantResult?.time || null\n  },\n  \n  supabase: {\n    success: supabaseResults.length > 0,\n    records_upserted: supabaseResults.length,\n    sample_asset: supabaseResults[0]?.asset_id || null,\n    sample_name: supabaseResults[0]?.name || null\n  },\n  \n  all_successful: false,\n  errors: 0,\n  total_processed: 0\n};\n\n// Check overall success\nsummary.all_successful = (\n  summary.neo4j.success &&\n  summary.qdrant.success &&\n  summary.supabase.success\n);\n\nsummary.errors = summary.all_successful ? 0 : 1;\nsummary.total_processed = Math.max(\n  summary.neo4j.records_updated,\n  summary.supabase.records_upserted,\n  1\n);\n\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1152,
+        1520
+      ],
+      "id": "a2641310-0e44-4c9b-985e-1a8ca7ed5a63",
+      "name": "Generate Storage Summary"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1360,
+        1504
+      ],
+      "id": "29de6e5a-56f3-47b6-b330-003713ff530b",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/fat_standards_metadata?on_conflict=asset_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates, return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1680,
+        1776
+      ],
+      "id": "ef3ed051-72d7-4107-9299-ce7d79a93f59",
+      "name": "Store in Supabase(Postgre)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d43f19fa-bf81-48ac-a8fb-9e528e53553a",
+              "leftValue": "={{ $json.errors }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -960,
+        1504
+      ],
+      "id": "1e257b72-5728-4ee6-a6d1-7f722415f3f3",
+      "name": "Check for Errors"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C09VCRQ9WAD",
+          "mode": "list",
+          "cachedResultName": "classification-foundry-alerts"
+        },
+        "text": "=⚠️ Workflow 2 completed with errors  Total processed: {{ $json.total_processed }} Successful: {{ $json.neo4j.records_updated }} Errors: {{ $json.errors }}  Neo4j: {{ $json.neo4j.success ? '✅' : '❌' }} Qdrant: {{ $json.qdrant.success ? '✅' : '❌' }} Supabase: {{ $json.supabase.success ? '✅' : '❌' }}  Timestamp: {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -704,
+        1408
+      ],
+      "id": "cfc92b18-8fee-47eb-8de1-de62db04e1dd",
+      "name": "Send Error Notification",
+      "webhookId": "c8ef735e-5eea-4060-8f76-5c6b74ed3e89",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "jzRSmdhqzgGRlGnt",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C09VCRQ9WAD",
+          "mode": "list",
+          "cachedResultName": "classification-foundry-alerts"
+        },
+        "text": "=⚠️ Workflow 2 completed with errors  Total processed: {{ $json.total_processed }} Successful: {{ $json.neo4j.records_updated }} Errors: {{ $json.errors }}  Neo4j: {{ $json.neo4j.success ? '✅' : '❌' }} Qdrant: {{ $json.qdrant.success ? '✅' : '❌' }} Supabase: {{ $json.supabase.success ? '✅' : '❌' }}  Timestamp: {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -672,
+        1680
+      ],
+      "id": "5d2b04b4-6b59-4ce4-8fb7-83a270aff1d7",
+      "name": "Send Success Notification",
+      "webhookId": "6bed1664-e78c-4699-b25d-fb64eb7a2a34",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "jzRSmdhqzgGRlGnt",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2496,
+        496
+      ],
+      "id": "1f1f1ccb-1a1e-4343-b014-bf77ea56ad5f",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "openai/text-embedding-3-large"
+            },
+            {
+              "name": "input",
+              "value": "={{ $json.embedding_text }}"
+            },
+            {
+              "name": "dimensions",
+              "value": "={{ 3072 }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "07d16d6f-4359-4036-8a96-abfcf707fa30",
+      "name": "HTTP Request - Generate Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -208,
+        928
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j Query - Fetch all Standard asset_ids\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR)\n        RETURN s.asset_id AS asset_id, s.code AS code, s.name AS name\n        ORDER BY s.code\n      `,\n      parameters: {}\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        384
+      ],
+      "id": "3a00d507-5716-4c61-8f61-7f16e650f965",
+      "name": "Prepare Neo4j Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc_for_2020/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1328,
+        384
+      ],
+      "id": "8d4b67d7-f8e6-4f30-a29a-69039c6d55bd",
+      "name": "Qdrant fetch",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compare Neo4j vs Qdrant - Find missing standards\nconst neo4jResponse = $('Execute Neo4j HTTP Request').first().json;\nconst qdrantResponse = $('Qdrant fetch').first().json;\n\n// Parse Neo4j results\nconst neo4jStandards = neo4jResponse.data.values.map(row => ({\n  asset_id: row[0],\n  code: row[1],\n  name: row[2]\n}));\n\n// Parse Qdrant results\nconst qdrantPoints = qdrantResponse.result.points;\nconst qdrantAssetIds = new Set(qdrantPoints.map(p => p.payload.asset_id));\n\n// Find missing in Qdrant\nconst missing = neo4jStandards.filter(s => !qdrantAssetIds.has(s.asset_id));\n\nconsole.log(`Neo4j: ${neo4jStandards.length}`);\nconsole.log(`Qdrant: ${qdrantPoints.length}`);\nconsole.log(`Missing: ${missing.length}`);\n\nreturn [{\n  json: {\n    neo4j_count: neo4jStandards.length,\n    qdrant_count: qdrantPoints.length,\n    missing_count: missing.length,\n    missing_standards: missing\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        384
+      ],
+      "id": "a51cdb8f-2ba8-4fbd-948e-3f4885443f34",
+      "name": "compare"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        384
+      ],
+      "id": "093b2e29-d575-42f2-a2ae-80a10bdd7fcd",
+      "name": "Execute Neo4j HTTP Request",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Reset Status Query\nconst missing = $input.first().json.missing_standards;\nconst missingIds = missing.map(m => m.asset_id);\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        UNWIND $missing_ids AS aid\n        MATCH (s:Standard:FoR {asset_id: aid})\n        SET s.status = 'thin'\n        RETURN s.asset_id, s.code, s.status\n      `,\n      parameters: {\n        missing_ids: missingIds\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1824,
+        384
+      ],
+      "id": "c5ebb1c2-9afb-4f61-93ea-836f4c48fd15",
+      "name": "Prepare Reset Status Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        384
+      ],
+      "id": "030b79aa-9855-4fe0-a634-e80703e8849b",
+      "name": "Execute Neo4j HTTP (reset)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Qdrant Scroll Query - Fetch all points from standards collection\nreturn [{\n  json: {\n    qdrant_payload: {\n      limit: 3000,\n      with_payload: {\n        include: [\"asset_id\", \"code\", \"name\"]\n      },\n      with_vectors: false\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        384
+      ],
+      "id": "8dc58d27-7e56-4026-9d03-666af697afa9",
+      "name": "Prepare Qdrant"
+    },
+    {
+      "parameters": {
+        "content": "## Use This to find missing unprocessed Domain std hub codes in Qdrant\n**Double click** to edit me. [Guide](https://docs.n8n.io/workflows/components/sticky-notes/)",
+        "height": 576,
+        "width": 1920
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        416,
+        240
+      ],
+      "typeVersion": 1,
+      "id": "82a08c37-56bd-4da2-ba6c-66439d2bba35",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// TASK 1.1 STEP 1: Get Richard Williams' FAT Object\n// We need to retrieve his embedding vector\n// =====================================================\n// \n// NOTE: You may need to adjust:\n// - collection_name: Could be 'fat_researchers', 'fat_researchers_v3', 'fat_objects', etc.\n// - ID format: Could be 'richard_williams', numeric ID, or UUID\n//\n// First, let's try to find him in the researchers collection\n\nreturn [{\n  json: {\n    task: 'Task 1.1 Step 1 - Get Richard Williams embedding',\n    description: 'Retrieve FAT Object embedding for vector search',\n    note: 'If this fails, we may need to adjust collection name or ID format'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1872,
+        2544
+      ],
+      "id": "b69b8123-7ecd-426f-94a5-31c97536a3aa",
+      "name": "Prepare: Fetch Richard Williams"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://f0d17c59-8785-4dc5-a0e7-8a4ddb4480d0.eu-west-1-0.aws.cloud.qdrant.io:6333/collections/fat_researchers_v3/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"limit\": 10,\n  \"with_payload\": true,\n  \"with_vector\": true,\n  \"filter\": {\n    \"should\": [\n      {\n        \"key\": \"name\",\n        \"match\": {\n          \"text\": \"Richard Williams\"\n        }\n      },\n      {\n        \"key\": \"researcher_name\",\n        \"match\": {\n          \"text\": \"Richard Williams\"\n        }\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1648,
+        2544
+      ],
+      "id": "ce1a8f0e-18fd-422f-8dc7-13a3cc7c49b6",
+      "name": "Execute: Scroll for Richard Williams",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "EGYFqeyPSXZKoGqV",
+          "name": "Scopus InstToken"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// Parse Richard Williams result and extract embedding\n// =====================================================\nconst rawResponse = $input.first().json;\nconst response = Array.isArray(rawResponse) ? rawResponse[0] : rawResponse;\n\nconsole.log('=== RICHARD WILLIAMS LOOKUP ===');\nconsole.log('Response keys:', Object.keys(response || {}));\n\nconst points = response?.result?.points || [];\n\nif (points.length === 0) {\n  console.log('❌ Richard Williams NOT FOUND in fat_researchers_v3');\n  console.log('Try checking:');\n  console.log('  - Different collection name');\n  console.log('  - Different filter field (name vs researcher_name)');\n  console.log('  - ID-based lookup instead of filter');\n  \n  return [{\n    json: {\n      status: 'NOT_FOUND',\n      error: 'Richard Williams not found in fat_researchers_v3',\n      suggestion: 'Check collection name and filter fields',\n      raw_response: response\n    }\n  }];\n}\n\nconst researcher = points[0];\nconst embedding = researcher.vector;\nconst payload = researcher.payload || {};\n\nconsole.log(`✅ Found Richard Williams`);\nconsole.log(`  Point ID: ${researcher.id}`);\nconsole.log(`  Name: ${payload.name || payload.researcher_name}`);\nconsole.log(`  Embedding dimensions: ${embedding?.length || 'NO VECTOR'}`);\n\nif (!embedding || embedding.length === 0) {\n  return [{\n    json: {\n      status: 'NO_VECTOR',\n      error: 'Richard Williams found but no embedding vector',\n      point_id: researcher.id,\n      payload: payload\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    status: 'FOUND',\n    researcher: {\n      point_id: researcher.id,\n      name: payload.name || payload.researcher_name,\n      payload_keys: Object.keys(payload)\n    },\n    embedding: embedding,\n    embedding_dimensions: embedding.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1424,
+        2544
+      ],
+      "id": "38f0f2ae-da6a-4d01-ab11-dfb14a274037",
+      "name": "Parse: Richard Williams Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// TASK 1.1 STEP 2: Search Standards with embedding\n// =====================================================\nconst input = $input.first().json;\n\nif (input.status !== 'FOUND') {\n  // Pass through the error\n  return [{ json: input }];\n}\n\nreturn [{\n  json: {\n    task: 'Task 1.1 Step 2 - Search Standards',\n    qdrant_search_payload: {\n      vector: input.embedding,\n      limit: 100,\n      with_payload: true\n    },\n    researcher: input.researcher\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1216,
+        2544
+      ],
+      "id": "0e454015-9ac9-4baa-ae50-c434b88bd599",
+      "name": "Prepare: Standards Search"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://f0d17c59-8785-4dc5-a0e7-8a4ddb4480d0.eu-west-1-0.aws.cloud.qdrant.io:6333/collections/standards_anzsrc_for_2020/points/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_search_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -992,
+        2544
+      ],
+      "id": "f882edda-8376-4a8c-90c6-af48f603b913",
+      "name": "Execute: Standards Vector Search",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "EGYFqeyPSXZKoGqV",
+          "name": "Scopus InstToken"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================\n// TASK 1.1 RESULTS: Find where 400301 ranks\n// =====================================================\nconst rawResponse = $input.first().json;\nconst researcher = $('Prepare: Standards Search').first().json.researcher;\n\n// Handle array wrapper\nconst response = Array.isArray(rawResponse) ? rawResponse[0] : rawResponse;\nconst results = response?.result || [];\n\nconsole.log('=== TASK 1.1 RAW VECTOR SEARCH RESULTS ===');\nconsole.log(`Researcher: ${researcher?.name}`);\nconsole.log(`Total results returned: ${results.length}`);\n\n// Find positions of problem codes\nconst problemCodes = ['400301', '310106', '310607', '340502'];\nconst positions = {};\n\nfor (const targetCode of problemCodes) {\n  positions[targetCode] = {\n    code: targetCode,\n    position: null,\n    score: null,\n    name: null\n  };\n}\n\n// Build top results list and find problem codes\nconst topResults = [];\n\nfor (let i = 0; i < results.length; i++) {\n  const result = results[i];\n  const payload = result.payload || {};\n  const code = payload.code?.toString();\n  const name = payload.name;\n  const score = result.score;\n  \n  // Record top 20\n  if (i < 20) {\n    topResults.push({\n      rank: i + 1,\n      code: code,\n      name: name,\n      score: score?.toFixed(4)\n    });\n  }\n  \n  // Check if this is a problem code\n  if (problemCodes.includes(code)) {\n    positions[code] = {\n      code: code,\n      position: i + 1,\n      score: score?.toFixed(4),\n      name: name\n    };\n  }\n}\n\n// Log findings\nconsole.log('\\n--- TOP 20 RESULTS ---');\nfor (const r of topResults) {\n  const marker = problemCodes.includes(r.code) ? ' ⭐' : '';\n  console.log(`${r.rank}. ${r.code} - ${r.name} (${r.score})${marker}`);\n}\n\nconsole.log('\\n--- PROBLEM CODES RANKING ---');\nfor (const [code, info] of Object.entries(positions)) {\n  if (info.position) {\n    console.log(`${code}: Position ${info.position} (score: ${info.score})`);\n  } else {\n    console.log(`${code}: ❌ NOT IN TOP 100`);\n  }\n}\n\n// Determine interpretation per spec\nconst code400301 = positions['400301'];\nlet interpretation = '';\nlet nextAction = '';\n\nif (!code400301.position) {\n  interpretation = 'SEVERE: 400301 not in top 100';\n  nextAction = 'Check Qdrant storage and embedding dimensions';\n} else if (code400301.position <= 20) {\n  interpretation = 'GOOD: Retrieval is working';\n  nextAction = 'Problem is in Gen 3 reranking → Go to Phase 2B';\n} else if (code400301.position <= 50) {\n  interpretation = 'MARGINAL: Retrieval could be improved';\n  nextAction = 'Embedding quality issue → Run Tasks 2.1-2.3';\n} else {\n  interpretation = 'POOR: Retrieval problem confirmed';\n  nextAction = 'Embedding or storage issue → Run Tasks 2.1-2.3';\n}\n\nconsole.log(`\\n--- INTERPRETATION ---`);\nconsole.log(`400301 Position: ${code400301.position || 'NOT FOUND'}`);\nconsole.log(`Assessment: ${interpretation}`);\nconsole.log(`Next Action: ${nextAction}`);\n\nreturn [{\n  json: {\n    task: 'Task 1.1 - Raw Vector Search Results',\n    researcher: researcher,\n    total_results: results.length,\n    problem_codes_ranking: positions,\n    top_20_results: topResults,\n    assessment: {\n      code_400301_position: code400301.position,\n      interpretation: interpretation,\n      next_action: nextAction\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        2544
+      ],
+      "id": "7a372723-485d-408a-81a0-514f8f6c4a90",
+      "name": "Parse: Task 1.1 Results"
+    }
+  ],
+  "pinData": {
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-11-27T08:15:24.005+11:00",
+          "Readable date": "November 27th 2025, 8:15:24 am",
+          "Readable time": "8:15:24 am",
+          "Day of week": "Thursday",
+          "Year": "2025",
+          "Month": "November",
+          "Day of month": "27",
+          "Hour": "08",
+          "Minute": "15",
+          "Second": "24",
+          "Timezone": "Australia/Melbourne (UTC+11:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Prepare Neo4j Query for Standards": {
+      "main": [
+        [
+          {
+            "node": "Fetch Thin Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Field Enrichment": {
+      "main": [
+        []
+      ]
+    },
+    "Fetch Thin Standards": {
+      "main": [
+        [
+          {
+            "node": "Parse Neo4j HTTP Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Neo4j HTTP Response": {
+      "main": [
+        [
+          {
+            "node": "Pass 1: Structural Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 1: Structural Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Update Status to enriching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status to enriching": {
+      "main": [
+        [
+          {
+            "node": "Execute Update to enriching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Update to enriching": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Pass 2 LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Pass 2 LLM": {
+      "main": [
+        [
+          {
+            "node": "Pass 2: LLM Context Enhancement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pass 2: LLM Context Enhancement",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Pass 2 LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Pass 3 Disambiguation Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pass 3: Disambiguation Signals",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 2: LLM Context Enhancement": {
+      "main": [
+        [
+          {
+            "node": "Parse Pass 2 LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Pass 3 Disambiguation Prompts": {
+      "main": [
+        [
+          {
+            "node": "Pass 3: Disambiguation Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 3: Disambiguation Signals": {
+      "main": [
+        [
+          {
+            "node": "Parse Pass 3 Disambiguation Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Pass 3 Disambiguation Response": {
+      "main": [
+        [
+          {
+            "node": "Pass 4: Canonical Normalisation (ICF)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 4: Canonical Normalisation (ICF)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Storage Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Storage Payloads": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Generate Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Embeddings with Payloads": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Cypher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Cypher": {
+      "main": [
+        [
+          {
+            "node": "Store in Neo4j",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Qdrant - Store Embedding",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare PostgreSQL Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PostgreSQL Batch": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase(Postgre)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant - Store Embedding": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Generate Storage Summary": {
+      "main": [
+        [
+          {
+            "node": "Check for Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Generate Storage Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase(Postgre)": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Check for Errors": {
+      "main": [
+        [
+          {
+            "node": "Send Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Query for Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Generate Embedding": {
+      "main": [
+        [
+          {
+            "node": "Merge Embeddings with Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant fetch": {
+      "main": [
+        [
+          {
+            "node": "compare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Neo4j HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "compare": {
+      "main": [
+        [
+          {
+            "node": "Prepare Reset Status Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Reset Status Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP (reset)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Qdrant fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Fetch Richard Williams": {
+      "main": [
+        [
+          {
+            "node": "Execute: Scroll for Richard Williams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Scroll for Richard Williams": {
+      "main": [
+        [
+          {
+            "node": "Parse: Richard Williams Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse: Richard Williams Result": {
+      "main": [
+        [
+          {
+            "node": "Prepare: Standards Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Standards Search": {
+      "main": [
+        [
+          {
+            "node": "Execute: Standards Vector Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Standards Vector Search": {
+      "main": [
+        [
+          {
+            "node": "Parse: Task 1.1 Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "09a57802-b893-44e1-b629-204df1ffd50b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "HKMMp48fCUxAC7Jq",
+  "tags": [
+    {
+      "updatedAt": "2025-12-18T21:22:51.435Z",
+      "createdAt": "2025-11-25T14:19:55.471Z",
+      "id": "23TAoanPtB83dwz5",
+      "name": "Fabrication"
+    },
+    {
+      "updatedAt": "2025-12-18T21:22:20.648Z",
+      "createdAt": "2025-12-18T21:22:20.648Z",
+      "id": "ZZe6oCsk68xd39MA",
+      "name": "Domain Hub Standard"
+    }
+  ]
+}

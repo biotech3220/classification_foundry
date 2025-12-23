@@ -1,0 +1,761 @@
+{
+  "name": "GOVERN-4: Registry Health Governance",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "b4682909-d413-4575-89fe-8ea1077b0959",
+      "name": "Hourly Metrics Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1472,
+        -240
+      ],
+      "notes": "Triggers hourly metrics aggregation at the top of each hour"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "govern-4-health",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4f7640ad-1bd1-4647-849a-6d2336802bcb",
+      "name": "Webhook: /health",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        32
+      ],
+      "webhookId": "govern-4-health",
+      "notes": "API endpoint for health dashboard"
+    },
+    {
+      "parameters": {
+        "path": "govern-4-alerts",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d9e4eabb-ce30-40a8-ac68-e468f5354383",
+      "name": "Webhook: /alerts",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        224
+      ],
+      "webhookId": "govern-4-alerts",
+      "notes": "API endpoint for active alerts"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Initialize metrics collection context\nconst now = new Date().toISOString();\nconst instanceId = 'researcher_instance_prod';\n\nreturn [{\n  json: {\n    collection_started_at: now,\n    instance_id: instanceId,\n    metrics: {\n      freshness: null,\n      queue_depth: null,\n      sla_compliance: null,\n      pipeline_health: null\n    }\n  }\n}];"
+      },
+      "id": "1b17335c-63be-4a45-a1da-35f7fec3ec77",
+      "name": "Initialize Collection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1264,
+        -240
+      ],
+      "notes": "Initialize metrics collection context"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst context = $('Initialize Collection').first().json;\n\n// Parse Neo4j v2 API response format\nconst fields = input.data?.fields || [];\nconst values = input.data?.values || [];\n\n// Find column indexes\nconst categoryIdx = fields.indexOf('category');\nconst statusIdx = fields.indexOf('status');\nconst countIdx = fields.indexOf('count');\n\n// Aggregate freshness metrics\nlet fresh = 0, aging = 0, stale = 0, unknown = 0, total = 0;\nlet statusCounts = { active: 0, fabricated: 0, deprecated: 0 };\n\nfor (const row of values) {\n  const category = row[categoryIdx];\n  const status = row[statusIdx];\n  const count = parseInt(row[countIdx]) || 0;\n  \n  total += count;\n  \n  // Freshness category\n  if (category === 'fresh') fresh += count;\n  else if (category === 'aging') aging += count;\n  else if (category === 'stale') stale += count;\n  else unknown += count;\n  \n  // Status tracking\n  if (status && statusCounts[status] !== undefined) {\n    statusCounts[status] += count;\n  }\n}\n\n// Calculate percentages\nconst freshPct = total > 0 ? (fresh / total * 100).toFixed(2) : 0;\nconst agingPct = total > 0 ? (aging / total * 100).toFixed(2) : 0;\nconst stalePct = total > 0 ? (stale / total * 100).toFixed(2) : 0;\n\ncontext.metrics.freshness = {\n  fresh: fresh,\n  aging: aging,\n  stale: stale,\n  unknown: unknown,\n  total: total,\n  fresh_pct: parseFloat(freshPct),\n  aging_pct: parseFloat(agingPct),\n  stale_pct: parseFloat(stalePct),\n  status_distribution: statusCounts\n};\n\nreturn [{ json: context }];"
+      },
+      "id": "b3048d23-6e01-4f38-8f46-594ce012e004",
+      "name": "Process Freshness Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        -240
+      ],
+      "notes": "Parse Neo4j response and calculate freshness percentages"
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/change_detection_queue?select=queue_status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "count=exact"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "e86be991-dd3a-43cf-ba19-4cb9d03304d8",
+      "name": "Supabase: Change Detection Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -592,
+        -240
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Fetch change_detection_queue entries for status counting"
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/refabrication_queue?select=queue_status,priority,pipeline_duration_seconds,completed_at,started_at",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "count=exact"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "f6982d1d-d327-4120-b489-8caa930d54eb",
+      "name": "Supabase: Refabrication Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -592,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Fetch refabrication_queue entries for status and pipeline metrics"
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $('Process Freshness Metrics').first().json;\n\n// Get results from both queue queries (using named node references)\nlet changeQueueRaw, refabQueueRaw;\n\ntry {\n  changeQueueRaw = $('Supabase: Change Detection Queue').first().json;\n} catch (e) {\n  changeQueueRaw = [];\n}\n\ntry {\n  refabQueueRaw = $('Supabase: Refabrication Queue').first().json;\n} catch (e) {\n  refabQueueRaw = [];\n}\n\n// Handle array responses from Supabase\nconst changeQueue = Array.isArray(changeQueueRaw) ? changeQueueRaw : (changeQueueRaw ? [changeQueueRaw] : []);\nconst refabQueue = Array.isArray(refabQueueRaw) ? refabQueueRaw : (refabQueueRaw ? [refabQueueRaw] : []);\n\n// Count change detection queue statuses\nconst changeStatusCounts = {\n  pending: 0,\n  classified: 0,\n  routed: 0,\n  other: 0\n};\n\nfor (const entry of changeQueue) {\n  if (!entry || !entry.queue_status) continue;\n  const status = entry.queue_status;\n  if (status === 'pending' || status === 'pending_classification') {\n    changeStatusCounts.pending++;\n  } else if (status === 'classified') {\n    changeStatusCounts.classified++;\n  } else if (status === 'routed') {\n    changeStatusCounts.routed++;\n  } else {\n    changeStatusCounts.other++;\n  }\n}\n\n// Count refabrication queue statuses and calculate pipeline metrics\nconst refabStatusCounts = {\n  pending_refabrication: 0,\n  in_progress: 0,\n  completed: 0,\n  failed: 0,\n  abandoned: 0\n};\n\nlet totalDuration = 0;\nlet durationCount = 0;\nlet completedCount = 0;\nlet failedCount = 0;\n\nfor (const entry of refabQueue) {\n  if (!entry || !entry.queue_status) continue;\n  const status = entry.queue_status;\n  \n  if (refabStatusCounts[status] !== undefined) {\n    refabStatusCounts[status]++;\n  }\n  \n  if (status === 'completed') {\n    completedCount++;\n    if (entry.pipeline_duration_seconds) {\n      totalDuration += entry.pipeline_duration_seconds;\n      durationCount++;\n    }\n  } else if (status === 'failed' || status === 'abandoned') {\n    failedCount++;\n  }\n}\n\n// Calculate pipeline health metrics\nconst totalProcessed = completedCount + failedCount;\nconst successRate = totalProcessed > 0 ? (completedCount / totalProcessed * 100).toFixed(2) : 100;\nconst avgDuration = durationCount > 0 ? (totalDuration / durationCount).toFixed(2) : 0;\n\ncontext.metrics.queue_depth = {\n  change_detection: {\n    pending: changeStatusCounts.pending,\n    classified: changeStatusCounts.classified,\n    routed: changeStatusCounts.routed,\n    total: changeQueue.length\n  },\n  refabrication: {\n    pending: refabStatusCounts.pending_refabrication,\n    in_progress: refabStatusCounts.in_progress,\n    completed: refabStatusCounts.completed,\n    failed: refabStatusCounts.failed,\n    abandoned: refabStatusCounts.abandoned,\n    total: refabQueue.length\n  }\n};\n\ncontext.metrics.pipeline_health = {\n  success_rate: parseFloat(successRate),\n  avg_duration_seconds: parseFloat(avgDuration),\n  completed_24h: completedCount,\n  failed_24h: failedCount\n};\n\nreturn [{ json: context }];"
+      },
+      "id": "c0cbf015-56db-4c86-ad39-bf18279042f9",
+      "name": "Process Queue Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -384,
+        -64
+      ],
+      "notes": "Aggregate queue depths and pipeline health from Supabase data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $('Process Queue Metrics').first().json;\nconst now = new Date().toISOString();\n\n// Define alert thresholds\nconst thresholds = {\n  stale_pct: { warning: 15, critical: 20 },\n  fresh_pct: { warning: 75, critical: 70 },\n  change_detection_pending: { warning: 200, critical: 500 },\n  refabrication_pending: { warning: 100, critical: 200 },\n  success_rate: { warning: 92, critical: 90 }\n};\n\nconst alerts = [];\nconst metrics = context.metrics;\n\n// Check freshness thresholds\nif (metrics.freshness) {\n  const stalePct = metrics.freshness.stale_pct;\n  const freshPct = metrics.freshness.fresh_pct;\n  \n  if (stalePct > thresholds.stale_pct.critical) {\n    alerts.push({\n      alert_type: 'threshold_breach',\n      severity: 'critical',\n      metric: 'stale_percentage',\n      current_value: stalePct,\n      threshold: thresholds.stale_pct.critical,\n      message: `CRITICAL: Stale assets exceed ${thresholds.stale_pct.critical}% threshold (${stalePct}%)`,\n      recommended_action: 'Immediate review of GOVERN-1 scan coverage required',\n      instance_id: context.instance_id,\n      fired_at: now\n    });\n  } else if (stalePct > thresholds.stale_pct.warning) {\n    alerts.push({\n      alert_type: 'threshold_breach',\n      severity: 'warning',\n      metric: 'stale_percentage',\n      current_value: stalePct,\n      threshold: thresholds.stale_pct.warning,\n      message: `WARNING: Stale assets approaching critical (${stalePct}%)`,\n      recommended_action: 'Review GOVERN-1 scan schedule',\n      instance_id: context.instance_id,\n      fired_at: now\n    });\n  }\n  \n  if (freshPct < thresholds.fresh_pct.critical) {\n    alerts.push({\n      alert_type: 'threshold_breach',\n      severity: 'critical',\n      metric: 'fresh_percentage',\n      current_value: freshPct,\n      threshold: thresholds.fresh_pct.critical,\n      message: `CRITICAL: Fresh assets below ${thresholds.fresh_pct.critical}% (${freshPct}%)`,\n      recommended_action: 'Review data acquisition pipeline health',\n      instance_id: context.instance_id,\n      fired_at: now\n    });\n  }\n}\n\n// Check queue depth thresholds\nif (metrics.queue_depth) {\n  const cdPending = metrics.queue_depth.change_detection?.pending || 0;\n  const refabPending = metrics.queue_depth.refabrication?.pending || 0;\n  \n  if (cdPending > thresholds.change_detection_pending.critical) {\n    alerts.push({\n      alert_type: 'queue_backlog',\n      severity: 'critical',\n      metric: 'change_detection_pending',\n      current_value: cdPending,\n      threshold: thresholds.change_detection_pending.critical,\n      message: `CRITICAL: Change detection queue depth exceeds ${thresholds.change_detection_pending.critical} (${cdPending})`,\n      recommended_action: 'Check GOVERN-2 processing capacity',\n      instance_id: context.instance_id,\n      fired_at: now\n    });\n  } else if (cdPending > thresholds.change_detection_pending.warning) {\n    alerts.push({\n      alert_type: 'queue_backlog',\n      severity: 'warning',\n      metric: 'change_detection_pending',\n      current_value: cdPending,\n      threshold: thresholds.change_detection_pending.warning,\n      message: `WARNING: Change detection queue growing (${cdPending} pending)`,\n      recommended_action: 'Monitor GOVERN-2 processing rate',\n      instance_id: context.instance_id,\n      fired_at: now\n    });\n  }\n  \n  if (refabPending > thresholds.refabrication_pending.critical) {\n    alerts.push({\n      alert_type: 'queue_backlog',\n      severity: 'critical',\n      metric: 'refabrication_pending',\n      current_value: refabPending,\n      threshold: thresholds.refabrication_pending.critical,\n      message: `CRITICAL: Refabrication queue depth exceeds ${thresholds.refabrication_pending.critical} (${refabPending})`,\n      recommended_action: 'Check GOVERN-3 processing capacity and OBJECT-2 availability',\n      instance_id: context.instance_id,\n      fired_at: now\n    });\n  }\n}\n\n// Check pipeline health\nif (metrics.pipeline_health) {\n  const successRate = metrics.pipeline_health.success_rate;\n  \n  if (successRate < thresholds.success_rate.critical) {\n    alerts.push({\n      alert_type: 'pipeline_degradation',\n      severity: 'critical',\n      metric: 'refab_success_rate',\n      current_value: successRate,\n      threshold: thresholds.success_rate.critical,\n      message: `CRITICAL: Re-fabrication success rate below ${thresholds.success_rate.critical}% (${successRate}%)`,\n      recommended_action: 'Review GOVERN-3 failure logs immediately',\n      instance_id: context.instance_id,\n      fired_at: now\n    });\n  }\n}\n\n// Determine overall health status\nlet overallStatus = 'healthy';\nif (alerts.some(a => a.severity === 'critical')) {\n  overallStatus = 'critical';\n} else if (alerts.some(a => a.severity === 'warning')) {\n  overallStatus = 'degraded';\n}\n\ncontext.overall_status = overallStatus;\ncontext.alerts = alerts;\ncontext.alert_count = alerts.length;\ncontext.collection_completed_at = now;\n\nreturn [{ json: context }];"
+      },
+      "id": "a82f5daf-8e58-4035-bee2-29b288988c5e",
+      "name": "Evaluate Alert Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -64
+      ],
+      "notes": "Compare metrics against thresholds and generate alerts"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/governance_metrics",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  {\n    \"metric_type\": \"freshness_distribution\",\n    \"instance_id\": \"{{ $json.instance_id }}\",\n    \"entity_type\": \"researcher\",\n    \"timestamp\": \"{{ $json.collection_completed_at }}\",\n    \"values\": {{ JSON.stringify($json.metrics.freshness) }}\n  },\n  {\n    \"metric_type\": \"queue_depth\",\n    \"instance_id\": \"{{ $json.instance_id }}\",\n    \"timestamp\": \"{{ $json.collection_completed_at }}\",\n    \"values\": {{ JSON.stringify($json.metrics.queue_depth) }}\n  },\n  {\n    \"metric_type\": \"pipeline_health\",\n    \"instance_id\": \"{{ $json.instance_id }}\",\n    \"timestamp\": \"{{ $json.collection_completed_at }}\",\n    \"values\": {{ JSON.stringify($json.metrics.pipeline_health) }}\n  }\n]",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "06968f4e-fb51-46f6-ae9a-3418e71b2b7f",
+      "name": "Store Metrics to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        64,
+        -160
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Insert metrics into governance_metrics time-series table"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-alerts",
+              "leftValue": "={{ $json.alert_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "450050dd-fca5-4a66-9653-dfb2d5cbe21f",
+      "name": "Has Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        48,
+        112
+      ],
+      "notes": "Check if any alerts were generated"
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $('Evaluate Alert Thresholds').first().json;\nconst alerts = context.alerts || [];\n\n// Transform alerts for Supabase insert\nconst alertRecords = alerts.map(alert => ({\n  alert_type: alert.alert_type,\n  severity: alert.severity,\n  metric: alert.metric,\n  current_value: alert.current_value,\n  threshold: alert.threshold,\n  message: alert.message,\n  recommended_action: alert.recommended_action,\n  instance_id: alert.instance_id,\n  first_fired_at: alert.fired_at,\n  last_fired_at: alert.fired_at\n}));\n\nreturn alertRecords.map(record => ({ json: record }));"
+      },
+      "id": "1446034b-2c23-475b-ad5f-4a2f3c12ffc6",
+      "name": "Prepare Alert Records",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -16
+      ],
+      "notes": "Transform alerts for database insertion"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/alert_history",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "f7f3fd7b-8e2d-470c-b542-3bce2d3d8370",
+      "name": "Store Alerts to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        512,
+        -16
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Insert or update alerts with deduplication"
+    },
+    {
+      "parameters": {
+        "jsCode": "// No alerts to process\nreturn [{ json: { message: 'No alerts generated - system healthy', alerts_processed: 0 } }];"
+      },
+      "id": "2581e8b7-bc1d-4de8-80d0-10968ac755d9",
+      "name": "No Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        128
+      ],
+      "notes": "Handle case when no alerts were generated"
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $('Evaluate Alert Thresholds').first().json;\nconst storeResult = $('Store Metrics to Supabase').first().json;\n\nconst summary = {\n  execution_completed_at: new Date().toISOString(),\n  overall_status: context.overall_status,\n  metrics_stored: true,\n  alerts_generated: context.alert_count,\n  freshness_summary: {\n    fresh_pct: context.metrics.freshness?.fresh_pct || 0,\n    stale_pct: context.metrics.freshness?.stale_pct || 0,\n    total_assets: context.metrics.freshness?.total || 0\n  },\n  queue_summary: {\n    change_detection_pending: context.metrics.queue_depth?.change_detection?.pending || 0,\n    refabrication_pending: context.metrics.queue_depth?.refabrication?.pending || 0\n  },\n  pipeline_summary: {\n    success_rate: context.metrics.pipeline_health?.success_rate || 100,\n    avg_duration: context.metrics.pipeline_health?.avg_duration_seconds || 0\n  }\n};\n\nreturn [{ json: summary }];"
+      },
+      "id": "9fe32cd7-9f80-4c82-8ec7-a02e6d144975",
+      "name": "Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        -160
+      ],
+      "notes": "Compile execution summary"
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/governance_metrics?order=timestamp.desc&limit=10",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "count=exact"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "7c8d65d8-8558-440f-b353-c028875993ae",
+      "name": "Fetch Latest Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1264,
+        32
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Fetch latest governance metrics for dashboard"
+    },
+    {
+      "parameters": {
+        "jsCode": "const metricsRaw = $input.all().map(item => item.json);\nconst metrics = Array.isArray(metricsRaw[0]) ? metricsRaw[0] : metricsRaw;\n\n// Group metrics by type and get latest of each\nconst latestByType = {};\nfor (const metric of metrics) {\n  if (!metric || !metric.metric_type) continue;\n  const type = metric.metric_type;\n  if (!latestByType[type] || new Date(metric.timestamp) > new Date(latestByType[type].timestamp)) {\n    latestByType[type] = metric;\n  }\n}\n\n// Build dashboard response\nconst freshness = latestByType['freshness_distribution']?.values || {};\nconst queues = latestByType['queue_depth']?.values || {};\nconst pipeline = latestByType['pipeline_health']?.values || {};\n\n// Determine overall status\nlet overallStatus = 'healthy';\nconst stalePct = freshness.stale_pct || 0;\nconst cdPending = queues.change_detection?.pending || 0;\nconst successRate = pipeline.success_rate || 100;\n\nif (stalePct > 20 || cdPending > 500 || successRate < 90) {\n  overallStatus = 'critical';\n} else if (stalePct > 15 || cdPending > 200 || successRate < 92) {\n  overallStatus = 'degraded';\n}\n\nconst response = {\n  registry_health: {\n    overall_status: overallStatus,\n    freshness: {\n      fresh_pct: freshness.fresh_pct || 0,\n      aging_pct: freshness.aging_pct || 0,\n      stale_pct: stalePct,\n      total_assets: freshness.total || 0,\n      target_fresh_pct: 80.0\n    },\n    queues: {\n      change_detection: queues.change_detection || { pending: 0, total: 0 },\n      refabrication: queues.refabrication || { pending: 0, total: 0 }\n    },\n    pipeline: {\n      success_rate: successRate,\n      avg_duration_seconds: pipeline.avg_duration_seconds || 0\n    },\n    last_updated: latestByType['freshness_distribution']?.timestamp || new Date().toISOString()\n  }\n};\n\nreturn [{ json: response }];"
+      },
+      "id": "83010cb2-35da-43c7-b058-1da96c0badc6",
+      "name": "Build Health Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        32
+      ],
+      "notes": "Aggregate latest metrics into dashboard response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "0e325a41-ec85-464e-8597-395fbf061039",
+      "name": "Respond: Health",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -816,
+        32
+      ],
+      "notes": "Return health dashboard response"
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/alert_history?resolved_at=is.null&order=last_fired_at.desc",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "e089522a-3b1a-427a-9f12-41569961f182",
+      "name": "Fetch Active Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1264,
+        224
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Fetch unresolved alerts from alert_history"
+    },
+    {
+      "parameters": {
+        "jsCode": "const alertsRaw = $input.all().map(item => item.json);\nconst alerts = Array.isArray(alertsRaw[0]) ? alertsRaw[0] : alertsRaw;\n\n// Filter out any null/undefined entries\nconst validAlerts = alerts.filter(a => a && a.alert_type);\n\nconst response = {\n  alerts: validAlerts.map(alert => ({\n    id: alert.id,\n    alert_type: alert.alert_type,\n    severity: alert.severity,\n    metric: alert.metric,\n    current_value: alert.current_value,\n    threshold: alert.threshold,\n    message: alert.message,\n    recommended_action: alert.recommended_action,\n    occurrence_count: alert.occurrence_count || 1,\n    first_fired_at: alert.first_fired_at,\n    last_fired_at: alert.last_fired_at\n  })),\n  total_active: validAlerts.length,\n  retrieved_at: new Date().toISOString()\n};\n\nreturn [{ json: response }];"
+      },
+      "id": "c8a82ebc-fb5f-4f32-9ccf-92699c9e66ce",
+      "name": "Build Alerts Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        224
+      ],
+      "notes": "Format active alerts for API response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "79f37b70-2e84-437f-9500-fe8bb76c5d0e",
+      "name": "Respond: Alerts",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -816,
+        224
+      ],
+      "notes": "Return active alerts response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"statement\": \"MATCH (f:FATObject) WHERE f.status IN ['active', 'fabricated'] WITH CASE WHEN f.source_freshness_score >= 0.75 THEN 'fresh' WHEN f.source_freshness_score >= 0.5 THEN 'aging' WHEN f.source_freshness_score IS NOT NULL THEN 'stale' ELSE 'unknown' END AS category, f.status AS status RETURN category, status, COUNT(*) AS count\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1040,
+        -240
+      ],
+      "id": "80013605-adc7-4d56-ab33-b9092a3432e2",
+      "name": "Neo4j: Freshness Distribution",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Hourly Metrics Trigger": {
+      "main": [
+        [
+          {
+            "node": "Initialize Collection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Collection": {
+      "main": [
+        [
+          {
+            "node": "Neo4j: Freshness Distribution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Freshness Metrics": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Change Detection Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Change Detection Queue": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Refabrication Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Refabrication Queue": {
+      "main": [
+        [
+          {
+            "node": "Process Queue Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Queue Metrics": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Alert Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Alert Thresholds": {
+      "main": [
+        [
+          {
+            "node": "Store Metrics to Supabase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Metrics to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert Records",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert Records": {
+      "main": [
+        [
+          {
+            "node": "Store Alerts to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: /health": {
+      "main": [
+        [
+          {
+            "node": "Fetch Latest Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Latest Metrics": {
+      "main": [
+        [
+          {
+            "node": "Build Health Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Health Response": {
+      "main": [
+        [
+          {
+            "node": "Respond: Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: /alerts": {
+      "main": [
+        [
+          {
+            "node": "Fetch Active Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Active Alerts": {
+      "main": [
+        [
+          {
+            "node": "Build Alerts Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alerts Response": {
+      "main": [
+        [
+          {
+            "node": "Respond: Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Neo4j: Freshness Distribution": {
+      "main": [
+        [
+          {
+            "node": "Process Freshness Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f839326c-fb3f-45f2-9168-4589c653e03a",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "VtG0gOnxUIhzm7Jf",
+  "tags": []
+}

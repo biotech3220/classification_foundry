@@ -1,0 +1,1349 @@
+{
+  "name": "OBJECT-3_v3.6.2_Gen4 Workflow (Classification, Assessment & Constraints)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -672,
+        0
+      ],
+      "id": "c5f7a9b0-c0c2-43e2-9ef0-0a486362b6b1",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        0
+      ],
+      "id": "fcd56201-8e40-457a-99e0-dc8303df7394",
+      "name": "Fetch FATObjects",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Neo4j response and prepare for Qdrant embedding fetch\nconst response = $input.first().json;\n\nconst fields = response.data.fields;\nconst values = response.data.values;\n\nconst results = [];\n\nfor (const row of values) {\n  // Map fields to values\n  const obj = {};\n  fields.forEach((field, idx) => {\n    obj[field] = row[idx];\n  });\n  \n  // Parse dense_view from JSON string\n  let denseViewParsed = {};\n  if (typeof obj.dense_view === 'string') {\n    try {\n      denseViewParsed = JSON.parse(obj.dense_view);\n    } catch (e) {\n      denseViewParsed = {};\n    }\n  }\n  \n  // Create text version for LLM prompts\n  const dv = denseViewParsed;\n  const denseViewText = `\nResearcher: ${dv.name || obj.name}\nInstitution: ${dv.institution || obj.institution}\nORCID: ${dv.orcid || obj.orcid}\nCareer Stage: ${dv.career_stage || 'unknown'}\nResearch Impact: ${dv.research_impact || 'unknown'}\n\nResearch Domains: ${(dv.research_domains || []).join(', ')}\n\nCore Methodologies: ${(dv.core_methodologies || []).join(', ')}\n\nResearch Themes: ${(dv.research_themes || []).join(', ')}\n\nMetrics:\n- H-index: ${dv.h_index || 0}\n- Total Citations: ${dv.total_citations || 0}\n- Publications: ${dv.publication_count || 0}\n- Patents: ${dv.patent_count || 0}\n\nCollaboration: ${dv.collaboration_breadth || 'unknown'} network with ${dv.collaborator_count || 0} collaborators\n`.trim();\n\n  // Build Qdrant scroll request to fetch embedding vector\n  const qdrantScrollRequest = {\n    filter: {\n      must: [\n        {\n          key: \"asset_id\",\n          match: {\n            value: obj.asset_id\n          }\n        }\n      ]\n    },\n    limit: 1,\n    with_payload: true,\n    with_vector: true\n  };\n\n  results.push({\n    json: {\n      asset_id: obj.asset_id,\n      name: obj.name,\n      orcid: obj.orcid,\n      institution: obj.institution,\n      data_completeness: obj.data_completeness,\n      status: obj.status,\n      version: obj.version,\n      fabricated_at: obj.fabricated_at,\n      dense_view_parsed: denseViewParsed,\n      dense_view_text: denseViewText,\n      qdrant_scroll_request: qdrantScrollRequest\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        0
+      ],
+      "id": "7473f4e2-a912-4867-99f3-4cb1cb60c66c",
+      "name": "Parse Neo4j Response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"filter\": { \"must\": [ { \"key\": \"asset_id\", \"match\": { \"value\": $json.asset_id } } ] }, \"limit\": 1, \"with_payload\": true, \"with_vector\": true } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "26d58873-ccef-47a1-bb38-d662918c32b0",
+      "name": "Fetch Embedding Vector",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        832,
+        0
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node 1f: Merge Embedding\n// Purpose: Extract FATObject data and embedding vector from Qdrant response\n// The Qdrant payload contains all the researcher data we need\n\nconst qdrantResponse = $input.first().json;\n\n// Handle the response structure - it's wrapped in an array from the HTTP Request\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\n\n// Extract points from Qdrant response\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  throw new Error('No points found in Qdrant response');\n}\n\nconst point = points[0];\nconst embeddingVector = point.vector;\nconst payload = point.payload;\n\nif (!embeddingVector || !Array.isArray(embeddingVector)) {\n  throw new Error('Vector not returned or invalid format');\n}\n\nif (!payload || !payload.asset_id) {\n  throw new Error('Payload missing or invalid');\n}\n\nreturn [{\n  json: {\n    // Core identifiers\n    asset_id: payload.asset_id,\n    qdrant_point_id: point.id,\n    \n    // Researcher info from payload\n    name: payload.name,\n    orcid: payload.orcid,\n    institution: payload.institution,\n    \n    // Research profile data from payload\n    research_domains: payload.research_domains || [],\n    methodologies: payload.methodologies || [],\n    research_themes: payload.research_themes || [],\n    \n    // Metrics from payload\n    h_index: payload.h_index,\n    total_citations: payload.total_citations,\n    publication_count: payload.publication_count,\n    patent_count: payload.patent_count,\n    career_stage: payload.career_stage,\n    research_impact: payload.research_impact,\n    \n    // The embedding vector (3072 dimensions)\n    embedding_vector: embeddingVector,\n    embedding_dimensions: embeddingVector.length,\n    \n    // Metadata\n    data_completeness: payload.data_completeness,\n    status: payload.status,\n    fabricated_at: payload.fabricated_at\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "d627de2c-aaf9-4caf-9153-59ae1d16355e",
+      "name": "Merge Embedding"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cypherPayload = {\n  statement: `\n    MATCH (fat:FATObject)\n    WHERE fat.asset_id = 'fat:researcher:colin_barrow'\n      AND fat.status = 'fabricated'\n    RETURN \n        fat.asset_id AS asset_id,\n        fat.name AS name,\n        fat.orcid AS orcid,\n        fat.institution AS institution,\n        fat.dense_view AS dense_view,\n        fat.data_completeness AS data_completeness,\n        fat.status AS status,\n        fat.version AS version,\n        fat.fabricated_at AS fabricated_at\n  `,\n  parameters: {}\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        1504
+      ],
+      "id": "e9379e84-6e07-4582-873e-704be96be897",
+      "name": "Prepare Fetch FATObjects(Colin)"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_prompt }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Assign 3-10 codes that comprehensively represent the researcher's expertise. Adjust count based on career complexity: - Early-career/narrow focus: 3-5 codes - Mid-career/multi-domain: 5-7 codes   - Senior/interdisciplinary: 7-10 codes Only assign codes where you have high confidence (0.70+)"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1616,
+        288
+      ],
+      "id": "bf97a95f-171f-45ef-8059-4d357a0682c0",
+      "name": "Pass 2: LLM Enrichment"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Dual-Standard LLM Response\n// Extracts BOTH Standard A (ANZSRC) and Standard B (OECD FOS) classifications\n\nconst llmResponse = $input.first().json;\n\n// Only fetch the fields we actually need downstream\nconst promptData = $('Prepare Dual-Standard LLM Prompt').first().json;\n\n// Extract content from LLM response\nlet content;\n\nif (llmResponse.choices?.[0]?.message?.content) {\n  content = llmResponse.choices[0].message.content;\n} else if (llmResponse.text) {\n  content = llmResponse.text;\n} else if (llmResponse.output) {\n  content = llmResponse.output;\n} else if (Array.isArray(llmResponse) && llmResponse[0]?.text) {\n  content = llmResponse[0].text;\n} else {\n  throw new Error(`Unexpected LLM response structure: ${JSON.stringify(llmResponse).slice(0, 200)}`);\n}\n\nif (!content) {\n  throw new Error('No content in LLM response');\n}\n\n// Parse JSON from response\nlet parsed;\ntry {\n  let cleanContent = content.trim();\n  if (cleanContent.startsWith('```json')) {\n    cleanContent = cleanContent.slice(7);\n  } else if (cleanContent.startsWith('```')) {\n    cleanContent = cleanContent.slice(3);\n  }\n  if (cleanContent.endsWith('```')) {\n    cleanContent = cleanContent.slice(0, -3);\n  }\n  \n  parsed = JSON.parse(cleanContent.trim());\n} catch (e) {\n  throw new Error(`Failed to parse LLM response as JSON: ${e.message}\\nContent: ${content.slice(0, 500)}`);\n}\n\n// Validate structure\nif (!parsed.standard_a?.classifications) {\n  throw new Error('LLM response missing standard_a.classifications');\n}\n\nconst CONFIDENCE_THRESHOLD = 0.70;\n\n// Process Standard A (ANZSRC)\nconst standardAClassifications = (parsed.standard_a.classifications || [])\n  .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n  .map(c => ({\n    code: String(c.code),\n    name: c.name || 'Unknown',\n    confidence: Math.min(1.0, Math.max(0.0, c.confidence)),\n    justification: c.justification || '',\n    evidence: c.evidence || []\n  }))\n  .sort((a, b) => b.confidence - a.confidence);\n\n// Process Standard B (OECD FOS)\nconst standardBClassifications = (parsed.standard_b?.classifications || [])\n  .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n  .map(c => ({\n    code: String(c.code),\n    name: c.name || 'Unknown',\n    confidence: Math.min(1.0, Math.max(0.0, c.confidence)),\n    justification: c.justification || ''\n  }))\n  .sort((a, b) => b.confidence - a.confidence);\n\nconsole.log(`✅ Standard A: ${standardAClassifications.length} codes`);\nconsole.log(`✅ Standard B: ${standardBClassifications.length} codes`);\n\nreturn [{\n  json: {\n    // Core identifiers (needed for storage)\n    asset_id: promptData.asset_id,\n    name: promptData.name,\n    orcid: promptData.orcid,\n    institution: promptData.institution,\n    qdrant_point_id: promptData.qdrant_point_id,\n    \n    // Standard A classifications\n    classifications: standardAClassifications,\n    classification_count: standardAClassifications.length,\n    \n    // Standard B classifications\n    standard_b_classifications: standardBClassifications,\n    standard_b_count: standardBClassifications.length,\n    \n    // Reasoning\n    reasoning: parsed.reasoning || '',\n    \n    // LLM metadata\n    model: llmResponse.model || 'openai/gpt-4o'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        624
+      ],
+      "id": "9516d93a-5487-4fab-8adb-6a4093174aaf",
+      "name": "Parse LLM Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate Final Confidence\n// Gen 4: Includes CRE blocking constraint handling\n\nconst inputData = $input.first().json;\n\nconst classifications = inputData.classifications || [];\nconst cf1Penalty = inputData.cf1_assessment?.penalty || 0.0;  // ANZSRC hierarchy penalty\nconst crosswalkModifier = inputData.crosswalk_assessment?.modifier || 0.0;\nconst creAssessment = inputData.cre_assessment || {};\n\n// ============================================================\n// GEN 4: CHECK FOR BLOCKING CONSTRAINT FAILURES\n// ============================================================\nif (creAssessment.blocking_failures?.length > 0) {\n  console.log(`🚫 BLOCKED by CRE constraints: ${creAssessment.blocking_failures.join(', ')}`);\n  \n  return [{\n    json: {\n      ...inputData,\n      final_confidence: 0.0,\n      classification_failed: true,\n      classification_blocked: true,\n      failure_reason: `Blocked by CRE constraints: ${creAssessment.blocking_failures.join(', ')}`,\n      blocking_constraints: creAssessment.blocking_failures\n    }\n  }];\n}\n\n// Check if we have any classifications\nif (classifications.length === 0) {\n  return [{\n    json: {\n      ...inputData,\n      final_confidence: 0.0,\n      classification_failed: true,\n      failure_reason: 'No valid classifications after assessment'\n    }\n  }];\n}\n\n// ============================================================\n// CALCULATE CONFIDENCE WITH ALL MODIFIERS\n// ============================================================\nconst crePenalty = creAssessment.cre_penalty || 0.0;\n\n// Apply ALL penalties/modifiers to each classification\nconst adjustedClassifications = classifications.map(c => {\n  const totalAdjustment = -cf1Penalty + crosswalkModifier - crePenalty;\n  const adjustedConfidence = Math.max(0.0, Math.min(1.0, c.confidence + totalAdjustment));\n  \n  return {\n    ...c,\n    base_confidence: c.confidence,\n    cf1_adjustment: -cf1Penalty,\n    crosswalk_adjustment: crosswalkModifier,\n    cre_adjustment: -crePenalty,\n    adjusted_confidence: Math.round(adjustedConfidence * 10000) / 10000\n  };\n});\n\n// Calculate final confidence (mean of adjusted confidences)\nconst confidences = adjustedClassifications.map(c => c.adjusted_confidence);\nconst finalConfidence = Math.round((confidences.reduce((a, b) => a + b, 0) / confidences.length) * 10000) / 10000;\n\n// Determine routing threshold\nconst FAIL_THRESHOLD = 0.60;\nconst classificationFailed = finalConfidence < FAIL_THRESHOLD;\nconst failureReason = classificationFailed \n  ? `Final confidence ${finalConfidence.toFixed(2)} below threshold ${FAIL_THRESHOLD}`\n  : null;\n\n// Log summary\nconsole.log(`✅ Confidence Calculation:`);\nconsole.log(`   Base mean: ${(classifications.reduce((a, c) => a + c.confidence, 0) / classifications.length).toFixed(3)}`);\nconsole.log(`   ANZSRC hierarchy penalty: ${cf1Penalty > 0 ? '-' : ''}${(cf1Penalty * 100).toFixed(0)}%`);\nconsole.log(`   Crosswalk modifier: ${crosswalkModifier >= 0 ? '+' : ''}${(crosswalkModifier * 100).toFixed(0)}%`);\nconsole.log(`   CRE penalty: ${crePenalty > 0 ? '-' : ''}${(crePenalty * 100).toFixed(0)}%`);\nconsole.log(`   Final confidence: ${finalConfidence.toFixed(3)}`);\n\nreturn [{\n  json: {\n    // Core data\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    reasoning: inputData.reasoning,\n    model: inputData.model,\n    \n    // Assessment results (pass through)\n    cf1_assessment: inputData.cf1_assessment,\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    cre_assessment: inputData.cre_assessment,  // NEW: CRE results\n    \n    // Standard A classifications with adjustments\n    classifications: adjustedClassifications,\n    classification_count: adjustedClassifications.length,\n    \n    // Standard B classifications (pass through unchanged)\n    standard_b_classifications: inputData.standard_b_classifications,\n    standard_b_count: inputData.standard_b_count,\n    \n    // Final confidence calculation\n    final_confidence: finalConfidence,\n    confidence_breakdown: {\n      base_mean: Math.round((classifications.reduce((a, c) => a + c.confidence, 0) / classifications.length) * 10000) / 10000,\n      cf1_penalty: cf1Penalty,\n      crosswalk_modifier: crosswalkModifier,\n      cre_penalty: crePenalty,  // NEW\n      net_adjustment: Math.round((-cf1Penalty + crosswalkModifier - crePenalty) * 10000) / 10000\n    },\n    \n    // Routing signals\n    classification_failed: classificationFailed,\n    classification_blocked: false,\n    failure_reason: failureReason,\n    \n    // Timestamp\n    classified_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        624
+      ],
+      "id": "6ea5ccef-8848-49f8-aaba-300eb4f1d87c",
+      "name": "Calculate Final Confidence"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j Write Query - Dual Standard + CRE Assessment\n// Gen 4: Persists ACTUAL CRE assessment to FATObject node\n\nconst inputData = $input.first().json;\n\n// Handle classification failure\nif (inputData.classification_failed) {\n  const failedCypherPayload = {\n    statement: `\n      MATCH (obj:FATObject {asset_id: $asset_id})\n      SET obj.status = 'classification_failed',\n          obj.classification_failed_at = datetime(),\n          obj.classification_failed_reason = $failure_reason\n      RETURN obj.asset_id AS asset_id, obj.status AS status\n    `,\n    parameters: {\n      asset_id: inputData.asset_id,\n      failure_reason: inputData.failure_reason\n    }\n  };\n  \n  return [{\n    json: {\n      ...inputData,\n      neo4j_payload: failedCypherPayload,\n      is_failure_update: true\n    }\n  }];\n}\n\n// Deduplicate Standard A classifications\nconst seenCodesA = new Set();\nconst uniqueClassificationsA = [];\n\nfor (const c of inputData.classifications) {\n  const codeStr = String(c.code);\n  if (!seenCodesA.has(codeStr)) {\n    seenCodesA.add(codeStr);\n    uniqueClassificationsA.push({\n      code: parseInt(c.code, 10),\n      name: c.name,\n      confidence: c.adjusted_confidence,\n      justification: c.justification,\n      evidence: c.evidence || [],\n      cf1_validated: c.cf1_validated || false\n    });\n  }\n}\n\n// Prepare Standard B classifications\nconst standardBClassifications = (inputData.standard_b_classifications || []).map(c => ({\n  code: String(c.code),\n  name: c.name,\n  confidence: c.confidence,\n  justification: c.justification || ''\n}));\n\n// ============================================================\n// FIX: Get CRE Assessment directly from node by name\n// ============================================================\nconst existingCre = $('Merge CRE Output').first().json.cre_assessment || {};\nconst cf1Assessment = inputData.cf1_assessment || {};\nconst crosswalk = inputData.crosswalk_assessment || {};\n\nconst cf1Result = existingCre.cf1_result || {};\nconst cf5Result = existingCre.cf5_result || {};\n\nconst creAssessment = {\n  cf1_trl: {\n    passed: cf1Result.passed !== false,\n    gate_mode: cf1Result.gate_mode || 'block',\n    inferred_level: cf1Result.inferred_level || null,\n    required_level: cf1Result.required_level || null,\n    confidence: cf1Result.confidence || null,\n    evidence: cf1Result.evidence || [],\n    message: cf1Result.message || ''\n  },\n  cf5_regulatory: {\n    passed: cf5Result.passed !== false,\n    gate_mode: cf5Result.gate_mode || 'block',\n    warnings: cf5Result.warnings || [],\n    checked_domains: cf5Result.checked_domains || [],\n    message: cf5Result.message || ''\n  },\n  anzsrc_hierarchy: {\n    passed: cf1Assessment.passed !== false,\n    violations: cf1Assessment.violations || [],\n    flags: cf1Assessment.flags || [],\n    penalty: cf1Assessment.penalty || 0\n  },\n  crosswalk_assessment: {\n    alignment_score: crosswalk.alignment_score || null,\n    alignment_status: crosswalk.alignment_status || 'unknown',\n    modifier: crosswalk.modifier || 0\n  },\n  blocking_failures: existingCre.blocking_failures || [],\n  penalising_failures: existingCre.penalising_failures || [],\n  requires_hitl: existingCre.requires_hitl || false,\n  cre_penalty: existingCre.cre_penalty || 0,\n  assessed_at: new Date().toISOString(),\n  cre_version: 'Gen4'\n};\n\n// Build Cypher query\nconst cypherPayload = {\n  statement: `\n    MATCH (obj:FATObject {asset_id: $asset_id})\n    SET obj.status = 'classified',\n        obj.classified_at = datetime(),\n        obj.classified_by = $agent_id,\n        obj.final_confidence = $final_confidence,\n        obj.cre_assessment = $cre_assessment\n    \n    WITH obj\n    \n    UNWIND $classifications_a AS cls\n    MATCH (std_a:Standard:FoR {code: cls.code})\n    MERGE (obj)-[r_a:CLASSIFIED_AS]->(std_a)\n    ON CREATE SET \n      r_a.confidence = cls.confidence,\n      r_a.justification = cls.justification,\n      r_a.evidence = cls.evidence,\n      r_a.classified_at = datetime(),\n      r_a.classified_by = $agent_id,\n      r_a.model = $model,\n      r_a.standard_type = 'primary',\n      r_a.taxonomy = 'ANZSRC_FoR_2020',\n      r_a.validated = false,\n      r_a.validation_state = 'PENDING',\n      r_a.cf1_validated = cls.cf1_validated\n    ON MATCH SET\n      r_a.confidence = cls.confidence,\n      r_a.justification = cls.justification,\n      r_a.evidence = cls.evidence,\n      r_a.classified_at = datetime(),\n      r_a.classified_by = $agent_id,\n      r_a.model = $model\n    \n    WITH obj, count(r_a) AS anzsrc_count\n    \n    UNWIND $classifications_b AS cls_b\n    MATCH (std_b:Standard:OECD_FOS {code: cls_b.code})\n    MERGE (obj)-[r_b:CLASSIFIED_AS]->(std_b)\n    ON CREATE SET \n      r_b.confidence = cls_b.confidence,\n      r_b.justification = cls_b.justification,\n      r_b.classified_at = datetime(),\n      r_b.classified_by = $agent_id,\n      r_b.model = $model,\n      r_b.standard_type = 'domain_hub',\n      r_b.taxonomy = 'OECD_FOS_2007',\n      r_b.validated = false,\n      r_b.validation_state = 'PENDING'\n    ON MATCH SET\n      r_b.confidence = cls_b.confidence,\n      r_b.justification = cls_b.justification,\n      r_b.classified_at = datetime(),\n      r_b.classified_by = $agent_id,\n      r_b.model = $model\n    \n    RETURN obj.asset_id AS asset_id, \n           obj.status AS status,\n           anzsrc_count AS standard_a_relationships,\n           count(r_b) AS standard_b_relationships\n  `,\n  parameters: {\n    asset_id: inputData.asset_id,\n    agent_id: 'object3_classifier_v3.6.1',\n    model: inputData.model || 'openai/gpt-4o',\n    final_confidence: inputData.final_confidence,\n    classifications_a: uniqueClassificationsA,\n    classifications_b: standardBClassifications,\n    cre_assessment: JSON.stringify(creAssessment)\n  }\n};\n\nconsole.log(`✅ Neo4j write: ${uniqueClassificationsA.length} ANZSRC + ${standardBClassifications.length} FOS`);\nconsole.log(`✅ CRE: TRL=${creAssessment.cf1_trl.inferred_level}, conf=${creAssessment.cf1_trl.confidence}`);\n\nreturn [{\n  json: {\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    classifications: uniqueClassificationsA,\n    classification_count: uniqueClassificationsA.length,\n    standard_b_classifications: standardBClassifications,\n    standard_b_count: standardBClassifications.length,\n    final_confidence: inputData.final_confidence,\n    cf1_assessment: inputData.cf1_assessment,\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    cre_assessment: creAssessment,\n    confidence_breakdown: inputData.confidence_breakdown,\n    reasoning: inputData.reasoning,\n    classified_at: inputData.classified_at,\n    neo4j_payload: cypherPayload,\n    is_failure_update: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        624
+      ],
+      "id": "2dedebcb-d763-4516-a285-5a452e7196b2",
+      "name": "Prepare Neo4j Write Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -896,
+        896
+      ],
+      "id": "6a570b8c-a7d9-4bc4-90a2-a0d69302f5f8",
+      "name": "Write to Neo4j",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/payload",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -368,
+        896
+      ],
+      "id": "87b44d19-6911-4509-ba70-a53109dd44cc",
+      "name": "Update Qdrant",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final Output - Dual Standard Summary\n// Gen 4: References CRE assessment directly from source node\n\nconst inputData = $('Prepare Qdrant Payload').first().json;\nconst neo4jResult = $('Write to Neo4j').first().json;\nconst qdrantResult = $('Update Qdrant').first().json;\nconst postgresResult = $input.first().json;\n\n// Direct reference to CRE assessment from source node\nconst creAssessment = $('Merge CRE Output').first().json.cre_assessment || null;\n\n// Parse Neo4j response for relationship counts\nconst neo4jValues = neo4jResult?.data?.values?.[0] || [];\nconst standardARelationships = neo4jValues[2] || 0;\nconst standardBRelationships = neo4jValues[3] || 0;\n\n// Get crosswalk status\nconst crosswalkStatus = inputData.crosswalk_assessment?.alignment_status \n  || (inputData.crosswalk_assessment?.alignment_score === null \n      ? \"no_crosswalks\" \n      : inputData.crosswalk_assessment?.alignment_score >= 0.50 \n        ? \"aligned\" \n        : inputData.crosswalk_assessment?.alignment_score >= 0.30\n          ? \"acceptable\"\n          : \"misaligned\");\n\nconst output = {\n  // === Classification Result ===\n  asset_id: inputData.asset_id,\n  name: inputData.name,\n  status: \"classified\",\n  \n  // === Standard A Classifications (ANZSRC) ===\n  standard_a: {\n    taxonomy: \"ANZSRC_FoR_2020\",\n    role: \"primary_classification\",\n    classifications: inputData.classifications.map(c => ({\n      code: c.code,\n      name: c.name,\n      confidence: c.adjusted_confidence || c.confidence,\n      justification: c.justification,\n      evidence: c.evidence || []\n    })),\n    count: inputData.classification_count\n  },\n  \n  // === Standard B Classifications (OECD FOS) ===\n  standard_b: {\n    taxonomy: \"OECD_FOS_2007\",\n    role: \"domain_hub\",\n    classifications: (inputData.standard_b_classifications || []).map(c => ({\n      code: c.code,\n      name: c.name,\n      confidence: c.confidence,\n      justification: c.justification\n    })),\n    count: inputData.standard_b_count || 0\n  },\n  \n  // === Confidence & Assessment ===\n  assessment: {\n    final_confidence: inputData.final_confidence,\n    confidence_breakdown: inputData.confidence_breakdown,\n    \n    // ANZSRC Hierarchy Check\n    anzsrc_hierarchy: {\n      passed: inputData.cf1_assessment?.passed || false,\n      violations: inputData.cf1_assessment?.violations?.length || 0,\n      flags: inputData.cf1_assessment?.flags?.length || 0,\n      penalty: inputData.cf1_assessment?.penalty || 0\n    },\n    \n    // Crosswalk Assessment\n    crosswalk: {\n      alignment_score: inputData.crosswalk_assessment?.alignment_score || null,\n      modifier: inputData.crosswalk_assessment?.modifier || 0,\n      mappings_checked: inputData.crosswalk_assessment?.total_mappings_checked || 0,\n      status: crosswalkStatus\n    },\n    \n    // === GEN 4: CRE ASSESSMENT (Direct Reference) ===\n    cre: creAssessment ? {\n      skipped: creAssessment.skipped || false,\n      cf1_trl: creAssessment.cf1_result || null,\n      cf5_regulatory: creAssessment.cf5_result || null,\n      blocking_failures: creAssessment.blocking_failures || [],\n      penalising_failures: creAssessment.penalising_failures || [],\n      cre_penalty: creAssessment.cre_penalty || 0,\n      requires_hitl: creAssessment.requires_hitl || false\n    } : null\n  },\n  \n  // === Reasoning ===\n  reasoning: inputData.reasoning,\n  \n  // === OBJECT-4 Routing Preview ===\n  routing: {\n    recommendation: inputData.final_confidence >= 0.85 \n      ? \"AUTO_APPROVE\" \n      : inputData.final_confidence >= 0.60 \n        ? \"HUMAN_REVIEW\" \n        : \"REJECT\",\n    confidence_threshold: inputData.final_confidence >= 0.85 \n      ? \">=0.85\" \n      : inputData.final_confidence >= 0.60 \n        ? \"0.60-0.85\" \n        : \"<0.60\",\n    requires_validation: inputData.final_confidence < 0.85,\n    blocked_by_cre: creAssessment?.blocking_failures?.length > 0 || false\n  },\n  \n  // === Storage Confirmation ===\n  storage: {\n    neo4j: {\n      status: \"success\",\n      standard_a_relationships: standardARelationships,\n      standard_b_relationships: standardBRelationships,\n      total_relationships: standardARelationships + standardBRelationships\n    },\n    qdrant: {\n      status: qdrantResult?.status || \"ok\",\n      point_id: inputData.qdrant_point_id\n    },\n    postgresql: {\n      status: postgresResult?.id ? \"success\" : \"ok\",\n      job_id: postgresResult?.job_id || null,\n      record_id: postgresResult?.id || null\n    }\n  },\n  \n  // === Metadata ===\n  metadata: {\n    classified_at: inputData.classified_at,\n    classified_by: \"object3_classifier_v3.6.1\",\n    model: inputData.model || \"openai/gpt-4o\",\n    workflow_version: \"OBJECT-3_v3.6.1_Gen4_CRE\"\n  }\n};\n\n// Log summary\nconsole.log(`✅ Classification Complete: ${output.name}`);\nconsole.log(`   CRE CF1 (TRL): ${creAssessment?.cf1_result?.passed ? 'PASSED' : 'N/A'} (Level ${creAssessment?.cf1_result?.inferred_level || 'N/A'})`);\nconsole.log(`   CRE CF5 (Regulatory): ${creAssessment?.cf5_result?.passed ? 'PASSED' : 'N/A'}`);\nconsole.log(`   Final Confidence: ${output.assessment.final_confidence}`);\nconsole.log(`   Routing: ${output.routing.recommendation}`);\n\nreturn [{\n  json: output\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        896
+      ],
+      "id": "ff45ba82-16e0-4597-ada4-33a1eaab9862",
+      "name": "Final Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Qdrant Payload - Dual Standard\n// Updates payload with BOTH Standard A and Standard B classification metadata\n\nconst inputData = $('Prepare Neo4j Write Query').first().json;\n\n// Get existing payload from Merge Embedding (preserves all researcher data)\nconst existingPayload = $('Merge Embedding').first().json;\n\n// Extract Standard A classification codes as integers\nconst classificationCodesA = inputData.classifications.map(c => parseInt(c.code, 10));\nconst classificationConfidencesA = inputData.classifications.map(c => c.confidence);\n\n// Extract Standard B classification codes as strings\nconst classificationCodesB = (inputData.standard_b_classifications || []).map(c => c.code);\nconst classificationConfidencesB = (inputData.standard_b_classifications || []).map(c => c.confidence);\n\n// Build merged payload - preserve ALL existing fields, add classification fields\nconst mergedPayload = {\n  // Existing researcher data (preserve everything)\n  asset_id: existingPayload.asset_id,\n  object_type: \"researcher\",\n  name: existingPayload.name,\n  institution: existingPayload.institution,\n  orcid: existingPayload.orcid,\n  research_domains: existingPayload.research_domains || [],\n  methodologies: existingPayload.methodologies || [],\n  research_themes: existingPayload.research_themes || [],\n  h_index: existingPayload.h_index,\n  total_citations: existingPayload.total_citations,\n  publication_count: existingPayload.publication_count,\n  patent_count: existingPayload.patent_count,\n  career_stage: existingPayload.career_stage,\n  research_impact: existingPayload.research_impact,\n  data_completeness: existingPayload.data_completeness,\n  fabricated_at: existingPayload.fabricated_at,\n  \n  // Status update\n  status: \"classified\",\n  \n  // Standard A (ANZSRC) classification fields\n  classifications: classificationCodesA,\n  classification_confidences: classificationConfidencesA,\n  classification_taxonomy: \"ANZSRC_FoR_2020\",\n  \n  // Standard B (OECD FOS) classification fields\n  standard_b_codes: classificationCodesB,\n  standard_b_confidences: classificationConfidencesB,\n  standard_b_taxonomy: \"OECD_FOS_2007\",\n  \n  // Combined confidence metrics\n  final_confidence: inputData.final_confidence,\n  cf1_passed: inputData.cf1_assessment?.passed || false,\n  crosswalk_alignment_score: inputData.crosswalk_assessment?.alignment_score || null,\n  \n  // Validation state\n  classified_at: inputData.classified_at,\n  classified_by: \"object3_classifier_v3.5\",\n  validation_state: \"PENDING\"\n};\n\n// Build Qdrant request\nconst qdrantPayload = {\n  payload: mergedPayload,\n  points: [inputData.qdrant_point_id]\n};\n\nconsole.log(`✅ Qdrant payload prepared:`);\nconsole.log(`   Standard A: ${classificationCodesA.length} codes`);\nconsole.log(`   Standard B: ${classificationCodesB.length} codes`);\n\nreturn [{\n  json: {\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    classifications: inputData.classifications,\n    classification_count: inputData.classification_count,\n    standard_b_classifications: inputData.standard_b_classifications,\n    standard_b_count: inputData.standard_b_count,\n    final_confidence: inputData.final_confidence,\n    cf1_assessment: inputData.cf1_assessment,\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    confidence_breakdown: inputData.confidence_breakdown,\n    reasoning: inputData.reasoning,\n    classified_at: inputData.classified_at,\n    qdrant_payload: qdrantPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        896
+      ],
+      "id": "97b11ec1-07cd-40ab-a8b4-e92f674b5b1d",
+      "name": "Prepare Qdrant Payload"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Fetch FATObjects\n// PURPOSE: Fetch specific researcher OR all fabricated if none specified\n\nconst inputData = $input.first().json;\n\n// Use provided asset_id, or fetch all if not specified\nconst specificAssetId = inputData.asset_id || null;\n\nlet cypherPayload;\n\nif (specificAssetId) {\n  // Fetch specific researcher\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject)\n      WHERE fat.asset_id = $asset_id\n        AND fat.status = 'fabricated'\n      RETURN \n          fat.asset_id AS asset_id,\n          fat.name AS name,\n          fat.orcid AS orcid,\n          fat.institution AS institution,\n          fat.dense_view AS dense_view,\n          fat.data_completeness AS data_completeness,\n          fat.status AS status,\n          fat.version AS version,\n          fat.fabricated_at AS fabricated_at\n    `,\n    parameters: {\n      asset_id: specificAssetId\n    }\n  };\n} else {\n  // Fetch ALL fabricated researchers\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject)\n      WHERE fat.status = 'fabricated'\n      RETURN \n          fat.asset_id AS asset_id,\n          fat.name AS name,\n          fat.orcid AS orcid,\n          fat.institution AS institution,\n          fat.dense_view AS dense_view,\n          fat.data_completeness AS data_completeness,\n          fat.status AS status,\n          fat.version AS version,\n          fat.fabricated_at AS fabricated_at\n      ORDER BY fat.fabricated_at DESC\n    `,\n    parameters: {}\n  };\n}\n\nreturn [{\n  json: {\n    requested_asset_id: specificAssetId,\n    fetch_mode: specificAssetId ? 'single' : 'all',\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        0
+      ],
+      "id": "6e3de52f-2281-47bf-9c34-9de018af6e66",
+      "name": "Prepare Fetch FATObjects"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/payload",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payload\": {\n    \"asset_id\": \"fat:researcher:colin_barrow\",\n    \"object_type\": \"researcher\",\n    \"name\": \"Colin Barrow\",\n    \"institution\": \"Deakin University\",\n    \"orcid\": \"0000-0002-2153-7267\",\n    \"research_domains\": [\"Biotechnology\", \"Chemistry\", \"Food Science\", \"Nanotechnology\"],\n    \"methodologies\": [\"Lipase modification\", \"Bioprocessing techniques\", \"Natural product extraction\", \"Nanomaterial synthesis\", \"Biochemical analysis\"],\n    \"research_themes\": [\"Omega-3 oil enhancement\", \"Biotechnological applications of lipases\", \"Development of amyloid fibres\", \"Nanomaterial integration in food\", \"Biological chemistry of natural products\"],\n    \"h_index\": 79,\n    \"total_citations\": 25153,\n    \"publication_count\": 448,\n    \"patent_count\": 14,\n    \"career_stage\": \"established\",\n    \"research_impact\": \"Leading\",\n    \"data_completeness\": 100,\n    \"fabricated_at\": \"2025-12-01T12:00:00.000Z\",\n    \"status\": \"fabricated\"\n  },\n  \"points\": [\"66aa6d12-001b-4000-8000-000221ea81ec\"]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2032,
+        1504
+      ],
+      "id": "13f15254-1e5b-4003-a38a-765584e35fb1",
+      "name": "Update Qdrant1",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/payload",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"payload\": {\n    \"asset_id\": \"fat:researcher:colin_barrow\",\n    \"object_type\": \"researcher\",\n    \"name\": \"Colin Barrow\",\n    \"institution\": \"Deakin University\",\n    \"orcid\": \"0000-0002-2153-7267\",\n    \"research_domains\": [\"Biotechnology\", \"Chemistry\", \"Food Science\", \"Nanotechnology\"],\n    \"methodologies\": [\"Lipase modification\", \"Bioprocessing techniques\", \"Natural product extraction\", \"Nanomaterial synthesis\", \"Biochemical analysis\"],\n    \"research_themes\": [\"Omega-3 oil enhancement\", \"Biotechnological applications of lipases\", \"Development of amyloid fibres\", \"Nanomaterial integration in food\", \"Biological chemistry of natural products\"],\n    \"h_index\": 79,\n    \"total_citations\": 25153,\n    \"publication_count\": 448,\n    \"patent_count\": 14,\n    \"career_stage\": \"established\",\n    \"research_impact\": \"Leading\",\n    \"data_completeness\": 100,\n    \"fabricated_at\": \"2025-12-01T12:00:00.000Z\",\n    \"status\": \"classified\",\n    \"classifications\": [310601, 310602, 401807, 300602, 340303, 300102, 340401],\n    \"classification_confidences\": [0.9, 0.88, 0.88, 0.87, 0.86, 0.85, 0.84],\n    \"final_confidence\": 0.8686,\n    \"classified_at\": \"2025-12-05T15:25:38.778Z\",\n    \"classified_by\": \"object3_classifier_v1\",\n    \"cf1_passed\": true,\n    \"validation_state\": \"PENDING\"\n  },\n  \"points\": [\"66aa6d12-001b-4000-8000-000221ea81ec\"]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1984,
+        1264
+      ],
+      "id": "74ff8d03-0da3-4ef4-b134-1c61de111f36",
+      "name": "Update Qdrant2",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_status_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "383ec761-9c3d-470a-b5e2-248a2230caf8",
+      "name": "Execute Status Update to Classifying",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify status was updated, then pass through original data\nconst neo4jResponse = $input.first().json;\nconst originalData = $('Prepare Status Update to Classifying').first().json;\n\n// Check update succeeded\nconst values = neo4jResponse.data?.values || [];\nif (values.length === 0) {\n  throw new Error('Failed to update status to classifying');\n}\n\nconst updatedStatus = values[0][1];\nif (updatedStatus !== 'classifying') {\n  throw new Error(`Expected status 'classifying', got '${updatedStatus}'`);\n}\n\n// Pass through original data with confirmed status\nreturn [{\n  json: {\n    ...originalData,\n    status: 'classifying',  // Confirmed updated\n    classification_started_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        0
+      ],
+      "id": "f73fe5a1-0d61-4867-8b5e-7c37c91c2996",
+      "name": "Parse Status Update Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Add this node AFTER \"Parse Neo4j Response\"\nconst inputData = $input.first().json;\n\nreturn [{\n  json: {\n    ...inputData,\n    neo4j_status_payload: {\n      statement: `\n        MATCH (fat:FATObject {asset_id: $asset_id})\n        SET fat.status = 'classifying',\n            fat.classification_started_at = datetime()\n        RETURN fat.asset_id, fat.status\n      `,\n      parameters: {\n        asset_id: inputData.asset_id\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        0
+      ],
+      "id": "36b164a4-8703-4b95-ac60-311e0139fcc4",
+      "name": "Prepare Status Update to Classifying"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Crosswalk Assessment Query\n// Check [:MAPS_TO] alignment between assigned Standard A and Standard B codes\n\nconst inputData = $input.first().json;\n\nconst standardACodes = inputData.classifications.map(c => parseInt(c.code, 10));\nconst standardBCodes = inputData.standard_b_classifications.map(c => c.code);\n\n// If no Standard B classifications, skip crosswalk assessment\nif (standardBCodes.length === 0) {\n  console.log('⚠️ No Standard B codes - skipping crosswalk assessment');\n  return [{\n    json: {\n      ...inputData,\n      crosswalk_assessment: {\n        skipped: true,\n        reason: 'No Standard B classifications',\n        alignment_score: null,\n        modifier: 0.0\n      }\n    }\n  }];\n}\n\n// Query: For each assigned ANZSRC code, what FOS codes does it map to?\nconst cypherPayload = {\n  statement: `\n    UNWIND $anzsrc_codes AS anzsrc_code\n    MATCH (a:Standard:FoR {code: anzsrc_code})\n    OPTIONAL MATCH (a)-[m:MAPS_TO_V2]->(b:Standard:OECD_FOS)\n    RETURN \n      a.code AS anzsrc_code,\n      a.name AS anzsrc_name,\n      collect(CASE WHEN b IS NOT NULL THEN {\n        fos_code: b.code,\n        fos_name: b.name,\n        confidence: m.confidence,\n        alignment_score: m.alignment_score,\n        mapping_type: m.mapping_type\n      } ELSE NULL END) AS mapped_fos_codes\n  `,\n  parameters: {\n    anzsrc_codes: standardACodes\n  }\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    standard_a_codes: standardACodes,\n    standard_b_codes: standardBCodes,\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        624
+      ],
+      "id": "e79e725f-9b1f-477b-aa33-5c53b00b48c5",
+      "name": "Prepare Crosswalk Assessment Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        624
+      ],
+      "id": "9328ed33-59fc-4a6b-b464-48fe0562838e",
+      "name": "Execute Crosswalk Assessment",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate Crosswalk Alignment Score (FIXED)\n// v3.6.2 FIX: Code-level alignment instead of mapping-level\n// \n// OLD (flawed): alignedMappings / totalMappings\n//   - If code maps to 5 FOS and only 1 matches, that's 20% per code\n//   - Unfairly penalizes codes with many crosswalk relationships\n//\n// NEW (fixed): codesWithMatch / codesChecked  \n//   - If code has ANY matching FOS, it counts as aligned\n//   - Fair assessment: \"Does this ANZSRC code align with assigned FOS?\"\n\nconst neo4jResponse = $input.first().json;\nconst prevData = $('Prepare Crosswalk Assessment Query').first().json;\n\n// Handle skipped assessment\nif (prevData.crosswalk_assessment?.skipped) {\n  return [{ json: prevData }];\n}\n\n// Parse Neo4j response\nconst responseData = Array.isArray(neo4jResponse) ? neo4jResponse[0] : neo4jResponse;\n\nif (responseData.errors?.length > 0) {\n  console.error('Neo4j error:', responseData.errors[0].message);\n  return [{\n    json: {\n      ...prevData,\n      crosswalk_assessment: {\n        error: responseData.errors[0].message,\n        alignment_score: null,\n        modifier: 0.0\n      }\n    }\n  }];\n}\n\nconst values = responseData.data?.values || [];\nconst assignedFosCodes = new Set(prevData.standard_b_codes);\n\n// ============================================================\n// v3.6.2 FIX: Track CODE-LEVEL alignment (not mapping-level)\n// ============================================================\nlet codesWithMatch = 0;\nlet codesChecked = 0;\nlet codesWithNoCrosswalk = 0;\n\n// Still track mapping-level for detailed reporting\nlet totalMappings = 0;\nlet alignedMappings = 0;\n\nconst alignmentDetails = [];\n\nfor (const row of values) {\n  const anzsrcCode = row[0];\n  const anzsrcName = row[1];\n  const mappedFosCodes = (row[2] || []).filter(m => m !== null);\n  \n  if (mappedFosCodes.length === 0) {\n    // No crosswalk exists for this code\n    codesWithNoCrosswalk += 1;\n    alignmentDetails.push({\n      anzsrc_code: anzsrcCode,\n      anzsrc_name: anzsrcName,\n      status: 'no_crosswalk',\n      mapped_fos: [],\n      aligned: false\n    });\n    continue;\n  }\n  \n  // This code has crosswalks - count it for alignment calculation\n  codesChecked += 1;\n  \n  // Check if ANY mapped FOS code matches an assigned FOS code\n  const matchingMappings = mappedFosCodes.filter(m => assignedFosCodes.has(m.fos_code));\n  const hasMatch = matchingMappings.length > 0;\n  \n  if (hasMatch) {\n    codesWithMatch += 1;\n  }\n  \n  // Track individual mappings for detailed reporting\n  totalMappings += mappedFosCodes.length;\n  alignedMappings += matchingMappings.length;\n  \n  alignmentDetails.push({\n    anzsrc_code: anzsrcCode,\n    anzsrc_name: anzsrcName,\n    status: hasMatch ? 'aligned' : 'misaligned',\n    mapped_fos: mappedFosCodes.map(m => ({\n      code: m.fos_code,\n      name: m.fos_name,\n      confidence: m.confidence,\n      matches_assigned: assignedFosCodes.has(m.fos_code)\n    })),\n    aligned: hasMatch,\n    matching_count: matchingMappings.length,\n    total_mappings: mappedFosCodes.length\n  });\n}\n\n// ============================================================\n// v3.6.2 FIX: CODE-LEVEL alignment score\n// Question: \"What % of ANZSRC codes have at least one matching FOS?\"\n// ============================================================\nlet alignmentScore = codesChecked > 0 \n  ? Math.round((codesWithMatch / codesChecked) * 100) / 100 \n  : null;\n\n// Also calculate mapping-level for reference (but don't use for modifier)\nlet mappingLevelScore = totalMappings > 0\n  ? Math.round((alignedMappings / totalMappings) * 100) / 100\n  : null;\n\n// ============================================================\n// Three-tier modifier system (unchanged thresholds)\n// ============================================================\n// >= 0.50: Strong alignment   → +5% boost\n// 0.30 - 0.49: Acceptable     → 0% neutral\n// < 0.30: Poor alignment      → -15% penalty\n// ============================================================\n\nlet modifier = 0.0;\nlet alignmentStatus = 'unknown';\n\nif (alignmentScore === null) {\n  // No crosswalks exist (Gen 2 fallback)\n  modifier = 0.0;\n  alignmentStatus = 'no_crosswalks';\n} else if (alignmentScore >= 0.50) {\n  // Strong alignment: boost confidence\n  modifier = 0.05;\n  alignmentStatus = 'aligned';\n} else if (alignmentScore >= 0.30) {\n  // Acceptable alignment: neutral (no penalty, no boost)\n  modifier = 0.0;\n  alignmentStatus = 'acceptable';\n} else {\n  // Poor alignment: penalize confidence\n  modifier = -0.15;\n  alignmentStatus = 'misaligned';\n}\n\n// Detailed logging\nconsole.log(`✅ Crosswalk Assessment (v3.6.2 - code-level):`);\nconsole.log(`   ANZSRC codes checked: ${codesChecked}`);\nconsole.log(`   Codes with FOS match: ${codesWithMatch}`);\nconsole.log(`   Codes with no crosswalk: ${codesWithNoCrosswalk}`);\nconsole.log(`   CODE-LEVEL alignment: ${alignmentScore !== null ? (alignmentScore * 100).toFixed(0) + '%' : 'N/A'}`);\nconsole.log(`   (mapping-level was: ${mappingLevelScore !== null ? (mappingLevelScore * 100).toFixed(0) + '%' : 'N/A'})`);\nconsole.log(`   Status: ${alignmentStatus}`);\nconsole.log(`   Modifier: ${modifier >= 0 ? '+' : ''}${(modifier * 100).toFixed(0)}%`);\n\n// Log which codes aligned and which didn't\nconst alignedCodes = alignmentDetails.filter(d => d.aligned);\nconst misalignedCodes = alignmentDetails.filter(d => d.status === 'misaligned');\nif (alignedCodes.length > 0) {\n  console.log(`   Aligned: ${alignedCodes.map(d => d.anzsrc_code).join(', ')}`);\n}\nif (misalignedCodes.length > 0) {\n  console.log(`   Misaligned: ${misalignedCodes.map(d => d.anzsrc_code).join(', ')}`);\n}\n\nreturn [{\n  json: {\n    // Core data\n    asset_id: prevData.asset_id,\n    name: prevData.name,\n    qdrant_point_id: prevData.qdrant_point_id,\n    \n    // Classifications\n    classifications: prevData.classifications,\n    classification_count: prevData.classification_count,\n    standard_b_classifications: prevData.standard_b_classifications,\n    standard_b_count: prevData.standard_b_count,\n    reasoning: prevData.reasoning,\n    model: prevData.model,\n    \n    // Crosswalk assessment (v3.6.2 - code-level)\n    crosswalk_assessment: {\n      skipped: false,\n      \n      // PRIMARY: Code-level alignment (used for modifier)\n      alignment_score: alignmentScore,\n      alignment_status: alignmentStatus,\n      modifier: modifier,\n      \n      // Code-level stats\n      codes_checked: codesChecked,\n      codes_with_match: codesWithMatch,\n      codes_with_no_crosswalk: codesWithNoCrosswalk,\n      \n      // Mapping-level stats (for reference only)\n      total_mappings_checked: totalMappings,\n      aligned_mappings: alignedMappings,\n      mapping_level_score: mappingLevelScore,\n      \n      // Detailed breakdown\n      details: alignmentDetails\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        624
+      ],
+      "id": "7900ea93-338d-4c65-a03c-06cba686048e",
+      "name": "Calculate Crosswalk Alignment"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare PostgreSQL Classification Log\n// Creates audit record for classification job\n\nconst inputData = $('Prepare Qdrant Payload').first().json;\n\n// Generate classification job ID\nconst jobId = `clf_${inputData.asset_id.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;\n\nconst postgresPayload = {\n  job_id: jobId,\n  asset_id: inputData.asset_id,\n  asset_type: 'researcher',\n  \n  // Standard A summary\n  standard_a_taxonomy: 'ANZSRC_FoR_2020',\n  standard_a_codes: inputData.classifications.map(c => parseInt(c.code, 10)),\n  standard_a_count: inputData.classification_count,\n  \n  // Standard B summary\n  standard_b_taxonomy: 'OECD_FOS_2007',\n  standard_b_codes: (inputData.standard_b_classifications || []).map(c => c.code),\n  standard_b_count: inputData.standard_b_count || 0,\n  \n  // Confidence metrics\n  final_confidence: inputData.final_confidence,\n  cf1_passed: inputData.cf1_assessment?.passed || false,\n  cf1_penalty: inputData.cf1_assessment?.penalty || 0,\n  crosswalk_alignment_score: inputData.crosswalk_assessment?.alignment_score || null,\n  crosswalk_modifier: inputData.crosswalk_assessment?.modifier || 0,\n  \n  // Metadata\n  classified_at: inputData.classified_at,\n  classified_by: 'object3_classifier_v3.5',\n  model: 'openai/gpt-4o',\n  workflow_version: 'OBJECT-3_v3.6',\n  \n  // Routing preview (for OBJECT-4)\n  routing_recommendation: inputData.final_confidence >= 0.85 \n    ? 'AUTO_APPROVE' \n    : inputData.final_confidence >= 0.60 \n      ? 'HUMAN_REVIEW' \n      : 'REJECT'\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    postgres_payload: postgresPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        896
+      ],
+      "id": "f53baef1-860d-4a70-852b-2a3dc7b34f1b",
+      "name": "Prepare PostgreSQL Classification Log"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/classification_logs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.postgres_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        896
+      ],
+      "id": "5eecff3e-6c28-42fc-87c4-56b4b9576ace",
+      "name": "Store Crosswalk Metadata",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_cre_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        1280
+      ],
+      "id": "a383b616-e85e-45f7-a2c1-889543e341b6",
+      "name": "Execute CRE Constraint Query",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// CF1 Hierarchical Consistency Check\n// Validates classification hierarchy and checks for constraint violations\n\nconst inputData = $input.first().json;\n\nif (!inputData.classifications || inputData.classifications.length === 0) {\n  throw new Error('No classifications to assess');\n}\n\n// Extract hierarchy info from each code\nconst classificationDetails = inputData.classifications.map(c => {\n  const code = String(c.code);\n  return {\n    ...c,\n    division_code: code.substring(0, 2),\n    group_code: code.substring(0, 4),\n    field_code: code\n  };\n});\n\n// Get unique divisions and groups\nconst divisionsFound = [...new Set(classificationDetails.map(c => c.division_code))];\nconst groupsFound = [...new Set(classificationDetails.map(c => c.group_code))];\n\n// === CF1 RULE 1: Check parent-child conflicts ===\nconst violations = [];\nconst codes = classificationDetails.map(c => c.code);\n\nfor (const c of classificationDetails) {\n  for (const other of codes) {\n    if (other !== c.code) {\n      // Check if one code is parent of another\n      if (c.code.startsWith(other) && c.code.length > other.length) {\n        violations.push({\n          rule: 'parent_child_conflict',\n          parent: other,\n          child: c.code,\n          action: `Remove parent code ${other}, keep specific code ${c.code}`\n        });\n      }\n    }\n  }\n}\n\n// === CF1 RULE 2: Check code specificity (warn on broad codes) ===\nconst flags = [];\nfor (const c of classificationDetails) {\n  if (c.code.length === 2) {\n    flags.push({\n      rule: 'broad_code_warning',\n      code: c.code,\n      message: '2-digit code is very broad, consider more specific classification'\n    });\n  } else if (c.code.length === 4) {\n    flags.push({\n      rule: 'group_code_warning',\n      code: c.code,\n      message: '4-digit group code used instead of 6-digit field code'\n    });\n  }\n}\n\n// === CF1 RULE 3: Check sibling overlap (multiple codes under same parent) ===\nconst parentGroups = {};\nfor (const c of classificationDetails) {\n  if (c.code.length === 6) {\n    const parent = c.group_code;\n    if (!parentGroups[parent]) {\n      parentGroups[parent] = [];\n    }\n    parentGroups[parent].push(c.code);\n  }\n}\n\nfor (const [parent, children] of Object.entries(parentGroups)) {\n  if (children.length > 2) {\n    flags.push({\n      rule: 'sibling_overlap',\n      parent: parent,\n      siblings: children,\n      message: `Multiple codes (${children.length}) under group ${parent} may indicate over-classification`\n    });\n  }\n}\n\n// === Calculate penalty ===\nlet penalty = 0.0;\n\n// Parent-child violations: -0.10 each\npenalty += violations.length * 0.10;\n\n// Broad code warnings: -0.05 each\npenalty += flags.filter(f => f.rule === 'broad_code_warning').length * 0.05;\n\n// Determine pass/fail\nconst passed = violations.length === 0;\n\n// === Build adjusted classifications ===\n// Remove parent codes if child exists\nconst codesToRemove = new Set(violations.map(v => v.parent));\n\nconst adjustedClassifications = classificationDetails\n  .filter(c => !codesToRemove.has(c.code))\n  .map(c => ({\n    code: c.code,\n    name: c.name,\n    confidence: c.confidence,\n    justification: c.justification,\n    evidence: c.evidence,\n    division_code: c.division_code,\n    group_code: c.group_code,\n    cf1_validated: passed\n  }));\n\n// === Enforce min/max code counts ===\nconst MIN_CODES = 3;\nconst MAX_CODES = 10;\n\nif (adjustedClassifications.length < MIN_CODES) {\n  flags.push({\n    rule: 'under_classification',\n    count: adjustedClassifications.length,\n    message: `Only ${adjustedClassifications.length} codes assigned, minimum is ${MIN_CODES}`\n  });\n}\n\nif (adjustedClassifications.length > MAX_CODES) {\n  // Truncate to top MAX_CODES by confidence\n  adjustedClassifications.sort((a, b) => b.confidence - a.confidence);\n  adjustedClassifications.splice(MAX_CODES);\n  flags.push({\n    rule: 'over_classification_truncated',\n    message: `Truncated to ${MAX_CODES} highest-confidence codes`\n  });\n}\n\nconsole.log(`✅ CF1 Assessment: ${passed ? 'PASSED' : 'FAILED'}`);\nconsole.log(`   Violations: ${violations.length}, Flags: ${flags.length}, Penalty: ${penalty}`);\n\nreturn [{\n  json: {\n    // Core data (pass through)\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    reasoning: inputData.reasoning,\n    model: inputData.model,\n    \n    // Crosswalk assessment (pass through)\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    \n    // CRE assessment (pass through) - NEW\n    cre_assessment: inputData.cre_assessment,\n    \n    // Standard B classifications (pass through)\n    standard_b_classifications: inputData.standard_b_classifications,\n    standard_b_count: inputData.standard_b_count,\n    \n    // CF1 Assessment results (ANZSRC hierarchy - local check)\n    cf1_assessment: {\n      passed: passed,\n      violations: violations,\n      flags: flags,\n      penalty: penalty,\n      divisions_found: divisionsFound,\n      groups_found: groupsFound\n    },\n    \n    // Adjusted Standard A classifications\n    classifications: adjustedClassifications,\n    classification_count: adjustedClassifications.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        624
+      ],
+      "id": "801c0eb5-2828-4b83-b9af-426dc2e67d8a",
+      "name": "ANZSRC Hierarchy Check"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "7wgDbsjDcjLdQNSJ",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/7wgDbsjDcjLdQNSJ"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        320,
+        624
+      ],
+      "name": "SYSTEM-2_CRE_Assessment",
+      "id": "4e8e56a7-1216-4220-a466-397679f2ab36"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge CRE Output\nconst creOutput = $input.first().json;  // From SYSTEM-2\nconst prevData = $('Calculate Crosswalk Alignment').first().json;  // Get data from before CRE\n\nconsole.log(`✅ CRE Assessment Received:`);\nconsole.log(`   Blocking: ${creOutput.blocking_failures?.join(', ') || 'None'}`);\nconsole.log(`   HITL Required: ${creOutput.requires_hitl}`);\n\nreturn [{\n  json: {\n    // Pass through from earlier node\n    asset_id: prevData.asset_id,\n    name: prevData.name,\n    qdrant_point_id: prevData.qdrant_point_id,\n    classifications: prevData.classifications,\n    classification_count: prevData.classification_count,\n    standard_b_classifications: prevData.standard_b_classifications,\n    standard_b_count: prevData.standard_b_count,\n    reasoning: prevData.reasoning,\n    model: prevData.model,\n    crosswalk_assessment: prevData.crosswalk_assessment,\n    \n    // CRE Assessment (from SYSTEM-2)\n    cre_assessment: {\n      constraint_results: creOutput.constraint_results || {},\n      blocking_failures: creOutput.blocking_failures || [],\n      penalising_failures: creOutput.penalising_failures || [],\n      requires_hitl: creOutput.requires_hitl || false,\n      cre_penalty: Math.abs(creOutput.final_confidence_modifier || 0)\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        624
+      ],
+      "id": "8c5bb951-b4f3-450f-850b-cee70ebc385a",
+      "name": "Merge CRE Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare CRE Input\n// Gen 4: Build input contract for SYSTEM-2_CRE_Assessment sub-workflow\n\nconst inputData = $input.first().json;\nconst signals = $('Merge Embedding').first().json;\n\n// Infer TRL from researcher signals\nfunction inferTRLLevel(s) {\n  const hasPatents = (s.patent_count || 0) > 0;\n  const careerStage = (s.career_stage || '').toLowerCase();\n  const impact = (s.research_impact || '').toLowerCase();\n  \n  if (hasPatents && (careerStage === 'established' || careerStage === 'senior')) return 7;\n  if (impact === 'leading' || impact === 'high') return 6;\n  if (careerStage === 'mid-career' || (s.h_index || 0) > 20) return 5;\n  if (careerStage === 'early-career' || careerStage === 'emerging') return 3;\n  return 4;\n}\n\n// Determine inference type\n// Only use 'patent' or 'publication' if NO explicit expertise declared\nlet inference_type = 'explicit';\n\nconst hasExplicitExpertise = \n  (signals.research_domains?.length > 0) ||\n  (signals.methodologies?.length > 0) ||\n  (signals.research_themes?.length > 0);\n\nif (!hasExplicitExpertise) {\n  // No explicit declaration - infer from other signals\n  if ((signals.patent_count || 0) > 0) {\n    inference_type = 'patent';\n  } else if ((signals.publication_count || 0) > 0) {\n    inference_type = 'publication';\n  } else {\n    inference_type = 'keyword';\n  }\n}\n\n// Average classification confidence\nconst avgConfidence = inputData.classifications.length > 0\n  ? inputData.classifications.reduce((a, c) => a + c.confidence, 0) / inputData.classifications.length\n  : 0;\n\n// Output CRE contract at ROOT level\nreturn [{\n  json: {\n    asset_id: inputData.asset_id,\n    classification_confidence: avgConfidence,\n    entity_data: {\n      trl_level: inferTRLLevel(signals),\n      certifications: [],\n      inference_type: inference_type\n    },\n    requirements: {\n      required_trl: 5,\n      required_certifications: []\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        624
+      ],
+      "id": "ab0beebd-6276-4819-a5f2-6fbd0b864209",
+      "name": "Prepare CRE Input"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        512
+      ],
+      "id": "c7ad53cc-8b36-490d-88f1-5b09e748d645",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare FOS Vector Search (Standard B)\n// Uses direct reference to get embedding from source node\n\nconst inputData = $input.first().json;\n\n// Get embedding directly from \"Merge Embedding\" node\nconst mergeEmbeddingData = $('Merge Embedding').first().json;\nconst embeddingVector = mergeEmbeddingData.embedding_vector;\n\n// Validate embedding\nif (!embeddingVector || embeddingVector.length !== 3072) {\n  throw new Error(`Invalid embedding vector from Merge Embedding. Expected 3072 dimensions, got ${embeddingVector?.length || 0}`);\n}\n\n// ============================================================\n// OECD FOS collection already contains ONLY FOS codes\n// No need to filter by taxonomy - the collection IS the filter\n// ============================================================\nconst qdrantFosRequest = {\n  query: embeddingVector,\n  limit: 10,\n  with_payload: true,\n  with_vector: false\n  // No filter needed - collection is dedicated to FOS\n};\n\nreturn [{\n  json: {\n    // Pass through all data from previous node\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    orcid: inputData.orcid,\n    institution: inputData.institution,\n    qdrant_point_id: inputData.qdrant_point_id,\n    dense_view_text: inputData.dense_view_text,\n    research_domains: inputData.research_domains,\n    methodologies: inputData.methodologies,\n    research_themes: inputData.research_themes,\n    h_index: inputData.h_index,\n    career_stage: inputData.career_stage,\n    \n    // ANZSRC candidates (Standard A) - from reranking\n    field_candidates: inputData.field_candidates,\n    field_candidate_count: inputData.field_candidate_count,\n    reranking: inputData.reranking,\n    group_candidates: inputData.group_candidates,\n    retrieval_sources: inputData.retrieval_sources,\n    \n    // Store embedding for reference\n    embedding_vector: embeddingVector,\n    \n    // Qdrant request for FOS search (no filter)\n    qdrant_fos_request: qdrantFosRequest\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        288
+      ],
+      "id": "f6e76165-575c-4a83-9147-2fc378fc5e36",
+      "name": "Prepare FOS Vector Search"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse FOS Vector Search Results\n// Extracts OECD FOS candidates for dual-standard classification\n\nconst qdrantResponse = $input.first().json;\nconst originalData = $('Prepare FOS Vector Search').first().json;\n\n// Handle response structure (may be wrapped in array)\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\n\n// ============================================================\n// FAIL-SAFE: Handle errors or empty results\n// ============================================================\nif (responseData.status === 'error' || responseData.error) {\n  const errorMessage = responseData.status?.error || responseData.error || 'Unknown error';\n  console.log(`⚠️ FOS Vector Search error: ${errorMessage}`);\n  \n  return [{\n    json: {\n      ...originalData,\n      fos_candidates: [],\n      fos_candidate_count: 0,\n      fos_search_empty: true,\n      fos_search_error: errorMessage\n    }\n  }];\n}\n\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  console.log('⚠️ FOS Vector Search: No candidates found - proceeding with ANZSRC only');\n  \n  return [{\n    json: {\n      ...originalData,\n      fos_candidates: [],\n      fos_candidate_count: 0,\n      fos_search_empty: true\n    }\n  }];\n}\n\n// Extract FOS candidates with scores and context\n// Filter to field-level only (exclude group-level like \"2\", \"3\")\nconst fosCandidates = points\n  .filter(point => point.payload.level === 'field')  // Only fields, not groups\n  .map(point => ({\n    code: point.payload.code,\n    name: point.payload.name,\n    score: point.score,\n    group_code: point.payload.group_code,\n    embedding_text: point.payload.embedding_text || null\n  }));\n\n// Log summary\nconsole.log(`✅ FOS Vector Search: Found ${fosCandidates.length} field-level candidates`);\nconsole.log(`   Top 3: ${fosCandidates.slice(0, 3).map(c => `${c.code} ${c.name} (${c.score.toFixed(3)})`).join(', ')}`);\n\nreturn [{\n  json: {\n    // Pass through ALL researcher data\n    asset_id: originalData.asset_id,\n    name: originalData.name,\n    orcid: originalData.orcid,\n    institution: originalData.institution,\n    qdrant_point_id: originalData.qdrant_point_id,\n    dense_view_text: originalData.dense_view_text,\n    research_domains: originalData.research_domains,\n    methodologies: originalData.methodologies,\n    research_themes: originalData.research_themes,\n    h_index: originalData.h_index,\n    career_stage: originalData.career_stage,\n    \n    // ANZSRC candidates (Standard A) - from reranking\n    field_candidates: originalData.field_candidates,\n    field_candidate_count: originalData.field_candidate_count,\n    reranking: originalData.reranking,\n    group_candidates: originalData.group_candidates,\n    retrieval_sources: originalData.retrieval_sources,\n    \n    // NEW: FOS candidates (Standard B)\n    fos_candidates: fosCandidates,\n    fos_candidate_count: fosCandidates.length,\n    fos_search_empty: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        288
+      ],
+      "id": "dc0fb41d-d592-41e5-aac2-1969af724deb",
+      "name": "Parse FOS Candidates"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_oecd_fos_2007/points/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qdrant_fos_request) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "984c620b-c017-4c58-98d8-3d8d51c4ab86",
+      "name": "Vector Search FOS (Qdrant)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        912,
+        288
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Dual-Standard LLM Prompt\n// Requests classification against BOTH ANZSRC (Standard A) AND OECD FOS (Standard B)\n\nconst inputData = $input.first().json;\n\n// Get ANZSRC field candidates (Standard A) - Top 25 from reranking\nconst anzsrcCandidates = inputData.field_candidates || [];\n\n// Get FOS candidates (Standard B)\nconst fosCandidates = inputData.fos_candidates || [];\n\n// ============================================================\n// BUILD ANZSRC CANDIDATE LIST (Standard A)\n// ============================================================\nconst anzsrcList = anzsrcCandidates.map(f => {\n  return `${f.code} - ${f.name}`;\n}).join('\\n');\n\n// ============================================================\n// BUILD FOS CANDIDATE LIST (Standard B)\n// ============================================================\nconst fosList = fosCandidates.map(f => {\n  return `${f.code} - ${f.name}`;\n}).join('\\n');\n\n// ============================================================\n// DETERMINE CODE COUNT BASED ON CAREER STAGE\n// ============================================================\nconst denseView = inputData.dense_view_text || '';\nconst careerStage = inputData.career_stage || 'mid-career';\n\nlet anzsrcCodeGuidance = '5-7';\nlet fosCodeGuidance = '2-4';\n\nif (careerStage === 'early-career' || denseView.toLowerCase().includes('early') || denseView.toLowerCase().includes('emerging')) {\n  anzsrcCodeGuidance = '3-5';\n  fosCodeGuidance = '2-3';\n} else if (careerStage === 'senior' || denseView.toLowerCase().includes('established') || denseView.toLowerCase().includes('leading')) {\n  anzsrcCodeGuidance = '7-10';\n  fosCodeGuidance = '3-5';\n}\n\n// ============================================================\n// BUILD DUAL-STANDARD LLM PROMPT\n// ============================================================\nconst userPrompt = `RESEARCHER PROFILE:\n${inputData.dense_view_text}\n\n============================================================\nDUAL-STANDARD CLASSIFICATION TASK\n============================================================\n\nYou must classify this researcher against TWO taxonomies independently.\n\n------------------------------------------------------------\nSTANDARD A: ANZSRC Field of Research 2020 (Primary Classification)\n------------------------------------------------------------\nAssign ${anzsrcCodeGuidance} codes from the candidates below.\nThese are specific 6-digit codes representing detailed research fields.\n\nCANDIDATE CODES:\n${anzsrcList}\n\n------------------------------------------------------------\nSTANDARD B: OECD Fields of Science 2007 (Domain Context)\n------------------------------------------------------------\nAssign ${fosCodeGuidance} codes from the candidates below.\nThese are broader international domain classifications.\n\nCANDIDATE CODES:\n${fosList}\n\n------------------------------------------------------------\nRESPONSE FORMAT (JSON only)\n------------------------------------------------------------\n{\n  \"standard_a\": {\n    \"taxonomy\": \"ANZSRC_FoR_2020\",\n    \"classifications\": [\n      {\n        \"code\": \"401801\",\n        \"name\": \"Bio-fabrication\",\n        \"confidence\": 0.92,\n        \"justification\": \"Evidence-based reasoning referencing specific publications, grants, or expertise\",\n        \"evidence\": [\"keyword1\", \"keyword2\"]\n      }\n    ]\n  },\n  \"standard_b\": {\n    \"taxonomy\": \"OECD_FOS_2007\",\n    \"classifications\": [\n      {\n        \"code\": \"2.10\",\n        \"name\": \"Nano-technology\",\n        \"confidence\": 0.88,\n        \"justification\": \"Broader domain alignment reasoning\"\n      }\n    ]\n  },\n  \"reasoning\": \"Overall classification rationale explaining how Standard A and Standard B classifications relate\"\n}\n\n------------------------------------------------------------\nCRITICAL RULES\n------------------------------------------------------------\n1. Respond ONLY with valid JSON - no markdown, no code blocks, no extra text\n2. Only assign codes with confidence >= 0.70\n3. Standard A codes must be from the ANZSRC candidates listed above\n4. Standard B codes must be from the OECD FOS candidates listed above\n5. Classify BOTH standards independently based on the researcher profile\n6. Standard B should provide broader international context that aligns with Standard A\n7. Include specific evidence from the profile for each classification`;\n\nreturn [{\n  json: {\n    // Pass through researcher data\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    orcid: inputData.orcid,\n    institution: inputData.institution,\n    qdrant_point_id: inputData.qdrant_point_id,\n    dense_view_text: inputData.dense_view_text,\n    research_domains: inputData.research_domains,\n    methodologies: inputData.methodologies,\n    research_themes: inputData.research_themes,\n    h_index: inputData.h_index,\n    career_stage: inputData.career_stage,\n    \n    // Candidates for reference\n    field_candidates: anzsrcCandidates,\n    field_candidate_count: anzsrcCandidates.length,\n    fos_candidates: fosCandidates,\n    fos_candidate_count: fosCandidates.length,\n    reranking: inputData.reranking,\n    \n    // LLM prompt\n    user_prompt: userPrompt,\n    \n    // Guidance used (for tracking)\n    classification_guidance: {\n      career_stage: careerStage,\n      anzsrc_code_range: anzsrcCodeGuidance,\n      fos_code_range: fosCodeGuidance\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        288
+      ],
+      "id": "0343e715-575c-4023-befe-8dc133cc770b",
+      "name": "Prepare Dual-Standard LLM Prompt"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node 2: Prepare Vector Search GROUPS\n// Purpose: Prepare data and request body for Qdrant vector similarity search\n\nconst inputData = $input.first().json;\n\n// Validate embedding vector\nif (!inputData.embedding_vector || inputData.embedding_vector.length !== 3072) {\n  throw new Error(`Invalid embedding vector. Expected 3072 dimensions, got ${inputData.embedding_vector?.length || 0}`);\n}\n\n// Prepare Qdrant request body\nconst qdrant_request_body = {\n  query: inputData.embedding_vector,\n  filter: {\n  must: [\n    {\n      key: \"level\",\n      match: {\n        value: \"field\"    \n      }\n    }\n  ]\n},\nlimit: 75,  \n  with_payload: true,\n  with_vector: false\n};\n\nreturn [{\n  json: {\n    // Researcher identification\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    \n    // Research profile for LLM context later\n    research_domains: inputData.research_domains || [],\n    methodologies: inputData.methodologies || [],\n    research_themes: inputData.research_themes || [],\n    h_index: inputData.h_index,\n    total_citations: inputData.total_citations,\n    career_stage: inputData.career_stage,\n    \n    // Qdrant request body (ready to stringify)\n    qdrant_request_body: qdrant_request_body\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -832,
+        288
+      ],
+      "id": "88a19102-98d7-422c-959d-3e23dbb65571",
+      "name": "Prepare Vector Search FIELDS"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cohere.com/v2/rerank",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "cohereApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cohere_request_body) }}",
+        "options": {}
+      },
+      "id": "821c72df-bfd1-4fa0-8d95-685194f0a340",
+      "name": "Cohere Rerank",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        208,
+        288
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "cohereApi": {
+          "id": "r3yyDdVpi3CmVDjc",
+          "name": "Cohere-API TrialKey"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Cohere Request (FIXED)\nconst inputData = $input.first().json;\n\n// Build documents array using embedding_text for rich context\nconst documents = inputData.field_candidates.map(f => {\n  if (f.embedding_text) {\n    return f.embedding_text;\n  } else {\n    return `${f.code} - ${f.name}`;\n  }\n});\n\nconst richContextCount = inputData.field_candidates.filter(f => f.embedding_text).length;\nconsole.log(`Cohere request: ${documents.length} documents (${richContextCount} with rich context)`);\n\n// Build Cohere rerank request body\nconst cohereRequestBody = {\n  model: \"rerank-v3.5\",\n  query: inputData.dense_view_text,\n  documents: documents,\n  top_n: 25\n};\n\nreturn [{\n  json: {\n    // Pass through all researcher data explicitly\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    orcid: inputData.orcid,\n    institution: inputData.institution,\n    qdrant_point_id: inputData.qdrant_point_id,\n    research_domains: inputData.research_domains,\n    methodologies: inputData.methodologies,\n    research_themes: inputData.research_themes,\n    h_index: inputData.h_index,\n    career_stage: inputData.career_stage,\n    dense_view_text: inputData.dense_view_text,\n    embedding_vector: inputData.embedding_vector,\n    \n    // Field candidates\n    field_candidates: inputData.field_candidates,\n    field_codes: inputData.field_codes,\n    vector_candidate_count: inputData.vector_candidate_count,\n    \n    // Cohere request body\n    cohere_request_body: cohereRequestBody\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        288
+      ],
+      "id": "993c3186-be4f-4737-b972-2929957c3093",
+      "name": "Prepare Cohere Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Cohere Rerank Results\nconst cohereResponse = $input.first().json;\nconst originalData = $('Parse Vector Search Results1').first().json;\n\nconst fieldCandidates = originalData.field_candidates;\nconst rerankedResults = cohereResponse.results || [];\n\n// Map reranked indices back to original candidates\nconst rerankedCandidates = rerankedResults.map(result => ({\n  ...fieldCandidates[result.index],\n  rerank_score: result.relevance_score\n}));\n\nreturn [{\n  json: {\n    ...originalData,\n    field_candidates: rerankedCandidates,\n    field_candidate_count: rerankedCandidates.length,\n    reranking: {\n      applied: true,\n      model: 'rerank-v3.5',\n      original_count: fieldCandidates.length,\n      reranked_count: rerankedCandidates.length\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        288
+      ],
+      "id": "3ca68185-3e59-4d60-adc5-d8118b865d95",
+      "name": "Parse Cohere Rerank Results"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc_for_2020/points/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qdrant_request_body) }}",
+        "options": {}
+      },
+      "id": "51e6a469-afdf-4aa1-be78-a04a001ba137",
+      "name": "Vector Search FIELDS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -560,
+        288
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Parse Vector Search Results1 (FIXED)\n// Input: Qdrant vector search response (DIRECT FIELD SEARCH)\n// Output: Structured field candidates WITH embedding_text for LLM classification\n// FIX: Added embedding_text extraction from Qdrant payload\n\nconst qdrantResponse = $input.first().json;\nconst originalData = $('Prepare Vector Search FIELDS').first().json;\n\n// Handle response structure\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  throw new Error(`No candidate standards found for asset_id: ${originalData.asset_id}`);\n}\n\n// Extract FIELD candidates with scores AND embedding_text\nconst fieldCandidates = points.map(point => ({\n  code: point.payload.code,\n  name: point.payload.name,\n  level: point.payload.level,\n  division_code: point.payload.division_code || String(point.payload.code).substring(0, 2),\n  group_code: point.payload.group_code,\n  embedding_text: point.payload.embedding_text || null,  // ← FIX: Extract embedding_text\n  score: point.score\n}));\n\n// Get unique field codes\nconst fieldCodes = [...new Set(fieldCandidates.map(c => c.code))];\n\n// Log candidate pool size for tracking\nconsole.log(`Direct field search returned ${points.length} field candidates`);\nconsole.log(`Fields with embedding_text: ${fieldCandidates.filter(f => f.embedding_text).length}`);\n\nreturn [{\n  json: {\n    // Pass through researcher data\n    asset_id: originalData.asset_id,\n    name: originalData.name,\n    orcid: originalData.orcid,\n    institution: originalData.institution,\n    qdrant_point_id: originalData.qdrant_point_id,\n    research_domains: originalData.research_domains,\n    methodologies: originalData.methodologies,\n    research_themes: originalData.research_themes,\n    h_index: originalData.h_index,\n    career_stage: originalData.career_stage,\n    dense_view_text: $('Parse Neo4j Response').first().json.dense_view_text,\n    \n    // Pass through embedding for FOS search later\n    embedding_vector: originalData.embedding_vector,\n    \n    // FIELD candidate data (now includes embedding_text)\n    field_candidates: fieldCandidates,\n    field_codes: fieldCodes,\n    vector_candidate_count: points.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        288
+      ],
+      "id": "977dd199-bc9d-47a6-a8da-c590bbaa5ba6",
+      "name": "Parse Vector Search Results1"
+    }
+  ],
+  "pinData": {
+    "When clicking ‘Execute workflow’": [
+      {
+        "json": {
+          "asset_id": "fat:researcher:colin_barrow"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch FATObjects": {
+      "main": [
+        [
+          {
+            "node": "Parse Neo4j Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Neo4j Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update to Classifying",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Embedding Vector": {
+      "main": [
+        [
+          {
+            "node": "Merge Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Vector Search FIELDS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch FATObjects(Colin)": {
+      "main": [
+        []
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Crosswalk Assessment Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 2: LLM Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Final Confidence": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Write Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Write Query": {
+      "main": [
+        [
+          {
+            "node": "Write to Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Prepare PostgreSQL Classification Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Payload": {
+      "main": [
+        [
+          {
+            "node": "Update Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch FATObjects": {
+      "main": [
+        [
+          {
+            "node": "Fetch FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Status Update to Classifying": {
+      "main": [
+        [
+          {
+            "node": "Parse Status Update Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Status Update Response": {
+      "main": [
+        [
+          {
+            "node": "Fetch Embedding Vector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Status Update to Classifying": {
+      "main": [
+        [
+          {
+            "node": "Execute Status Update to Classifying",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Crosswalk Assessment Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Crosswalk Assessment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Crosswalk Assessment": {
+      "main": [
+        [
+          {
+            "node": "Calculate Crosswalk Alignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Crosswalk Alignment": {
+      "main": [
+        [
+          {
+            "node": "Prepare CRE Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Output": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare PostgreSQL Classification Log": {
+      "main": [
+        [
+          {
+            "node": "Store Crosswalk Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Crosswalk Metadata": {
+      "main": [
+        [
+          {
+            "node": "Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute CRE Constraint Query": {
+      "main": [
+        []
+      ]
+    },
+    "ANZSRC Hierarchy Check": {
+      "main": [
+        [
+          {
+            "node": "Calculate Final Confidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SYSTEM-2_CRE_Assessment": {
+      "main": [
+        [
+          {
+            "node": "Merge CRE Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge CRE Output": {
+      "main": [
+        [
+          {
+            "node": "ANZSRC Hierarchy Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare CRE Input": {
+      "main": [
+        [
+          {
+            "node": "SYSTEM-2_CRE_Assessment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pass 2: LLM Enrichment",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare FOS Vector Search": {
+      "main": [
+        [
+          {
+            "node": "Vector Search FOS (Qdrant)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse FOS Candidates": {
+      "main": [
+        [
+          {
+            "node": "Prepare Dual-Standard LLM Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search FOS (Qdrant)": {
+      "main": [
+        [
+          {
+            "node": "Parse FOS Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Vector Search FIELDS": {
+      "main": [
+        [
+          {
+            "node": "Vector Search FIELDS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cohere Rerank": {
+      "main": [
+        [
+          {
+            "node": "Parse Cohere Rerank Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Cohere Request": {
+      "main": [
+        [
+          {
+            "node": "Cohere Rerank",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Cohere Rerank Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare FOS Vector Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search FIELDS": {
+      "main": [
+        [
+          {
+            "node": "Parse Vector Search Results1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Vector Search Results1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Cohere Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Dual-Standard LLM Prompt": {
+      "main": [
+        [
+          {
+            "node": "Pass 2: LLM Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8de3407b-c942-4f74-8fcf-ac0a5c7b3794",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "SJY1dwMCF32ZggNU",
+  "tags": [
+    {
+      "updatedAt": "2025-12-16T11:15:39.965Z",
+      "createdAt": "2025-12-16T11:15:39.965Z",
+      "id": "3qOz4Ic6lOIRKblO",
+      "name": "Dual Standard"
+    },
+    {
+      "updatedAt": "2025-12-18T01:54:55.218Z",
+      "createdAt": "2025-12-18T01:54:55.218Z",
+      "id": "XpmoqTfbBuwBUZCw",
+      "name": "CRE"
+    },
+    {
+      "updatedAt": "2025-12-18T01:45:03.480Z",
+      "createdAt": "2025-12-18T01:45:03.480Z",
+      "id": "zT0OLWLVBAVEOSHg",
+      "name": "Crosswalk"
+    }
+  ]
+}

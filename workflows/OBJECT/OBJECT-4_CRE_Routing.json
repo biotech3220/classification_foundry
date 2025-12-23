@@ -1,0 +1,496 @@
+{
+  "name": "OBJECT-4_v3.5_Gen4 Workflow (CRE Routing)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Check CRE Blocking (NEW - Gen 4)\n// PURPOSE: Evaluate CRE constraints BEFORE confidence routing\n// PRIORITY ORDER:\n//   1. Blocking failures (CF1, CF5) -> reject_queue\n//   2. requires_hitl (CF12 Path C) -> human_review_queue\n//   3. Penalising failures -> populate escalation_flags\n// FIX: Process ALL items, not just first\n// ============================================================\n\nconst duplicateResults = $input.all();\nconst originalItems = $('Prepare Duplicate Check').all();\n\nconst results = [];\n\nfor (let i = 0; i < duplicateResults.length; i++) {\n  const duplicateCheck = duplicateResults[i].json;\n  const inputData = originalItems[i].json;\n  \n  // Check for duplicate routing FIRST\n  if (duplicateCheck.exists === true) {\n    results.push({\n      json: {\n        asset_id: inputData.asset_id,\n        name: inputData.name,\n        routing_skipped: true,\n        skip_reason: 'Already in validation queue',\n        routing_decision: 'DUPLICATE_SKIP'\n      }\n    });\n    continue;\n  }\n  \n  // ============================================================\n  // Extract CRE assessment from OBJECT-3\n  // ============================================================\n  const creAssessment = inputData.cre_assessment || {};\n  \n  // Gen 4 CRE fields (from OBJECT-3 or defaults)\n  const cf1_trl = creAssessment.cf1_trl || { passed: true, inferred_level: null, confidence: null };\n  const cf5_regulatory = creAssessment.cf5_regulatory || { passed: true, warnings_count: 0 };\n  const blockingFailures = creAssessment.blocking_failures || [];\n  const penalisingFailures = creAssessment.penalising_failures || [];\n  const requiresHitl = creAssessment.requires_hitl || false;\n  const crePenalty = creAssessment.cre_penalty || 0;\n  \n  // ============================================================\n  // PRIORITY 1: Check for blocking failures (CF1, CF5)\n  // ============================================================\n  if (blockingFailures.length > 0) {\n    results.push({\n      json: {\n        ...inputData,\n        routing_decision: 'CRE_BLOCKED',\n        blocked_by_cre: true,\n        cre_evaluated: true,\n        cre_assessment: creAssessment,\n        blocking_failures: blockingFailures,\n        penalising_failures: penalisingFailures,\n        requires_hitl: requiresHitl,\n        escalation_flags: blockingFailures,\n        cre_penalty: crePenalty,\n        // Pre-set routing for blocked items\n        queue: 'reject_queue',\n        status: 'rejected',\n        routing_reason: `CRE blocking constraint failed: ${blockingFailures.join(', ')}`,\n        threshold_applied: 'CRE_BLOCK',\n        approved_at: null,\n        routed_at: new Date().toISOString(),\n        routing_skipped: false\n      }\n    });\n    continue;\n  }\n  \n  // ============================================================\n  // PRIORITY 2: Check for HITL requirement (CF12 Path C)\n  // ============================================================\n  if (requiresHitl) {\n    results.push({\n      json: {\n        ...inputData,\n        routing_decision: 'CRE_HITL_REQUIRED',\n        blocked_by_cre: false,\n        cre_evaluated: true,\n        cre_assessment: creAssessment,\n        blocking_failures: blockingFailures,\n        penalising_failures: penalisingFailures,\n        requires_hitl: true,\n        escalation_flags: ['cf12_hitl_required', ...penalisingFailures],\n        cre_penalty: crePenalty,\n        // Pre-set routing for HITL items\n        queue: 'human_review_queue',\n        status: 'pending_review',\n        routing_reason: 'CF12 inference requires expert validation (HITL)',\n        threshold_applied: 'CRE_HITL',\n        approved_at: null,\n        routed_at: new Date().toISOString(),\n        routing_skipped: false\n      }\n    });\n    continue;\n  }\n  \n  // ============================================================\n  // PRIORITY 3: No CRE blocking - pass to confidence routing\n  // Include penalising failures in escalation_flags\n  // ============================================================\n  results.push({\n    json: {\n      ...inputData,\n      routing_decision: 'CRE_PASSED',\n      blocked_by_cre: false,\n      cre_evaluated: true,\n      cre_assessment: creAssessment,\n      blocking_failures: blockingFailures,\n      penalising_failures: penalisingFailures,\n      requires_hitl: false,\n      escalation_flags: penalisingFailures,  // Pass along for visibility\n      cre_penalty: crePenalty,\n      // Leave routing fields null - will be set by confidence routing\n      queue: null,\n      status: null,\n      routing_reason: null,\n      threshold_applied: null,\n      approved_at: null,\n      routed_at: null,\n      routing_skipped: false\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        992
+      ],
+      "id": "ae45e473-6445-4f33-a153-248365f7fdf7",
+      "name": "Check CRE Blocking"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cre-block-condition",
+              "leftValue": "={{ $json.routing_decision }}",
+              "rightValue": "CRE_PASSED",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -544,
+        992
+      ],
+      "id": "834d6ce4-aa7f-4175-893a-7345e6b7e74c",
+      "name": "If CRE Already Routed"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Merge CRE and Confidence Routing\n// PURPOSE: Combine outputs from CRE-routed and confidence-routed paths\n// FIX: Process ALL items, not just first\n\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const inputData = item.json;\n  \n  // If routing_skipped, pass through (duplicate detection)\n  if (inputData.routing_skipped) {\n    results.push({ json: inputData });\n    continue;\n  }\n  \n  // Build final routing record\n  results.push({\n    json: {\n      // FATObject data\n      asset_id: inputData.asset_id,\n      name: inputData.name,\n      orcid: inputData.orcid,\n      institution: inputData.institution,\n      classified_at: inputData.classified_at,\n      classified_by: inputData.classified_by,\n      classifications: inputData.classifications,\n      classification_count: inputData.classification_count,\n      standard_a_count: inputData.standard_a_count || 0,\n      standard_b_count: inputData.standard_b_count || 0,\n      \n      // Routing decision\n      queue: inputData.queue,\n      status: inputData.status,\n      confidence: inputData.confidence || inputData.final_confidence,\n      threshold_applied: inputData.threshold_applied,\n      routing_reason: inputData.routing_reason,\n      routing_decision: inputData.routing_decision,\n      approved_at: inputData.approved_at,\n      blocked_by_cre: inputData.blocked_by_cre || false,\n      \n      // Assessment context\n      assessment_flags: inputData.assessment_flags || {\n        constraint_results: {\n          cf1_trl: inputData.cre_assessment?.cf1_trl || {},\n          cf5_regulatory: inputData.cre_assessment?.cf5_regulatory || {}\n        },\n        blocking_failures: inputData.blocking_failures || [],\n        penalising_failures: inputData.penalising_failures || [],\n        requires_hitl: inputData.requires_hitl || false\n      },\n      escalation_flags: inputData.escalation_flags || [],\n      cre_assessment: inputData.cre_assessment,\n      hitl_validation: inputData.hitl_validation || null,\n      \n      // Version tracking\n      classification_version: inputData.classification_version || 'v3.6.1',\n      routing_version: inputData.routing_version || 'v3.5',\n      \n      // Routing metadata\n      routed_at: inputData.routed_at || new Date().toISOString(),\n      routing_skipped: false\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        1072
+      ],
+      "id": "06f1740e-33bd-4343-aa7c-f4d5fa07491d",
+      "name": "Merge Routing Paths"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "db929774-8cca-43eb-99f7-0b8fe930b7c0",
+              "leftValue": "={{ $json.routing_skipped }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -96,
+        1072
+      ],
+      "id": "939428f5-7ed4-43a6-8ae7-e66905f36538",
+      "name": "If Duplicate Skip"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.postgres_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        352,
+        1088
+      ],
+      "id": "903f1d15-2311-468f-9fd6-5ddbadceb4a5",
+      "name": "Write to validation_queue",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Skip Output (Duplicate Detected)\n// PURPOSE: Format output for skipped routing\n\nconst inputData = $input.first().json;\n\nreturn [{\n  json: {\n    routing_success: false,\n    routing_skipped: true,\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    skip_reason: inputData.skip_reason,\n    existing_queue: inputData.existing_queue,\n    existing_status: inputData.existing_status,\n    message: `Routing skipped: ${inputData.skip_reason}`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        944
+      ],
+      "id": "7b221814-4555-4ef8-8529-300cbd1b9a2e",
+      "name": "Skip Output"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2128,
+        992
+      ],
+      "id": "b072886a-4955-4ec0-99d9-50b39e264525",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Fetch Classified FATObjects\n// PURPOSE: Query Neo4j for FATObjects with status='classified'\n// Gen 4: Enhanced to fetch CRE assessment data\n\nconst inputData = $input.first().json;\n\n// Use provided asset_id, or fetch all classified if none specified\nconst specificAssetId = inputData.asset_id || null;\n\nlet cypherPayload;\n\nif (specificAssetId) {\n  // Fetch specific researcher with CRE assessment data\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject {asset_id: $asset_id, status: 'classified'})\n      OPTIONAL MATCH (fat)-[r:CLASSIFIED_AS]->(std:Standard)\n      WITH fat, collect({\n        code: std.code,\n        name: std.name,\n        taxonomy: std.taxonomy,\n        confidence: r.confidence,\n        justification: r.justification,\n        evidence: r.evidence,\n        cf1_validated: r.cf1_validated,\n        cre_assessment: r.cre_assessment\n      }) AS classifications\n      RETURN \n        fat.asset_id AS asset_id,\n        fat.name AS name,\n        fat.orcid AS orcid,\n        fat.institution AS institution,\n        fat.status AS status,\n        fat.final_confidence AS final_confidence,\n        fat.classified_at AS classified_at,\n        fat.classified_by AS classified_by,\n        fat.cre_assessment AS cre_assessment,\n        classifications\n    `,\n    parameters: {\n      asset_id: specificAssetId\n    }\n  };\n} else {\n  // Fetch ALL classified FATObjects with CRE data\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject {status: 'classified'})\n      OPTIONAL MATCH (fat)-[r:CLASSIFIED_AS]->(std:Standard)\n      WITH fat, collect({\n        code: std.code,\n        name: std.name,\n        taxonomy: std.taxonomy,\n        confidence: r.confidence,\n        justification: r.justification,\n        evidence: r.evidence,\n        cf1_validated: r.cf1_validated,\n        cre_assessment: r.cre_assessment\n      }) AS classifications\n      RETURN \n        fat.asset_id AS asset_id,\n        fat.name AS name,\n        fat.orcid AS orcid,\n        fat.institution AS institution,\n        fat.status AS status,\n        fat.final_confidence AS final_confidence,\n        fat.classified_at AS classified_at,\n        fat.classified_by AS classified_by,\n        fat.cre_assessment AS cre_assessment,\n        classifications\n      ORDER BY fat.classified_at DESC\n    `,\n    parameters: {}\n  };\n}\n\nreturn [{\n  json: {\n    requested_asset_id: specificAssetId,\n    fetch_mode: specificAssetId ? 'single' : 'all',\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1904,
+        992
+      ],
+      "id": "21cc180f-184a-42ea-88bb-0d802da326d2",
+      "name": "Prepare Fetch Classified Status"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1680,
+        992
+      ],
+      "id": "51bf4c02-9705-4986-9597-3526220fae67",
+      "name": "Fetch Classified FATObjects",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Neo4j Response - Gen 4 Enhanced\n// PURPOSE: Extract FATObject data and parse CRE assessment\n// FIX: Process ALL items, not just first\n\nconst neo4jResponse = $input.first().json;\n\n// Handle response structure\nconst responseData = Array.isArray(neo4jResponse) ? neo4jResponse[0] : neo4jResponse;\nconst fields = responseData.data?.fields || [];\nconst values = responseData.data?.values || [];\n\nif (values.length === 0) {\n  throw new Error('No classified FATObjects found');\n}\n\nconst results = [];\n\nfor (const row of values) {\n  // Map fields to values\n  const obj = {};\n  fields.forEach((field, idx) => {\n    obj[field] = row[idx];\n  });\n  \n  // ============================================================\n  // Gen 4: Parse CRE assessment from JSON string\n  // ============================================================\n  let creAssessment = {};\n  \n  if (obj.cre_assessment) {\n    try {\n      // Neo4j stores as JSON string - parse it\n      creAssessment = typeof obj.cre_assessment === 'string' \n        ? JSON.parse(obj.cre_assessment) \n        : obj.cre_assessment;\n    } catch (e) {\n      console.log(`⚠️ Failed to parse cre_assessment for ${obj.asset_id}: ${e.message}`);\n      creAssessment = {};\n    }\n  }\n  \n  // ============================================================\n  // Parse classifications - separate Standard A and Standard B\n  // ============================================================\n  let classifications = [];\n  \n  if (obj.classifications) {\n    try {\n      classifications = typeof obj.classifications === 'string'\n        ? JSON.parse(obj.classifications)\n        : obj.classifications;\n    } catch (e) {\n      console.log(`⚠️ Failed to parse classifications: ${e.message}`);\n      classifications = [];\n    }\n  }\n  \n  // Separate by taxonomy\n  const standardAClassifications = classifications.filter(c => \n    c.taxonomy === null || c.taxonomy === 'ANZSRC_FoR_2020' || typeof c.code === 'number'\n  );\n  const standardBClassifications = classifications.filter(c => \n    c.taxonomy === 'oecd_fos_2007' || c.taxonomy === 'OECD_FOS_2007'\n  );\n  \n  results.push({\n    json: {\n      // Core identifiers\n      asset_id: obj.asset_id,\n      name: obj.name,\n      orcid: obj.orcid,\n      institution: obj.institution,\n      \n      // Classification status\n      status: obj.status,\n      final_confidence: obj.final_confidence,\n      classified_at: obj.classified_at,\n      classified_by: obj.classified_by,\n      \n      // Classifications (combined for compatibility)\n      classifications: classifications,\n      classification_count: classifications.length,\n      standard_a_count: standardAClassifications.length,\n      standard_b_count: standardBClassifications.length,\n      \n      // ============================================================\n      // Gen 4: CRE Assessment (parsed from Neo4j)\n      // ============================================================\n      cre_assessment: creAssessment,\n      \n      // Extract key CRE fields for easy access\n      cf1_trl: creAssessment.cf1_trl || { passed: true, gate_mode: 'block' },\n      cf5_regulatory: creAssessment.cf5_regulatory || { passed: true, gate_mode: 'block' },\n      blocking_failures: creAssessment.blocking_failures || [],\n      penalising_failures: creAssessment.penalising_failures || [],\n      requires_hitl: creAssessment.requires_hitl || false,\n      cre_penalty: creAssessment.cre_penalty || 0,\n      crosswalk_assessment: creAssessment.crosswalk_assessment || {}\n    }\n  });\n}\n\nconsole.log(`✅ Parsed ${results.length} FATObjects with CRE assessment`);\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1456,
+        992
+      ],
+      "id": "9c84e959-ef17-4829-ae11-21f92c3c07be",
+      "name": "Parse Neo4j Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Duplicate Check\n// PURPOSE: Format payload for Supabase RPC call\n// FIX: Process ALL items, not just first\n\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  results.push({\n    json: {\n      // Pass through all data\n      asset_id: data.asset_id,\n      name: data.name,\n      orcid: data.orcid,\n      institution: data.institution,\n      status: data.status,\n      final_confidence: data.final_confidence,\n      classified_at: data.classified_at,\n      classified_by: data.classified_by,\n      classifications: data.classifications,\n      classification_count: data.classification_count,\n      standard_a_count: data.standard_a_count,\n      standard_b_count: data.standard_b_count,\n      \n      // Gen 4: CRE assessment\n      cre_assessment: data.cre_assessment,\n      \n      // Supabase RPC payload\n      supabase_rpc_payload: {\n        p_asset_id: data.asset_id\n      }\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1216,
+        992
+      ],
+      "id": "3d8f6988-cff6-4892-9396-dd810125bbe4",
+      "name": "Prepare Duplicate Check"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/rpc/check_duplicate_routing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_rpc_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -992,
+        992
+      ],
+      "id": "61e2099d-2efb-4a48-9658-33d055cccb78",
+      "name": "Check Duplicate (Postgre)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Apply Routing Thresholds (Gen 4 Enhanced)\n// PURPOSE: Apply confidence-based routing for items that passed CRE\n// THRESHOLDS:\n//   >= 0.85 -> auto_approve_queue\n//   0.60-0.85 -> human_review_queue\n//   < 0.60 -> reject_queue\n// Gen 4: Optionally force human review if penalising failures exist\n// FIX: Process ALL items, not just first\n// ============================================================\n\nconst items = $input.all();\nconst results = [];\n\n// Routing thresholds\nconst THRESHOLD_AUTO_APPROVE = 0.85;\nconst THRESHOLD_HUMAN_REVIEW = 0.60;\n\n// Configuration: Force human review if penalising failures exist?\nconst FORCE_REVIEW_ON_PENALTIES = false; // Set to true to be more conservative\n\nfor (const item of items) {\n  const inputData = item.json;\n  \n  // Safety check: should have passed CRE at this point\n  if (inputData.routing_decision !== 'CRE_PASSED') {\n    // Already routed by CRE (blocked or HITL), pass through\n    results.push({ json: inputData });\n    continue;\n  }\n  \n  const confidence = inputData.final_confidence || 0;\n  const penalisingFailures = inputData.penalising_failures || [];\n  const escalationFlags = [...(inputData.escalation_flags || [])];\n  \n  let queue, status, thresholdApplied, routingReason, approvedAt;\n  \n  // ============================================================\n  // Apply confidence thresholds\n  // ============================================================\n  if (confidence >= THRESHOLD_AUTO_APPROVE) {\n    // Check if we should force human review due to penalties\n    if (FORCE_REVIEW_ON_PENALTIES && penalisingFailures.length > 0) {\n      queue = 'human_review_queue';\n      status = 'pending_review';\n      thresholdApplied = '>=0.85 (forced review)';\n      approvedAt = null;\n      routingReason = `High confidence (${(confidence * 100).toFixed(2)}%) but penalising constraint failures detected: ${penalisingFailures.join(', ')}. Escalated for human review.`;\n      escalationFlags.push('high_confidence_with_penalties');\n    } else {\n      queue = 'auto_approve_queue';\n      status = 'auto_approved';\n      thresholdApplied = '>=0.85';\n      approvedAt = new Date().toISOString();\n      \n      // Build routing reason with CRE context\n      let reasonParts = [`High confidence (${(confidence * 100).toFixed(2)}%) exceeds auto-approve threshold.`];\n      \n      if (inputData.cre_assessment?.cf1_trl?.passed) {\n        reasonParts.push(`TRL ${inputData.cre_assessment.cf1_trl.inferred_level || 'N/A'} validated.`);\n      }\n      if (inputData.cre_assessment?.cf5_regulatory?.passed) {\n        reasonParts.push('No regulatory blocks.');\n      }\n      if (penalisingFailures.length > 0) {\n        reasonParts.push(`Note: ${penalisingFailures.length} minor constraint warning(s).`);\n      }\n      \n      routingReason = reasonParts.join(' ');\n    }\n    \n  } else if (confidence >= THRESHOLD_HUMAN_REVIEW) {\n    queue = 'human_review_queue';\n    status = 'pending_review';\n    thresholdApplied = '0.60-0.85';\n    approvedAt = null;\n    \n    let reasonParts = [`Medium confidence (${(confidence * 100).toFixed(2)}%) requires human review.`];\n    \n    if (penalisingFailures.length > 0) {\n      reasonParts.push(`Constraint warnings: ${penalisingFailures.join(', ')}.`);\n    }\n    \n    routingReason = reasonParts.join(' ');\n    \n  } else {\n    queue = 'reject_queue';\n    status = 'rejected';\n    thresholdApplied = '<0.60';\n    approvedAt = null;\n    routingReason = `Low confidence (${(confidence * 100).toFixed(2)}%) below minimum threshold. Classification rejected.`;\n  }\n  \n  // ============================================================\n  // Build assessment_flags for queue record\n  // ============================================================\n  const cre = inputData.cre_assessment || {};\n  \n  const assessmentFlags = {\n    // Classification metrics\n    classification_count: inputData.classification_count,\n    standard_a_count: inputData.standard_a_count,\n    standard_b_count: inputData.standard_b_count,\n    \n    // Crosswalk alignment\n    crosswalk_alignment: cre.crosswalk_assessment?.alignment_score || null,\n    crosswalk_modifier: cre.crosswalk_assessment?.modifier || 0,\n    \n    // Gen 4: CRE constraint results\n    constraint_results: {\n      cf1_trl: {\n        passed: cre.cf1_trl?.passed || true,\n        gate_mode: cre.cf1_trl?.gate_mode || 'block',\n        inferred_level: cre.cf1_trl?.inferred_level || null,\n        confidence: cre.cf1_trl?.confidence || null\n      },\n      cf5_regulatory: {\n        passed: cre.cf5_regulatory?.passed || true,\n        gate_mode: cre.cf5_regulatory?.gate_mode || 'block',\n        warnings: cre.cf5_regulatory?.warnings || []\n      }\n    },\n    \n    // Failure tracking\n    blocking_failures: inputData.blocking_failures || [],\n    penalising_failures: penalisingFailures,\n    requires_hitl: false,\n    cre_penalty: inputData.cre_penalty || 0,\n    \n    // Warnings\n    warnings: cre.warnings || []\n  };\n  \n  results.push({\n    json: {\n      // FATObject data\n      asset_id: inputData.asset_id,\n      name: inputData.name,\n      orcid: inputData.orcid,\n      institution: inputData.institution,\n      classified_at: inputData.classified_at,\n      classified_by: inputData.classified_by,\n      classifications: inputData.classifications,\n      classification_count: inputData.classification_count,\n      standard_a_count: inputData.standard_a_count,\n      standard_b_count: inputData.standard_b_count,\n      \n      // Routing decision\n      queue: queue,\n      status: status,\n      confidence: confidence,\n      threshold_applied: thresholdApplied,\n      routing_reason: routingReason,\n      routing_decision: status === 'auto_approved' ? 'CONFIDENCE_AUTO' : status === 'pending_review' ? 'CONFIDENCE_REVIEW' : 'CONFIDENCE_REJECT',\n      approved_at: approvedAt,\n      blocked_by_cre: false,\n      \n      // Assessment context\n      assessment_flags: assessmentFlags,\n      escalation_flags: escalationFlags,\n      cre_assessment: inputData.cre_assessment,\n      \n      // Version tracking\n      classification_version: 'v3.6.1',\n      routing_version: 'v3.5',\n      \n      // Routing metadata\n      routed_at: new Date().toISOString(),\n      routing_skipped: false\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        1216
+      ],
+      "id": "5668395c-95db-4c0f-a32d-c519e7f36553",
+      "name": "Apply Routing Thresholds"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Queue Insert (Gen 4 Enhanced)\n// PURPOSE: Build PostgreSQL payload with CRE fields\n// FIX: Process ALL items, not just first\n\nconst items = $input.all();\nconst results = [];\n\n// Generate queue_entry_id (UUID v4)\nconst generateUUID = () => {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n};\n\nfor (const item of items) {\n  const inputData = item.json;\n  const queueEntryId = generateUUID();\n  \n  // Build PostgreSQL payload\n  const postgresPayload = {\n    queue_entry_id: queueEntryId,\n    asset_id: inputData.asset_id,\n    queue: inputData.queue,\n    status: inputData.status,\n    confidence: inputData.confidence,\n    threshold_applied: inputData.threshold_applied,\n    routing_reason: inputData.routing_reason,\n    \n    // Assessment flags (JSONB)\n    assessment_flags: inputData.assessment_flags,\n    \n    // Gen 4: Escalation flags array\n    escalation_flags: inputData.escalation_flags || [],\n    \n    // Gen 4: CRE-specific fields\n    cre_blocking_failures: inputData.blocking_failures || inputData.assessment_flags?.blocking_failures || [],\n    cre_penalising_failures: inputData.penalising_failures || inputData.assessment_flags?.penalising_failures || [],\n    cre_requires_hitl: inputData.requires_hitl || false,\n    blocked_by_cre: inputData.blocked_by_cre || false,\n    \n    // Gen 4: HITL validation metadata (for CF12 items)\n    hitl_validation: inputData.hitl_validation || null,\n    \n    // Workflow tracking\n    synced: false,\n    routed_at: inputData.routed_at,\n    approved_at: inputData.approved_at,\n    classification_version: inputData.classification_version,\n    routing_version: inputData.routing_version\n  };\n  \n  results.push({\n    json: {\n      ...inputData,\n      queue_entry_id: queueEntryId,\n      postgres_payload: postgresPayload\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        1088
+      ],
+      "id": "e7d8324a-df43-43ab-bfd5-a538b4df589c",
+      "name": "Prepare Queue Insert"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Final Output (Gen 4 Enhanced)\n// PURPOSE: Format routing result with full CRE visibility\n// FIX: Process ALL items, not just first\n// ============================================================\n\nconst routingItems = $('Prepare Queue Insert').all();\nconst queueResults = $input.all();\nconst results = [];\n\nfor (let i = 0; i < routingItems.length; i++) {\n  const routingData = routingItems[i].json;\n  const queueResult = queueResults[i]?.json;\n  \n  // Handle array response from Supabase\n  const insertedRecord = Array.isArray(queueResult) ? queueResult[0] : queueResult;\n  const cre = routingData.cre_assessment || {};\n  \n  const output = {\n    // === Routing Result ===\n    routing_success: true,\n    asset_id: routingData.asset_id,\n    name: routingData.name,\n    institution: routingData.institution,\n    \n    // === Queue Assignment ===\n    queue: routingData.queue,\n    status: routingData.status,\n    confidence: routingData.confidence,\n    threshold_applied: routingData.threshold_applied,\n    routing_reason: routingData.routing_reason,\n    routing_decision: routingData.routing_decision,\n    \n    // === Gen 4: CRE Assessment Summary ===\n    cre_summary: {\n      blocked_by_cre: routingData.blocked_by_cre,\n      requires_hitl: routingData.cre_requires_hitl || false,\n      cf1_trl: {\n        passed: cre.cf1_trl?.passed || true,\n        inferred_level: cre.cf1_trl?.inferred_level || null,\n        confidence: cre.cf1_trl?.confidence || null\n      },\n      cf5_regulatory: {\n        passed: cre.cf5_regulatory?.passed || true,\n        warnings_count: (cre.cf5_regulatory?.warnings || []).length\n      },\n      blocking_failures: routingData.blocking_failures || [],\n      penalising_failures: routingData.penalising_failures || [],\n      escalation_flags: routingData.escalation_flags || []\n    },\n    \n    // === Queue Record ===\n    queue_entry_id: insertedRecord?.queue_entry_id || routingData.queue_entry_id,\n    routed_at: routingData.routed_at,\n    approved_at: routingData.approved_at,\n    \n    // === Next Step ===\n    next_step: routingData.status === 'auto_approved' \n      ? 'OBJECT-5 will sync to Neo4j (status → active)'\n      : routingData.status === 'pending_review'\n        ? routingData.cre_requires_hitl \n          ? 'Awaiting expert validation (CF12 HITL)'\n          : 'Awaiting curator review'\n        : 'Rejected - may need re-classification or constraint remediation',\n    \n    // === Metadata ===\n    metadata: {\n      classification_version: routingData.classification_version,\n      routing_version: routingData.routing_version,\n      classification_count: routingData.classification_count,\n      standard_a_count: routingData.standard_a_count,\n      standard_b_count: routingData.standard_b_count,\n      workflow: 'OBJECT-4_v3.5_Gen4'\n    }\n  };\n  \n  // Log routing summary\n  console.log(`✅ Routing Complete: ${output.name}`);\n  console.log(`   Queue: ${output.queue}`);\n  console.log(`   Status: ${output.status}`);\n  console.log(`   Confidence: ${(output.confidence * 100).toFixed(2)}%`);\n  console.log(`   Blocked by CRE: ${output.cre_summary.blocked_by_cre}`);\n  console.log(`   Requires HITL: ${output.cre_summary.requires_hitl}`);\n  console.log(`   Next: ${output.next_step}`);\n  \n  results.push({ json: output });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        1088
+      ],
+      "id": "46c9dc9c-d10a-44e3-bb58-c69a9c670602",
+      "name": "Final Output"
+    }
+  ],
+  "pinData": {
+    "When clicking ‘Execute workflow’": [
+      {
+        "json": {}
+      }
+    ]
+  },
+  "connections": {
+    "Check CRE Blocking": {
+      "main": [
+        [
+          {
+            "node": "If CRE Already Routed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If CRE Already Routed": {
+      "main": [
+        [
+          {
+            "node": "Merge Routing Paths",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Apply Routing Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Routing Paths": {
+      "main": [
+        [
+          {
+            "node": "If Duplicate Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Duplicate Skip": {
+      "main": [
+        [
+          {
+            "node": "Skip Output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Queue Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to validation_queue": {
+      "main": [
+        [
+          {
+            "node": "Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Classified Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Classified Status": {
+      "main": [
+        [
+          {
+            "node": "Fetch Classified FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Classified FATObjects": {
+      "main": [
+        [
+          {
+            "node": "Parse Neo4j Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Neo4j Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Duplicate Check": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate (Postgre)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate (Postgre)": {
+      "main": [
+        [
+          {
+            "node": "Check CRE Blocking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Routing Thresholds": {
+      "main": [
+        [
+          {
+            "node": "Merge Routing Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Queue Insert": {
+      "main": [
+        [
+          {
+            "node": "Write to validation_queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "73ecd3f0-7904-4205-b9b9-07416fda0a70",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "ADGQPItx3DGH6qVn",
+  "tags": []
+}

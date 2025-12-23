@@ -1,0 +1,1950 @@
+{
+  "name": "SYSTEM-1_v3.2",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst enrichedItems = [];\n\nfor (const item of items) {\n  const code = item.json.code;\n  const name = item.json.name;\n  const codeStr = code.toString();\n  \n  // Parse provenance from JSON string\n  let provenance;\n  try {\n    provenance = typeof item.json.provenance === 'string' \n      ? JSON.parse(item.json.provenance) \n      : item.json.provenance;\n  } catch (e) {\n    provenance = {\n      source: 'ANZSRC_FoR_2020',\n      created_at: new Date().toISOString(),\n      ingestion_method: 'unknown'\n    };\n  }\n  \n  // Parse ANZSRC hierarchy from code length\n  let hierarchy = {};\n  \n  if (codeStr.length === 2) {\n    // Division level (e.g., \"30\")\n    hierarchy = {\n      level: \"division\",\n      division_code: codeStr,\n      division_name: name,\n      group_code: null,\n      field_code: null\n    };\n  } else if (codeStr.length === 4) {\n    // Group level (e.g., \"3001\")\n    hierarchy = {\n      level: \"group\",\n      division_code: codeStr.substring(0, 2),\n      group_code: codeStr,\n      group_name: name,\n      field_code: null\n    };\n  } else if (codeStr.length === 6) {\n    // Field level (e.g., \"300101\")\n    hierarchy = {\n      level: \"field\",\n      division_code: codeStr.substring(0, 2),\n      group_code: codeStr.substring(0, 4),\n      field_code: codeStr,\n      field_name: name\n    };\n  }\n  \n  // Build enriched structure\n  const enriched = {\n    asset_id: item.json.asset_id,\n    code: code,\n    name: name,\n    standard_version: item.json.standard_version,\n    hierarchy: hierarchy,\n    hierarchy_json: JSON.stringify(hierarchy), // For Neo4j storage\n    provenance: provenance,\n    pass1_timestamp: new Date().toISOString()\n  };\n  \n  enrichedItems.push({ json: enriched });\n}\n\nreturn enrichedItems;"
+      },
+      "id": "3a3a26b4-0bad-4a8c-895a-78e5c15d30ff",
+      "name": "Pass 1: Structural Enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1456,
+        80
+      ],
+      "notes": "Deterministic hierarchy parsing. Extract division/group/field structure from ANZSRC codes."
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -3216,
+        -144
+      ],
+      "id": "b256ed46-2ef9-4b87-b541-f894e56b3db3",
+      "name": "Start Field Enrichment"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Fetch Thin Standards\nconst batchSize = 20;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR)\n        WHERE s.status = $status\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          standard_version: s.standard_version,\n          provenance: s.provenance,\n          level: s.level\n        } as standard_data\n        ORDER BY s.code\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"thin\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2192,
+        80
+      ],
+      "id": "b38c1cc7-3d8d-4f46-9d41-c88f510d71b8",
+      "name": "Prepare Neo4j Query for Standards"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1920,
+        80
+      ],
+      "id": "c029cb18-eb25-4793-a3f3-a6f18722bef3",
+      "name": "Fetch Thin Standards",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst allStandards = [];\n\nfor (const item of items) {\n  const response = item.json;\n  \n  // Check for Neo4j errors\n  if (response.errors && response.errors.length > 0) {\n    console.error('Neo4j errors:', response.errors);\n    throw new Error(`Neo4j query failed: ${response.errors[0].message}`);\n  }\n  \n  // Neo4j HTTP response is wrapped in an array\n  const resultWrapper = Array.isArray(response) ? response[0] : response;\n  \n  // Extract the data array\n  const dataArray = resultWrapper?.data;\n  \n  if (!dataArray) {\n    console.warn('No data returned from Neo4j');\n    continue;\n  }\n  \n  // dataArray has structure: { fields: [...], values: [[{...}], [{...}], ...] }\n  const values = dataArray.values;\n  \n  if (!values || values.length === 0) {\n    console.warn('No values in Neo4j response');\n    continue;\n  }\n  \n  // Parse each row - each value is an array with one object\n  for (const valueRow of values) {\n    const standardData = valueRow[0]; // Get the standard_data object\n    \n    allStandards.push({\n      json: {\n        asset_id: standardData.asset_id,\n        code: standardData.code,\n        name: standardData.name,\n        standard_version: standardData.standard_version,\n        provenance: standardData.provenance,\n        level: standardData.level\n      }\n    });\n  }\n}\n\nreturn allStandards;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1712,
+        80
+      ],
+      "id": "e738d285-8e06-4376-8614-c52ab0791ec5",
+      "name": "Parse Neo4j HTTP Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Create ONE batch update for all items\nconst allUpdates = items.map(item => ({\n  asset_id: item.json.asset_id,\n  status: \"raw\",\n  hierarchy_json: item.json.hierarchy_json,\n  pass1_timestamp: item.json.pass1_timestamp\n}));\n\n// Single batched query\nconst batchQuery = {\n  statement: `\n    UNWIND $updates AS update\n    MATCH (s:Standard {asset_id: update.asset_id})\n    SET s.status = update.status,\n        s.hierarchy_json = update.hierarchy_json,\n        s.pass1_timestamp = update.pass1_timestamp,\n        s.updated_at = datetime()\n    RETURN {\n      asset_id: s.asset_id,\n      status: s.status\n    } as result\n  `,\n  parameters: {\n    updates: allUpdates\n  }\n};\n\nreturn [{\n  json: {\n    neo4j_payload: batchQuery,\n    original_items: items.map(i => i.json) // STORE ALL ORIGINAL DATA\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1248,
+        80
+      ],
+      "id": "c7f27b50-30e2-49e6-8ff9-4733f6f45fff",
+      "name": "Prepare Update Status to 'raw'"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -976,
+        80
+      ],
+      "id": "b174d0d6-ed0f-4e3e-b2f3-e723c6d40fae",
+      "name": "Execute Neo4j HTTP Request (Update Status)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Parse the Neo4j response\nconst response = items[0]?.json;\n\n// Unwrap response array\nconst resultWrapper = Array.isArray(response) ? response[0] : response;\n\n// Check for errors\nif (resultWrapper?.errors && resultWrapper.errors.length > 0) {\n  console.error('Neo4j errors:', resultWrapper.errors);\n  throw new Error(`Neo4j update failed: ${resultWrapper.errors[0].message}`);\n}\n\nconst dataArray = resultWrapper?.data;\n\nif (!dataArray || !dataArray.values) {\n  throw new Error('No data returned from Neo4j update');\n}\n\n// Extract all updated asset_ids\nconst updatedAssetIds = dataArray.values.map(valueRow => {\n  const result = valueRow[0];\n  return result.asset_id;\n});\n\nconsole.log(`Successfully updated ${updatedAssetIds.length} standards to status='raw'`);\n\n// Now prepare to re-fetch the full data\nreturn [{\n  json: {\n    updated_asset_ids: updatedAssetIds,\n    updated_count: updatedAssetIds.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        80
+      ],
+      "id": "e3c1f50d-d7c5-4f18-b6f5-6bac4816a7d2",
+      "name": "Parse Update Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst assetIds = items[0].json.updated_asset_ids;\n\nif (!assetIds || assetIds.length === 0) {\n  throw new Error('No asset_ids to fetch');\n}\n\nconst singleQuery = {\n  statement: `\n    MATCH (s:Standard:FoR)\n    WHERE s.asset_id IN $asset_ids\n      AND s.status = $status\n    RETURN {\n      asset_id: s.asset_id,\n      code: s.code,\n      name: s.name,\n      standard_version: s.standard_version,\n      hierarchy_json: s.hierarchy_json,\n      provenance: s.provenance,\n      level: s.level,\n      pass1_timestamp: s.pass1_timestamp\n    } as standard_data\n    ORDER BY s.code\n  `,\n  parameters: {\n    asset_ids: assetIds,\n    status: \"raw\"\n  }\n};\n\nreturn [{\n  json: {\n    neo4j_payload: singleQuery\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        80
+      ],
+      "id": "8689f63b-42e3-435a-827a-58de7a9e261c",
+      "name": "Re-Fetch Standards with Full Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        80
+      ],
+      "id": "d865c5f9-8301-4072-96ab-8e979a731be7",
+      "name": "Execute Neo4j HTTP Request (Re-fetch Full Data)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst allStandards = [];\n\nfor (const item of items) {\n  const response = item.json;\n  \n  // Check for errors\n  if (response.errors && response.errors.length > 0) {\n    console.error('Neo4j errors:', response.errors);\n    throw new Error(`Neo4j query failed: ${response.errors[0].message}`);\n  }\n  \n  // Unwrap response array\n  const resultWrapper = Array.isArray(response) ? response[0] : response;\n  const dataArray = resultWrapper?.data;\n  \n  if (!dataArray || !dataArray.values) {\n    console.warn('No data returned from Neo4j');\n    continue;\n  }\n  \n  // Parse each row\n  for (const valueRow of dataArray.values) {\n    const standardData = valueRow[0];\n    \n    // Parse hierarchy_json\n    let hierarchy;\n    try {\n      hierarchy = typeof standardData.hierarchy_json === 'string'\n        ? JSON.parse(standardData.hierarchy_json)\n        : standardData.hierarchy_json;\n    } catch (e) {\n      console.error('Failed to parse hierarchy:', e);\n      hierarchy = {};\n    }\n    \n    // Parse provenance\n    let provenance;\n    try {\n      provenance = typeof standardData.provenance === 'string'\n        ? JSON.parse(standardData.provenance)\n        : standardData.provenance;\n    } catch (e) {\n      console.error('Failed to parse provenance:', e);\n      provenance = {};\n    }\n    \n    allStandards.push({\n      json: {\n        asset_id: standardData.asset_id,\n        code: standardData.code,\n        name: standardData.name,\n        standard_version: standardData.standard_version,\n        hierarchy: hierarchy,\n        provenance: provenance,\n        level: standardData.level,\n        pass1_timestamp: standardData.pass1_timestamp\n      }\n    });\n  }\n}\n\nreturn allStandards;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2416,
+        512
+      ],
+      "id": "a6565f9f-1ef5-453f-93c0-3cf05456e440",
+      "name": "Parse Re-fetched Standards"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// We have all 50 standards with complete data\nconst assetIds = items.map(item => item.json.asset_id);\n\nconsole.log(`Preparing to fetch relationships for ${assetIds.length} standards`);\n\nconst singleQuery = {\n  statement: `\n    UNWIND $asset_ids AS aid\n    MATCH (s:Standard {asset_id: aid})\n    WHERE s.status = $status\n    OPTIONAL MATCH (s)-[:BELONGS_TO]->(parent:Standard)\n    OPTIONAL MATCH (child:Standard)-[:BELONGS_TO]->(s)\n    WITH s,\n         parent.code AS parent_code,\n         parent.name AS parent_name,\n         collect(DISTINCT {code: child.code, name: child.name}) AS children\n    RETURN {\n      asset_id: s.asset_id,\n      parent_code: parent_code,\n      parent_name: parent_name,\n      children: CASE WHEN size(children) > 0 AND children[0].code IS NOT NULL \n                     THEN children \n                     ELSE [] \n                END\n    } as relationship_data\n    ORDER BY s.asset_id\n  `,\n  parameters: {\n    asset_ids: assetIds,\n    status: \"raw\"\n  }\n};\n\nreturn [{\n  json: {\n    neo4j_payload: singleQuery,\n    original_standards: items.map(i => i.json) // Store for merging later\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        512
+      ],
+      "id": "d18610eb-6060-4186-b812-7b669ba9c2f1",
+      "name": "Prepare Fetch Relationships1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1904,
+        512
+      ],
+      "id": "112e9faa-67ef-4e00-bdc5-5ff4b089d91c",
+      "name": "Execute Neo4j HTTP Request (Fetch Relationships)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        512
+      ],
+      "id": "0316206d-227d-478f-b503-94d6cd4aac8c",
+      "name": "Execute Neo4j HTTP Request (Re-fetch with relationships)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst response = items[0].json;\n\n// Parse the relationship query response\nconst resultWrapper = Array.isArray(response) ? response[0] : response;\nconst dataArray = resultWrapper?.data;\n\nif (!dataArray || !dataArray.values) {\n  throw new Error('No relationship data returned from Neo4j');\n}\n\n// Build relationships map from the response YOU SHOWED ME\nconst relationshipsMap = {};\n\nfor (const valueRow of dataArray.values) {\n  const relData = valueRow[0];  // This is the relationship_data from your query\n  \n  relationshipsMap[relData.asset_id] = {\n    parent_code: relData.parent_code,\n    parent_name: relData.parent_name,\n    children: relData.children || []\n  };\n}\n\nconsole.log(`Parsed ${Object.keys(relationshipsMap).length} relationships`);\n\n// Example: Check what we got for division 30\nif (relationshipsMap['for2020:30']) {\n  console.log('Division 30 children:', relationshipsMap['for2020:30'].children.length);\n}\n\n// Output ONLY the relationships\nreturn [{\n  json: {\n    relationships_map: relationshipsMap\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1712,
+        512
+      ],
+      "id": "af3e7b70-65d3-4241-b817-a41f2489383f",
+      "name": "Parse Relationships"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Get relationships from Node 14\nconst node14Data = $('Parse Relationships').first().json;\nconst relationshipsMap = node14Data.relationships_map;\n\nif (!relationshipsMap) {\n  throw new Error('No relationships_map found in Node 14');\n}\n\nconsole.log(`Merging ${items.length} standards with relationships`);\n\nconst enrichedStandards = [];\n\nfor (const item of items) {\n  const standard = item.json;\n  \n  // Get relationships for this standard\n  const rels = relationshipsMap[standard.asset_id];\n  \n  if (!rels) {\n    console.warn('⚠️  No relationships for', standard.asset_id);\n  } else {\n    console.log('✅', standard.code, '- Parent:', rels.parent_code || 'none', ', Children:', rels.children.length);\n  }\n  \n  enrichedStandards.push({\n    json: {\n      ...standard,\n      parent_code: rels?.parent_code || null,\n      parent_name: rels?.parent_name || null,\n      children: rels?.children || []\n    }\n  });\n}\n\nconsole.log(`✅ Successfully enriched ${enrichedStandards.length} standards`);\n\nreturn enrichedStandards;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        512
+      ],
+      "id": "03f484ad-f2ed-4c90-97be-458b252db7bb",
+      "name": "Merge Standards with Stored Relationships"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst relationshipsData = items[0].json;\nconst relationshipsMap = relationshipsData.relationships_map;\n\nconst assetIds = Object.keys(relationshipsMap);\n\n// Prepare Neo4j query\nconst query = {\n  statement: `\n    MATCH (s:Standard:FoR)\n    WHERE s.asset_id IN $asset_ids\n      AND s.status = $status\n    RETURN {\n      asset_id: s.asset_id,\n      code: s.code,\n      name: s.name,\n      standard_version: s.standard_version,\n      hierarchy_json: s.hierarchy_json,\n      provenance: s.provenance,\n      level: s.level,\n      pass1_timestamp: s.pass1_timestamp\n    } as standard_data\n    ORDER BY s.code\n  `,\n  parameters: {\n    asset_ids: assetIds,\n    status: \"raw\"\n  }\n};\n\n// Output BOTH query and relationships\nreturn [{\n  json: {\n    neo4j_payload: query,\n    _passthrough_relationships: JSON.stringify(relationshipsMap)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        512
+      ],
+      "id": "bd39526b-2878-46cb-ad25-53db5af6bb7e",
+      "name": "Fetch Complete Standards with Relationships"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst httpResponse = items[0].json;\n\n// Parse Neo4j response\nlet dataArray = null;\n\nif (Array.isArray(httpResponse) && httpResponse.length > 0) {\n  dataArray = httpResponse[0].data;\n} else if (httpResponse.data) {\n  dataArray = httpResponse.data;\n}\n\nif (!dataArray || !dataArray.values) {\n  throw new Error('No Neo4j data found');\n}\n\nconsole.log(`Parsing ${dataArray.values.length} standards from Neo4j`);\n\nconst parsedStandards = [];\n\nfor (const valueRow of dataArray.values) {\n  const standardData = valueRow[0];\n  \n  // Parse JSON strings\n  let hierarchy, provenance;\n  try {\n    hierarchy = JSON.parse(standardData.hierarchy_json);\n    provenance = JSON.parse(standardData.provenance);\n  } catch (e) {\n    console.error('Parse error for', standardData.asset_id);\n    hierarchy = {};\n    provenance = {};\n  }\n  \n  parsedStandards.push({\n    json: {\n      asset_id: standardData.asset_id,\n      code: standardData.code,\n      name: standardData.name,\n      standard_version: standardData.standard_version,\n      hierarchy: hierarchy,\n      provenance: provenance,\n      level: standardData.level,\n      pass1_timestamp: standardData.pass1_timestamp\n    }\n  });\n}\n\nconsole.log(`✅ Parsed ${parsedStandards.length} standards`);\n\nreturn parsedStandards;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        512
+      ],
+      "id": "2f40ce54-5970-4ae8-85f4-bc8e2bada330",
+      "name": "Parse Standard"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst allUpdates = items.map(item => ({\n  asset_id: item.json.asset_id,\n  status: \"enriching\"\n}));\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        UNWIND $updates AS update\n        MATCH (s:Standard {asset_id: update.asset_id})\n        SET s.status = update.status,\n            s.updated_at = datetime()\n        RETURN s.asset_id as asset_id\n      `,\n      parameters: {\n        updates: allUpdates\n      }\n    },\n    original_items: items.map(i => i.json)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        512
+      ],
+      "id": "233e89db-b769-42ce-8d56-9ee28200888d",
+      "name": "Update Status to enriching"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -256,
+        512
+      ],
+      "id": "da8fec59-0474-4563-8897-6e654ce21da7",
+      "name": "Execute Update to enriching",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from the \"Merge Standards with Stored Relationships\" node\nconst items = $('Merge Standards with Stored Relationships').all();\nconst llmPrompts = [];\n\nfor (const item of items) {\n  const hierarchy = item.json.hierarchy;\n  \n  const parentInfo = item.json.parent_name \n    ? `\\nParent: ${item.json.parent_name} (${item.json.parent_code})`\n    : '';\n  \n  const prompt = `You are a research classification domain expert. Your task is to enrich the ANZSRC Field of Research taxonomy code with contextual information.\n\nStandard Code: ${item.json.code}\nStandard Name: ${item.json.name}\nHierarchy Level: ${hierarchy.level}\nDivision: ${hierarchy.division_code}${parentInfo}\n\nProvide the following enrichment in valid JSON format:\n{\n  \"domain_synonyms\": [\"list of 5-7 academic synonyms\"],\n  \"industry_terms\": [\"list of 5-7 industry terminology variants\"],\n  \"related_concepts\": [\"list of 5-7 related research concepts\"],\n  \"common_methods\": [\"list of 5-7 common research methods\"],\n  \"typical_outputs\": [\"list of 5-7 typical research outputs\"],\n  \"description_extended\": \"detailed 2-3 sentence description\"\n}\n\nCRITICAL: Respond ONLY with valid JSON. No markdown, no code blocks.`;\n\n  llmPrompts.push({\n    json: {\n      asset_id: item.json.asset_id,\n      code: item.json.code,\n      name: item.json.name,\n      standard_version: item.json.standard_version,\n      hierarchy: hierarchy,\n      parent_code: item.json.parent_code,\n      parent_name: item.json.parent_name,\n      children: item.json.children,\n      provenance: item.json.provenance,\n      level: item.json.level,\n      pass1_timestamp: item.json.pass1_timestamp,\n      llm_prompt: prompt\n    }\n  });\n}\n\nreturn llmPrompts;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2480,
+        928
+      ],
+      "id": "7e9ec023-6892-4453-97af-e3286e638f52",
+      "name": "Prepare for Pass 2 LLM"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -2224,
+        1136
+      ],
+      "id": "9979749a-5cfd-410a-a9f1-d4a90a869cb7",
+      "name": "OpenRouter Chat Model1",
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reference the original complete data AND the LLM response\nconst originalItems = $('Merge Standards with Stored Relationships').all();\nconst llmItems = $input.all();\n\nconst processedItems = [];\n\nfor (let i = 0; i < originalItems.length; i++) {\n  try {\n    // Get LLM response\n    const llmResponse = llmItems[i].json.output || \n                       llmItems[i].json.message?.content || \n                       llmItems[i].json.text || \n                       llmItems[i].json.content ||\n                       llmItems[i].json.response;\n    \n    // Parse JSON response\n    let contextData;\n    try {\n      contextData = JSON.parse(llmResponse);\n    } catch (e) {\n      // Try extracting JSON from markdown code blocks\n      const jsonMatch = llmResponse.match(/```json\\n([\\s\\S]*?)\\n```/);\n      if (jsonMatch) {\n        contextData = JSON.parse(jsonMatch[1]);\n      } else {\n        throw new Error('Failed to parse LLM response as JSON');\n      }\n    }\n    \n    // CRITICAL: Merge with COMPLETE original data\n    const enriched = {\n      ...originalItems[i].json,  // ✅ Preserve ALL original fields\n      domain_context: {\n        synonyms: contextData.domain_synonyms || [],\n        industry_terms: contextData.industry_terms || [],\n        related_concepts: contextData.related_concepts || [],\n        common_methods: contextData.common_methods || [],\n        typical_outputs: contextData.typical_outputs || [],\n        description_extended: contextData.description_extended || ''\n      },\n      pass2_timestamp: new Date().toISOString()\n    };\n    \n    processedItems.push({ json: enriched });\n  } catch (error) {\n    console.error('Error processing item:', error);\n    // Pass through with error flag, preserving original data\n    processedItems.push({ \n      json: { \n        ...originalItems[i].json,  // ✅ Preserve ALL original fields\n        pass2_error: error.message,\n        pass2_timestamp: new Date().toISOString()\n      } \n    });\n  }\n}\n\nreturn processedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1872,
+        928
+      ],
+      "id": "9e38afe7-ba23-4dae-a23b-2a517dba076e",
+      "name": "Parse Pass 2 LLM Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reference the \"Parse Pass 2 LLM Response\" node to get complete data\nconst items = $('Parse Pass 2 LLM Response').all();\n\nconst disambiguationPrompts = [];\n\nfor (const item of items) {\n  const context = item.json.domain_context || {};\n  \n  const relatedConcepts = (context.related_concepts || []).slice(0, 5).join(', ');\n  \n  const prompt = `You are a research classification expert. Define disambiguation signals for this ANZSRC code.\n\nStandard Code: ${item.json.code}\nStandard Name: ${item.json.name}\nDescription: ${context.description_extended || item.json.name}\nRelated Concepts: ${relatedConcepts}\n\nProvide disambiguation signals in valid JSON format:\n{\n  \"positive_signals\": [\n    \"List 5-7 specific indicators that research DOES belong to this classification\"\n  ],\n  \"negative_signals\": [\n    \"List 5-7 specific indicators that research does NOT belong here\"\n  ],\n  \"boundary_notes\": \"Write 2-3 sentences explaining edge cases and overlaps\"\n}\n\nCRITICAL: Respond ONLY with valid JSON. No markdown, no code blocks.`;\n\n  disambiguationPrompts.push({\n    json: {\n      asset_id: item.json.asset_id,\n      code: item.json.code,\n      name: item.json.name,\n      standard_version: item.json.standard_version,\n      hierarchy: item.json.hierarchy,\n      parent_code: item.json.parent_code,\n      parent_name: item.json.parent_name,\n      children: item.json.children,\n      provenance: item.json.provenance,\n      level: item.json.level,\n      pass1_timestamp: item.json.pass1_timestamp,\n      domain_context: item.json.domain_context,\n      pass2_timestamp: item.json.pass2_timestamp,\n      llm_prompt_pass3: prompt\n    }\n  });\n}\n\nreturn disambiguationPrompts;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1632,
+        928
+      ],
+      "id": "405f3f7a-54a0-4f04-bf55-91e0e04c1976",
+      "name": "Prepare Pass 3 Disambiguation Prompts"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -1392,
+        1152
+      ],
+      "id": "f75fe8ac-c3f9-4098-9849-eff1772057ae",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.llm_prompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -2224,
+        928
+      ],
+      "id": "92fa3d2d-54e6-4ca6-9dd3-32cdf108c6be",
+      "name": "Pass 2: LLM Context Enhancement"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.llm_prompt_pass3 }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -1392,
+        928
+      ],
+      "id": "37d6fe0d-2538-4d03-a3a2-70d809d24479",
+      "name": "Pass 3: Disambiguation Signals"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reference the complete data from Pass 2 AND the Pass 3 LLM response\nconst pass2Items = $('Parse Pass 2 LLM Response').all();\nconst llmItems = $input.all();\n\nconst processedItems = [];\n\nfor (let i = 0; i < pass2Items.length; i++) {\n  try {\n    // Get Pass 3 LLM response\n    const llmResponse = llmItems[i].json.output || \n                       llmItems[i].json.message?.content || \n                       llmItems[i].json.text || \n                       llmItems[i].json.content ||\n                       llmItems[i].json.response;\n    \n    // Parse JSON response\n    let disambiguationData;\n    try {\n      disambiguationData = JSON.parse(llmResponse);\n    } catch (e) {\n      // Try extracting JSON from markdown code blocks\n      const jsonMatch = llmResponse.match(/```json\\n([\\s\\S]*?)\\n```/);\n      if (jsonMatch) {\n        disambiguationData = JSON.parse(jsonMatch[1]);\n      } else {\n        throw new Error('Failed to parse disambiguation response as JSON');\n      }\n    }\n    \n    // CRITICAL: Merge with COMPLETE Pass 2 data\n    const enriched = {\n      ...pass2Items[i].json,  // ✅ Preserve ALL fields from Pass 2\n      disambiguation: {\n        positive_signals: disambiguationData.positive_signals || [],\n        negative_signals: disambiguationData.negative_signals || [],\n        boundary_notes: disambiguationData.boundary_notes || ''\n      },\n      pass3_timestamp: new Date().toISOString()\n    };\n    \n    processedItems.push({ json: enriched });\n  } catch (error) {\n    console.error('Error processing disambiguation:', error);\n    // Pass through with error flag, preserving Pass 2 data\n    processedItems.push({ \n      json: { \n        ...pass2Items[i].json,  // ✅ Preserve ALL fields from Pass 2\n        pass3_error: error.message,\n        pass3_timestamp: new Date().toISOString()\n      } \n    });\n  }\n}\n\nreturn processedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        928
+      ],
+      "id": "79a6ec10-b832-4790-91a1-4f4853b7add7",
+      "name": "Parse Pass 3 Disambiguation Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass 4: Canonical Normalisation - Generate ICF structure and three views\nconst crypto = require('crypto');\nconst items = $input.all();\nconst icfStandards = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // Generate dense view (800-1200 tokens)\n  const denseView = generateDenseView(data);\n  \n  // Generate embedding view (300-800 tokens)\n  const embeddingView = generateEmbeddingView(data);\n  \n  // Generate graph view structure\n  const graphView = generateGraphView(data);\n  \n  // Build complete ICF structure\n  const icf = {\n    asset_id: data.asset_id,\n    asset_type: \"standard\",\n    domain: \"research_classification\",\n    version: \"v1.0\",\n    status: \"fabricated\",\n    \n    provenance: {\n      source: data.provenance?.source || \"ANZSRC_FoR_2020\",\n      created_at: data.provenance?.created_at || new Date().toISOString(),\n      ingestion_method: data.provenance?.ingestion_method || \"csv_cloud_load\",\n      fabrication_pipeline_version: \"v6.4.1\",\n      pass1_timestamp: data.pass1_timestamp,\n      pass2_timestamp: data.pass2_timestamp,\n      pass3_timestamp: data.pass3_timestamp,\n      pass4_timestamp: new Date().toISOString(),\n      enrichment_model: \"gpt-4o\",\n      source_references: [\"ANZSRC_FoR_2020\"]\n    },\n    \n    core_attributes: {\n      code: data.code,\n      name: data.name,\n      standard_version: data.standard_version,\n      hierarchy: data.hierarchy,\n      parent_code: data.parent_code || null,\n      parent_name: data.parent_name || null,\n      children: data.children || [],\n      domain_context: data.domain_context || {},\n      disambiguation: data.disambiguation || {}\n    },\n    \n    views: {\n      dense: denseView,\n      embedding: embeddingView,\n      graph: graphView\n    },\n    \n    metadata: {\n      created_at: data.provenance?.created_at || new Date().toISOString(),\n      updated_at: new Date().toISOString(),\n      fabricated_at: new Date().toISOString(),\n      checksum: generateChecksum(denseView.content),\n      tags: [\"active\", \"fabricated\", \"anzsrc_for_2020\"]\n    }\n  };\n  \n  // Add lifecycle_status (Standards only, NOT Objects)\n  icf.lifecycle_status = \"active\";\n  \n  icfStandards.push({ json: icf });\n}\n\nreturn icfStandards;\n\n// ============================================================================\n// HELPER FUNCTIONS\n// ============================================================================\n\nfunction generateDenseView(data) {\n  const hierarchy = data.hierarchy || {};\n  const context = data.domain_context || {};\n  const disambiguation = data.disambiguation || {};\n  \n  let text = `${data.name} (${data.code})\\n\\n`;\n  \n  // Hierarchy path\n  if (hierarchy.level === 'field') {\n    text += `Classification Path: Division ${hierarchy.division_code} > Group ${hierarchy.group_code} > Field ${hierarchy.field_code}\\n\\n`;\n  } else if (hierarchy.level === 'group') {\n    text += `Classification Path: Division ${hierarchy.division_code} > Group ${hierarchy.group_code}\\n\\n`;\n  } else if (hierarchy.level === 'division') {\n    text += `Classification Level: Division ${hierarchy.division_code}\\n\\n`;\n  }\n  \n  // Extended description\n  if (context.description_extended) {\n    text += `Description: ${context.description_extended}\\n\\n`;\n  }\n  \n  // Domain context\n  if (context.synonyms && context.synonyms.length > 0) {\n    text += `Synonyms: ${context.synonyms.join(', ')}\\n\\n`;\n  }\n  \n  if (context.industry_terms && context.industry_terms.length > 0) {\n    text += `Industry Terms: ${context.industry_terms.join(', ')}\\n\\n`;\n  }\n  \n  if (context.related_concepts && context.related_concepts.length > 0) {\n    text += `Related Concepts: ${context.related_concepts.join(', ')}\\n\\n`;\n  }\n  \n  if (context.common_methods && context.common_methods.length > 0) {\n    text += `Common Methods: ${context.common_methods.join(', ')}\\n\\n`;\n  }\n  \n  if (context.typical_outputs && context.typical_outputs.length > 0) {\n    text += `Typical Outputs: ${context.typical_outputs.join(', ')}\\n\\n`;\n  }\n  \n  // Disambiguation signals\n  if (disambiguation.positive_signals && disambiguation.positive_signals.length > 0) {\n    text += `Classification Applies When:\\n`;\n    disambiguation.positive_signals.forEach(signal => {\n      text += `  • ${signal}\\n`;\n    });\n    text += `\\n`;\n  }\n  \n  if (disambiguation.negative_signals && disambiguation.negative_signals.length > 0) {\n    text += `Classification Does NOT Apply When:\\n`;\n    disambiguation.negative_signals.forEach(signal => {\n      text += `  • ${signal}\\n`;\n    });\n    text += `\\n`;\n  }\n  \n  if (disambiguation.boundary_notes) {\n    text += `Boundary Notes: ${disambiguation.boundary_notes}\\n`;\n  }\n  \n  return {\n    format: \"text\",\n    token_count: estimateTokens(text),\n    content: text,\n    chunking_metadata: {\n      chunk_id: `${data.asset_id}:dense:v1`,\n      position: 1,\n      total_chunks: 1\n    }\n  };\n}\n\nfunction generateEmbeddingView(data) {                                                                                                                \n   const context = data.domain_context || {};                                                                                                          \n   const disambiguation = data.disambiguation || {};                                                                                                   \n                                                                                                                                                       \n   // Build comprehensive embedding text (target: 500-800 tokens)                                                                                      \n   let parts = [];                                                                                                                                     \n                                                                                                                                                       \n   // 1. Core identity                                                                                                                                 \n   parts.push(`${data.name} (ANZSRC ${data.code}).`);                                                                                                  \n                                                                                                                                                       \n   // 2. Full description (NOT truncated)                                                                                                              \n   if (context.description_extended) {                                                                                                                 \n     parts.push(context.description_extended);                                                                                                         \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 3. ALL synonyms                                                                                                                                  \n   if (context.synonyms && context.synonyms.length > 0) {                                                                                              \n     parts.push(`Academic terms: ${context.synonyms.join(', ')}.`);                                                                                    \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 4. ALL industry terms                                                                                                                            \n   if (context.industry_terms && context.industry_terms.length > 0) {                                                                                  \n     parts.push(`Industry terms: ${context.industry_terms.join(', ')}.`);                                                                              \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 5. ALL related concepts                                                                                                                          \n   if (context.related_concepts && context.related_concepts.length > 0) {                                                                              \n     parts.push(`Related concepts: ${context.related_concepts.join(', ')}.`);                                                                          \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 6. ALL common methods                                                                                                                            \n   if (context.common_methods && context.common_methods.length > 0) {                                                                                  \n     parts.push(`Methods: ${context.common_methods.join(', ')}.`);                                                                                     \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 7. ALL typical outputs                                                                                                                           \n   if (context.typical_outputs && context.typical_outputs.length > 0) {                                                                                \n     parts.push(`Outputs: ${context.typical_outputs.join(', ')}.`);                                                                                    \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 8. ALL positive signals (FIXED: removed .slice(0, 3))                                                                                            \n   if (disambiguation.positive_signals && disambiguation.positive_signals.length > 0) {                                                                \n     parts.push(`Classification applies when: ${disambiguation.positive_signals.join('; ')}.`);                                                        \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 9. ALL negative signals (NEW)                                                                                                                    \n   if (disambiguation.negative_signals && disambiguation.negative_signals.length > 0) {                                                                \n     parts.push(`Classification does NOT apply when: ${disambiguation.negative_signals.join('; ')}.`);                                                 \n   }                                                                                                                                                   \n                                                                                                                                                       \n   // 10. Boundary notes (NEW)                                                                                                                         \n   if (disambiguation.boundary_notes && disambiguation.boundary_notes.length > 0) {                                                                    \n     parts.push(`Boundary considerations: ${disambiguation.boundary_notes}`);                                                                          \n   }                                                                                                                                                   \n                                                                                                                                                       \n   const text = parts.join(' ');                                                                                                                       \n                                                                                                                                                       \n   return {                                                                                                                                            \n     format: \"text\",                                                                                                                                   \n     token_count: estimateTokens(text),                                                                                                                \n     content: text,                                                                                                                                    \n     vector_metadata: {                                                                                                                                \n       model: \"text-embedding-3-large\",                                                                                                                \n       dimensions: 3072,                                                                                                                               \n       qdrant_collection: \"standards_anzsrc_for_2020\"                                                                                                  \n     }                                                                                                                                                 \n   };                                                                                                                                                  \n }                                                                   \n\nfunction generateGraphView(data) {\n  const hierarchy = data.hierarchy || {};\n  const relationships = [];\n  \n  // Parent relationship (BELONGS_TO)\n  if (data.parent_code) {\n    relationships.push({\n      type: \"BELONGS_TO\",\n      target: `for2020:${data.parent_code}`,\n      direction: \"outgoing\",\n      properties: {}\n    });\n  }\n  \n  // Child relationships (HAS_CHILD)\n  if (data.children && data.children.length > 0) {\n    data.children.forEach(child => {\n      relationships.push({\n        type: \"HAS_CHILD\",\n        target: `for2020:${child.code}`,\n        direction: \"outgoing\",\n        properties: {}\n      });\n    });\n  }\n  \n  return {\n    format: \"cypher\",\n    node_labels: [\"Standard\", \"FoR\", hierarchy.level || \"field\"],\n    properties: {\n      code: data.code,\n      name: data.name,\n      level: hierarchy.level || \"field\",\n      standard_version: data.standard_version\n    },\n    relationships: relationships\n  };\n}\n\nfunction estimateTokens(text) {\n  // Rough estimate: ~4 characters per token\n  return Math.ceil(text.length / 4);\n}\n\nfunction generateChecksum(content) {\n  return crypto.createHash('sha256').update(content).digest('hex');\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        928
+      ],
+      "id": "c0cfe507-af67-4f22-b738-2abd85549fb6",
+      "name": "Pass 4: Canonical Normalisation (ICF)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Storage Payloads - Format data for Neo4j, Qdrant, and PostgreSQL\nconst items = $input.all();\nconst preparedItems = [];\n\nfor (const item of items) {\n  const icf = item.json;\n  \n  // Prepare payload for all three databases\n  const storagePayload = {\n    // Original ICF structure (for reference)\n    icf: icf,\n    \n    // Neo4j payload (direct ICF structure)\n    neo4j: {\n      asset_id: icf.asset_id,\n      status: icf.status,\n      lifecycle_status: icf.lifecycle_status,\n      core_attributes: JSON.stringify(icf.core_attributes),\n      views: JSON.stringify(icf.views),\n      provenance: JSON.stringify(icf.provenance),\n      metadata: JSON.stringify(icf.metadata),\n      fabricated_at: icf.metadata.fabricated_at,\n      updated_at: icf.metadata.updated_at\n    },\n    \n    // Text for embedding generation (extracted here for Jina API)\n    embedding_text: icf.views.embedding.content,\n    \n    // Qdrant payload structure (vector will be added after embedding generation)\n    qdrant_base: {\n      id: icf.asset_id,\n      payload: {\n        asset_id: icf.asset_id,\n        code: icf.core_attributes.code,\n        name: icf.core_attributes.name,\n        embedding_text: icf.views.embedding.content,\n        asset_type: icf.asset_type,\n        standard_version: icf.core_attributes.standard_version,\n        fabricated_at: icf.metadata.fabricated_at,\n        level: icf.core_attributes.hierarchy.level,\n        division_code: icf.core_attributes.hierarchy.division_code,\n        group_code: icf.core_attributes.hierarchy.group_code || null,\n        field_code: icf.core_attributes.hierarchy.field_code || null\n      }\n    },\n    \n    // PostgreSQL payload (operational metadata)\n    postgresql: {\n      asset_id: icf.asset_id,\n      code: icf.core_attributes.code,\n      name: icf.core_attributes.name,\n      status: icf.status,\n      lifecycle_status: icf.lifecycle_status,\n      standard_version: icf.core_attributes.standard_version,\n      fabricated_at: icf.metadata.fabricated_at,\n      checksum: icf.metadata.checksum,\n      provenance_json: JSON.stringify(icf.provenance),\n      level: icf.core_attributes.hierarchy.level,\n      division_code: icf.core_attributes.hierarchy.division_code,\n      group_code: icf.core_attributes.hierarchy.group_code || null,\n      field_code: icf.core_attributes.hierarchy.field_code || null\n    }\n  };\n  \n  preparedItems.push({ json: storagePayload });\n}\n\nreturn preparedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        928
+      ],
+      "id": "779547fb-5927-468c-ac1e-164c2386589a",
+      "name": "Prepare Storage Payloads"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge generated embeddings back into storage payloads\nconst preparedData = $('Prepare Storage Payloads').all();\nconst embeddingResults = $input.all();\n\nconst mergedItems = [];\n\nfor (let i = 0; i < preparedData.length; i++) {\n  const item = preparedData[i].json;\n  const embeddingResult = embeddingResults[i].json;\n  \n  // Extract the embedding vector from openai API response\n  const vector = embeddingResult.data?.[0]?.embedding || null;\n  \n  if (!vector || !Array.isArray(vector) || vector.length !== 3072) {\n    console.error(`Failed to generate valid embedding for ${item.qdrant_base.id}`);\n  }\n  \n  // ⭐ FIX: Extract numeric code for Qdrant ID (like working example)\n  const numericCode = parseInt(item.qdrant_base.payload.code);\n  \n  // Build complete Qdrant payload with NUMERIC ID\n  const qdrantPayload = {\n    id: numericCode,  // ← Use number, not string\n    vector: vector,\n    payload: item.qdrant_base.payload\n  };\n  \n  // Merge everything together\n  const mergedPayload = {\n    icf: item.icf,\n    neo4j: item.neo4j,\n    postgresql: item.postgresql,\n    qdrant: qdrantPayload,  // Complete Qdrant point structure\n    embedding_generated: vector !== null,\n    embedding_dimensions: vector?.length || 0,\n    embedding_timestamp: new Date().toISOString()\n  };\n  \n  mergedItems.push({ json: mergedPayload });\n}\n\nreturn mergedItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2496,
+        1376
+      ],
+      "id": "a2eb75d4-c18b-493f-a0fd-921d59e32836",
+      "name": "Merge Embeddings with Payloads"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2000,
+        1376
+      ],
+      "id": "e947694f-40dc-4bc7-b5ed-10aed76701ad",
+      "name": "Store in Neo4j",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j Cypher Statement - Match working example format EXACTLY\nconst items = $input.all();\n\nconst allUpdates = items.map(item => {\n  const icf = item.json.icf;\n  const hierarchy = icf.core_attributes.hierarchy;\n  const domainContext = icf.core_attributes.domain_context || {};\n  const disambiguation = icf.core_attributes.disambiguation || {};\n  \n  return {\n    asset_id: icf.asset_id,\n    code: parseInt(icf.core_attributes.code),\n    name: icf.core_attributes.name,\n    level: hierarchy.level,\n    division_code: hierarchy.division_code ? parseInt(hierarchy.division_code) : null,\n    division_name: hierarchy.division_name || null,\n    group_code: hierarchy.group_code ? parseInt(hierarchy.group_code) : null,\n    group_name: hierarchy.group_name || null,\n    field_code: hierarchy.field_code ? parseInt(hierarchy.field_code) : null,\n    field_name: hierarchy.field_name || null,\n    synonyms: domainContext.synonyms || [],\n    industry_terms: domainContext.industry_terms || [],\n    related_concepts: domainContext.related_concepts || [],\n    typical_methods: domainContext.common_methods || [],\n    typical_outputs: domainContext.typical_outputs || [],\n    description_extended: domainContext.description_extended || \"\",\n    disambiguation: JSON.stringify(disambiguation),\n    dense_view: icf.views.dense.content,\n    dense_token_count: icf.views.dense.token_count,\n    embedding_text: icf.views.embedding.content,\n    status: icf.status,\n    lifecycle_status: icf.lifecycle_status,\n    standard_version: icf.core_attributes.standard_version,\n    fabricated_at: icf.metadata.fabricated_at,\n    checksum: icf.metadata.checksum,\n    parent_code: icf.core_attributes.parent_code || null,\n    parent_name: icf.core_attributes.parent_name || null\n  };\n});\n\n// ⭐ CRITICAL: Match working example structure - NO \"statements\" wrapper!\nconst neo4jPayload = {\n  statement: `\n    UNWIND $updates AS update\n    MERGE (s:Standard:FoR {asset_id: update.asset_id})\n    SET s.code = update.code,\n        s.name = update.name,\n        s.level = update.level,\n        s.division_code = update.division_code,\n        s.division_name = update.division_name,\n        s.group_code = update.group_code,\n        s.group_name = update.group_name,\n        s.field_code = update.field_code,\n        s.field_name = update.field_name,\n        s.synonyms = update.synonyms,\n        s.industry_terms = update.industry_terms,\n        s.related_concepts = update.related_concepts,\n        s.typical_methods = update.typical_methods,\n        s.typical_outputs = update.typical_outputs,\n        s.description_extended = update.description_extended,\n        s.disambiguation = update.disambiguation,\n        s.dense_view = update.dense_view,\n        s.dense_token_count = update.dense_token_count,\n        s.embedding_text = update.embedding_text,\n        s.status = update.status,\n        s.lifecycle_status = update.lifecycle_status,\n        s.standard_version = update.standard_version,\n        s.fabricated_at = update.fabricated_at,\n        s.checksum = update.checksum,\n        s.parent_code = update.parent_code,\n        s.parent_name = update.parent_name,\n        s.created_at = coalesce(s.created_at, datetime()),\n        s.updated_at = datetime()\n    RETURN s.asset_id as asset_id, s.status as status\n  `,\n  parameters: {\n    updates: allUpdates\n  }\n};\n\n// Return single payload matching working example format\nreturn [{\n  json: {\n    neo4j_payload: neo4jPayload,\n    qdrant_payloads: items.map(i => i.json.qdrant),\n    postgresql_payloads: items.map(i => i.json.postgresql),\n    original_items: items.map(i => i.json)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2240,
+        1376
+      ],
+      "id": "5322bbfd-96c9-4802-868b-9ebb9d6d69c2",
+      "name": "Prepare Neo4j Cypher"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc1_for_2020/points?wait=true",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n     {\n       \"points\": $json.qdrant_payloads\n     }\n   }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1984,
+        1568
+      ],
+      "id": "bf2d5d93-1987-4b78-a7e9-ebb6a9dc5161",
+      "name": "Qdrant - Store Embedding",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare PostgreSQL Batch Insert - Match working n8n pattern\nconst item = $input.first().json;\nconst postgresqlPayloads = item.postgresql_payloads;\n\n// Build the payload for Supabase REST API\nconst supabasePayload = postgresqlPayloads.map(payload => ({\n  asset_id: payload.asset_id,\n  code: payload.code,\n  name: payload.name,\n  status: payload.status,\n  lifecycle_status: payload.lifecycle_status,\n  standard_version: payload.standard_version,\n  level: payload.level,\n  division_code: payload.division_code,\n  group_code: payload.group_code,\n  field_code: payload.field_code,\n  fabricated_at: payload.fabricated_at,\n  checksum: payload.checksum,\n  provenance_json: payload.provenance_json\n}));\n\nreturn [{\n  json: {\n    supabase_payload: supabasePayload,\n    total_records: supabasePayload.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1984,
+        1776
+      ],
+      "id": "1d5113dc-89db-4e7e-90a1-8bd9f6a36344",
+      "name": "Prepare PostgreSQL Batch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Storage Summary Statistics\nconst items = $input.all();\n\nlet neo4jResult = null;\nlet qdrantResult = null;\nlet supabaseResults = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  if (!data) continue;\n  \n  // Identify Neo4j result (has 'data' with 'fields' and 'bookmarks')\n  if (data.data && data.data.fields && data.bookmarks) {\n    neo4jResult = data;\n  }\n  // Identify Qdrant result (has 'result' with 'operation_id' and 'time')\n  else if (data.result && data.result.operation_id !== undefined && data.time !== undefined) {\n    qdrantResult = data;\n  }\n  // Identify Supabase result (has 'id', 'asset_id', 'code', 'fabricated_at')\n  else if (data.id !== undefined && data.asset_id && data.code && data.fabricated_at) {\n    supabaseResults.push(data);\n  }\n}\n\nconst summary = {\n  workflow: \"Workflow_2_FAT_Standards_Fabrication\",\n  timestamp: new Date().toISOString(),\n  \n  neo4j: {\n    success: neo4jResult !== null,\n    records_updated: neo4jResult?.data?.values?.length || 0,\n    sample_asset: neo4jResult?.data?.values?.[0]?.[0] || null,\n    sample_status: neo4jResult?.data?.values?.[0]?.[1] || null\n  },\n  \n  qdrant: {\n    success: qdrantResult !== null && qdrantResult.status === 'ok',\n    operation_id: qdrantResult?.result?.operation_id || null,\n    status: qdrantResult?.result?.status || 'unknown',\n    time_seconds: qdrantResult?.time || null\n  },\n  \n  supabase: {\n    success: supabaseResults.length > 0,\n    records_upserted: supabaseResults.length,\n    sample_asset: supabaseResults[0]?.asset_id || null,\n    sample_name: supabaseResults[0]?.name || null\n  },\n  \n  all_successful: false,\n  errors: 0,\n  total_processed: 0\n};\n\n// Check overall success\nsummary.all_successful = (\n  summary.neo4j.success &&\n  summary.qdrant.success &&\n  summary.supabase.success\n);\n\nsummary.errors = summary.all_successful ? 0 : 1;\nsummary.total_processed = Math.max(\n  summary.neo4j.records_updated,\n  summary.supabase.records_upserted,\n  1\n);\n\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1152,
+        1520
+      ],
+      "id": "7b364c4e-3e9e-428f-ad7e-c202f4aab336",
+      "name": "Generate Storage Summary"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1360,
+        1504
+      ],
+      "id": "3550c501-0243-4379-96e5-816ab3de727b",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/fat_standards_metadata?on_conflict=asset_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates, return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1680,
+        1776
+      ],
+      "id": "30edada5-92b3-45c8-af12-fe47591c3be5",
+      "name": "Store in Supabase(Postgre)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d43f19fa-bf81-48ac-a8fb-9e528e53553a",
+              "leftValue": "={{ $json.errors }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -960,
+        1520
+      ],
+      "id": "4ee766c5-6d06-470d-b2b8-6dfb18ad2994",
+      "name": "Check for Errors"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C09VCRQ9WAD",
+          "mode": "list",
+          "cachedResultName": "classification-foundry-alerts"
+        },
+        "text": "=⚠️ Workflow 2 completed with errors  Total processed: {{ $json.total_processed }} Successful: {{ $json.neo4j.records_updated }} Errors: {{ $json.errors }}  Neo4j: {{ $json.neo4j.success ? '✅' : '❌' }} Qdrant: {{ $json.qdrant.success ? '✅' : '❌' }} Supabase: {{ $json.supabase.success ? '✅' : '❌' }}  Timestamp: {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -672,
+        1424
+      ],
+      "id": "c679db6a-b6c8-4e4a-ad3d-05340ecfbe87",
+      "name": "Send Error Notification",
+      "webhookId": "750a4fa7-bfd3-4158-837d-5c775e928a9c",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "jzRSmdhqzgGRlGnt",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C09VCRQ9WAD",
+          "mode": "list",
+          "cachedResultName": "classification-foundry-alerts"
+        },
+        "text": "=⚠️ Workflow 2 completed with errors  Total processed: {{ $json.total_processed }} Successful: {{ $json.neo4j.records_updated }} Errors: {{ $json.errors }}  Neo4j: {{ $json.neo4j.success ? '✅' : '❌' }} Qdrant: {{ $json.qdrant.success ? '✅' : '❌' }} Supabase: {{ $json.supabase.success ? '✅' : '❌' }}  Timestamp: {{ $json.timestamp }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        -672,
+        1680
+      ],
+      "id": "c3d44f6a-c029-4286-8554-3fbfd9482e58",
+      "name": "Send Success Notification",
+      "webhookId": "750a4fa7-bfd3-4158-837d-5c775e928a9c",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "jzRSmdhqzgGRlGnt",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2448,
+        80
+      ],
+      "id": "c4c9ddca-18b8-4472-90f3-ea3ba2222a04",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "openai/text-embedding-3-large"
+            },
+            {
+              "name": "input",
+              "value": "={{ $json.embedding_text }}"
+            },
+            {
+              "name": "dimensions",
+              "value": "={{ 3072 }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "0f612614-769b-4a54-a8c5-be95ee429893",
+      "name": "HTTP Request - Generate Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -208,
+        928
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j Query - Fetch all Standard asset_ids\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR)\n        RETURN s.asset_id AS asset_id, s.code AS code, s.name AS name\n        ORDER BY s.code\n      `,\n      parameters: {}\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        384
+      ],
+      "id": "ed4f8ac7-c106-4dd5-a202-f60268a95c7c",
+      "name": "Prepare Neo4j Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc1_for_2020/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1328,
+        384
+      ],
+      "id": "bdc13eff-6b76-4e82-93d4-fc0228710900",
+      "name": "Qdrant fetch",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compare Neo4j vs Qdrant - Find missing standards\nconst neo4jResponse = $('Execute Neo4j HTTP Request').first().json;\nconst qdrantResponse = $('Qdrant fetch').first().json;\n\n// Parse Neo4j results\nconst neo4jStandards = neo4jResponse.data.values.map(row => ({\n  asset_id: row[0],\n  code: row[1],\n  name: row[2]\n}));\n\n// Parse Qdrant results\nconst qdrantPoints = qdrantResponse.result.points;\nconst qdrantAssetIds = new Set(qdrantPoints.map(p => p.payload.asset_id));\n\n// Find missing in Qdrant\nconst missing = neo4jStandards.filter(s => !qdrantAssetIds.has(s.asset_id));\n\nconsole.log(`Neo4j: ${neo4jStandards.length}`);\nconsole.log(`Qdrant: ${qdrantPoints.length}`);\nconsole.log(`Missing: ${missing.length}`);\n\nreturn [{\n  json: {\n    neo4j_count: neo4jStandards.length,\n    qdrant_count: qdrantPoints.length,\n    missing_count: missing.length,\n    missing_standards: missing\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        384
+      ],
+      "id": "9143dcb3-07e9-4e96-9644-ed33946250aa",
+      "name": "compare"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        768,
+        384
+      ],
+      "id": "961fb703-cb3f-4ebd-ab16-c1029645a9b2",
+      "name": "Execute Neo4j HTTP Request",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Reset Status Query\nconst missing = $input.first().json.missing_standards;\nconst missingIds = missing.map(m => m.asset_id);\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        UNWIND $missing_ids AS aid\n        MATCH (s:Standard:FoR {asset_id: aid})\n        SET s.status = 'thin'\n        RETURN s.asset_id, s.code, s.status\n      `,\n      parameters: {\n        missing_ids: missingIds\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1824,
+        384
+      ],
+      "id": "37f1b11d-9053-410d-96d0-241e0b02ff16",
+      "name": "Prepare Reset Status Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        384
+      ],
+      "id": "2a09177b-03af-482a-93da-505694eccbed",
+      "name": "Execute Neo4j HTTP (reset)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Qdrant Scroll Query - Fetch all points from standards collection\nreturn [{\n  json: {\n    qdrant_payload: {\n      limit: 3000,\n      with_payload: {\n        include: [\"asset_id\", \"code\", \"name\"]\n      },\n      with_vectors: false\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        384
+      ],
+      "id": "0f4fb0a5-04eb-4cf9-aa70-11eb9b5ceda4",
+      "name": "Prepare Qdrant"
+    },
+    {
+      "parameters": {
+        "content": "## Use This to find missing unprocessed FoR codes in Qdrant\n**Double click** to edit me. [Guide](https://docs.n8n.io/workflows/components/sticky-notes/)",
+        "height": 576,
+        "width": 1920
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        416,
+        240
+      ],
+      "typeVersion": 1,
+      "id": "ecfbabfa-6a07-4796-8e09-c25d75ab1fa2",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Fetch Thin Standards (Specific Codes)\nconst targetCodes = [400301, 310106, 310607, 340502];\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        UNWIND $codes AS code\n        MATCH (s:Standard:FoR {code: code})\n        WHERE s.status = \"thin\"\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          standard_version: s.standard_version,\n          provenance: s.provenance,\n          level: s.level\n        } as standard_data\n        ORDER BY s.code\n      `,\n      parameters: {\n        codes: targetCodes\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1664,
+        -240
+      ],
+      "id": "2086e755-25bc-4c04-ad84-0b48b00a411c",
+      "name": "Prepare Neo4j Query for Standards(specific codes)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Task 0.1: Prepare Neo4j queries for baseline check\n\nreturn [\n  {\n    json: {\n      test_name: \"Task 0.1a - Count Standards\",\n      neo4j_payload: {\n        statement: \"MATCH (s:Standard:FoR) RETURN count(s) as total_standards, collect(DISTINCT s.status) as statuses\"\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2432,
+        2496
+      ],
+      "id": "42c5b029-c335-4472-b384-a7b491574fae",
+      "name": "Prepare: Count Standards Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2224,
+        2496
+      ],
+      "id": "020b74c6-0f6a-4fdc-901e-bcf810da57df",
+      "name": "Execute: Count Standards",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Neo4j count response\nconst response = $input.first().json;\nconst resultWrapper = Array.isArray(response) ? response[0] : response;\nconst data = resultWrapper?.data;\n\nlet total = 'ERROR';\nlet statuses = [];\n\nif (data && data.values && data.values[0]) {\n  total = data.values[0][0];\n  statuses = data.values[0][1] || [];\n}\n\nconsole.log(`Total Standards: ${total}`);\nconsole.log(`Statuses: ${statuses.join(', ')}`);\n\nreturn [{\n  json: {\n    test: \"Task 0.1a\",\n    total_standards: total,\n    statuses: statuses,\n    expected_count: 1238,\n    count_match: total === 1238 ? '✅ PASS' : '⚠️ CHECK'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2000,
+        2496
+      ],
+      "id": "5ebd63f4-66a5-4fec-9b5a-42c2cd2a65e2",
+      "name": "Parse: Count Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Task 0.1b: Check problem codes exist\n\nreturn [{\n  json: {\n    test_name: \"Task 0.1b - Problem Codes Check\",\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR) \n        WHERE s.code IN ['400301', '310106', '310607', '340502']\n        RETURN s.code as code, \n               s.name as name, \n               s.status as status, \n               s.asset_id as asset_id\n        ORDER BY s.code\n      `\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1776,
+        2496
+      ],
+      "id": "a19eb31d-2591-4ec4-912e-1cfb915c4adc",
+      "name": "Prepare: Problem Codes Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1552,
+        2496
+      ],
+      "id": "cd102e9d-2ef7-433d-8ec5-dd34c491885f",
+      "name": "Execute: Problem Codes",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse problem codes response\nconst response = $input.first().json;\nconst resultWrapper = Array.isArray(response) ? response[0] : response;\nconst data = resultWrapper?.data;\n\nconst problemCodes = {\n  '310106': { name: 'Enzymes', found: false },\n  '310607': { name: 'Nanobiotechnology', found: false },\n  '340502': { name: 'Natural products', found: false },\n  '400301': { name: 'Biofabrication', found: false }\n};\n\nconst foundCodes = [];\n\nif (data && data.values) {\n  for (const row of data.values) {\n    const code = row[0];\n    const name = row[1];\n    const status = row[2];\n    const assetId = row[3];\n    \n    if (problemCodes[code]) {\n      problemCodes[code].found = true;\n      problemCodes[code].status = status;\n      problemCodes[code].asset_id = assetId;\n    }\n    \n    foundCodes.push({ code, name, status, asset_id: assetId });\n  }\n}\n\nconst allFound = Object.values(problemCodes).every(c => c.found);\n\nconsole.log('Problem Codes Check:');\nfor (const [code, info] of Object.entries(problemCodes)) {\n  console.log(`  ${code} (${info.name}): ${info.found ? '✅ Found' : '❌ MISSING'}`);\n}\n\nreturn [{\n  json: {\n    test: \"Task 0.1b\",\n    problem_codes: problemCodes,\n    found_codes: foundCodes,\n    all_found: allFound ? '✅ ALL FOUND' : '❌ SOME MISSING'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1344,
+        2496
+      ],
+      "id": "5438da29-47f7-47b3-9333-d88d34e785f1",
+      "name": "Parse: Problem Codes Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Task 2.2: Get embedding content for problem code 400301\n// This checks what text was actually embedded\n\nreturn [{\n  json: {\n    test_name: \"Task 2.2 - Embedding Content Audit\",\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR {code: '400301'})\n        RETURN s.code as code,\n               s.name as name,\n               s.views as views,\n               s.core_attributes as core_attributes\n      `\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        2496
+      ],
+      "id": "138ed8e3-d6ce-4da1-aed4-8b38dab6828b",
+      "name": "Prepare: Embedding Audit Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -896,
+        2496
+      ],
+      "id": "f50bf2cd-a0b4-475b-bbca-61a0bdc5b37c",
+      "name": "Execute: Embedding Audit",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse embedding audit response - CRITICAL for root cause analysis\nconst response = $input.first().json;\nconst resultWrapper = Array.isArray(response) ? response[0] : response;\nconst data = resultWrapper?.data;\n\nlet result = {\n  test: \"Task 2.2 - Embedding Content Audit\",\n  code: '400301',\n  name: 'Biofabrication',\n  status: 'ERROR',\n  findings: []\n};\n\nif (data && data.values && data.values[0]) {\n  const row = data.values[0];\n  const code = row[0];\n  const name = row[1];\n  \n  // Parse views JSON\n  let views = {};\n  try {\n    views = typeof row[2] === 'string' ? JSON.parse(row[2]) : row[2];\n  } catch (e) {\n    result.findings.push('❌ Failed to parse views JSON');\n  }\n  \n  // Parse core_attributes JSON\n  let coreAttrs = {};\n  try {\n    coreAttrs = typeof row[3] === 'string' ? JSON.parse(row[3]) : row[3];\n  } catch (e) {\n    result.findings.push('❌ Failed to parse core_attributes JSON');\n  }\n  \n  // Extract embedding view\n  const embeddingView = views?.embedding || {};\n  const embeddingContent = embeddingView?.content || '';\n  const tokenCount = embeddingView?.token_count || 0;\n  \n  // Extract domain_context\n  const domainContext = coreAttrs?.domain_context || {};\n  \n  // Analyze embedding content\n  result.embedding_content = embeddingContent;\n  result.embedding_token_count = tokenCount;\n  result.embedding_char_count = embeddingContent.length;\n  \n  // Check for key terms\n  const keyTerms = ['biofabrication', 'bioprinting', '3D', 'tissue', 'scaffold', 'bioink', 'cell printing'];\n  result.key_terms_found = {};\n  for (const term of keyTerms) {\n    result.key_terms_found[term] = embeddingContent.toLowerCase().includes(term.toLowerCase());\n  }\n  \n  // Check domain_context fields\n  result.domain_context = {\n    has_synonyms: (domainContext.synonyms?.length || 0) > 0,\n    synonyms_count: domainContext.synonyms?.length || 0,\n    has_industry_terms: (domainContext.industry_terms?.length || 0) > 0,\n    industry_terms_count: domainContext.industry_terms?.length || 0,\n    has_related_concepts: (domainContext.related_concepts?.length || 0) > 0,\n    related_concepts_count: domainContext.related_concepts?.length || 0,\n    has_common_methods: (domainContext.common_methods?.length || 0) > 0,\n    common_methods_count: domainContext.common_methods?.length || 0,\n    has_description: (domainContext.description_extended?.length || 0) > 0,\n    description_length: domainContext.description_extended?.length || 0\n  };\n  \n  // Quality assessment\n  if (tokenCount < 100) {\n    result.findings.push('❌ CRITICAL: Token count < 100 - embedding is SPARSE');\n    result.quality = 'SPARSE';\n  } else if (tokenCount < 300) {\n    result.findings.push('⚠️ Token count < 300 - embedding is MARGINAL');\n    result.quality = 'MARGINAL';\n  } else {\n    result.findings.push('✅ Token count >= 300 - embedding density OK');\n    result.quality = 'ADEQUATE';\n  }\n  \n  // Check if key enrichment fields made it to embedding\n  if (!result.key_terms_found['biofabrication']) {\n    result.findings.push('❌ Missing \"biofabrication\" in embedding content');\n  }\n  if (!result.key_terms_found['bioprinting'] && !result.key_terms_found['3D']) {\n    result.findings.push('⚠️ Missing bioprinting/3D terms in embedding');\n  }\n  \n  result.status = 'ANALYZED';\n}\n\nconsole.log('=== EMBEDDING AUDIT RESULTS ===');\nconsole.log(`Token count: ${result.embedding_token_count}`);\nconsole.log(`Quality: ${result.quality}`);\nconsole.log('Findings:');\nfor (const f of result.findings) {\n  console.log(`  ${f}`);\n}\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        2496
+      ],
+      "id": "5f0f31cb-9e40-476b-b664-0247cc97c157",
+      "name": "Parse: Embedding Audit Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile all results into diagnostic summary\nconst countResult = $('Parse: Count Result').first().json;\nconst codesResult = $('Parse: Problem Codes Result').first().json;\nconst embeddingResult = $('Parse: Embedding Audit Result').first().json;\n\nconst summary = {\n  diagnostic_run: new Date().toISOString(),\n  \n  task_0_1a_count: {\n    total_standards: countResult.total_standards,\n    statuses: countResult.statuses,\n    result: countResult.count_match\n  },\n  \n  task_0_1b_codes: {\n    all_found: codesResult.all_found,\n    details: codesResult.problem_codes\n  },\n  \n  task_2_2_embedding: {\n    code_400301: {\n      token_count: embeddingResult.embedding_token_count,\n      char_count: embeddingResult.embedding_char_count,\n      quality: embeddingResult.quality,\n      key_terms: embeddingResult.key_terms_found,\n      domain_context: embeddingResult.domain_context,\n      findings: embeddingResult.findings\n    },\n    embedding_content_preview: embeddingResult.embedding_content?.substring(0, 500) + '...'\n  },\n  \n  preliminary_diagnosis: '',\n  recommended_next_step: ''\n};\n\n// Determine preliminary diagnosis\nif (embeddingResult.quality === 'SPARSE') {\n  summary.preliminary_diagnosis = 'H1 LIKELY: Embedding view is too sparse';\n  summary.recommended_next_step = 'Proceed to Task 2.3 - Compare Neo4j source vs Qdrant';\n} else if (embeddingResult.quality === 'MARGINAL') {\n  summary.preliminary_diagnosis = 'H1 POSSIBLE: Embedding may be under-enriched';\n  summary.recommended_next_step = 'Run Task 1.1 raw vector search to confirm retrieval position';\n} else {\n  summary.preliminary_diagnosis = 'Embedding density OK - problem may be elsewhere';\n  summary.recommended_next_step = 'Run Task 1.1 raw vector search to check actual retrieval rank';\n}\n\nconsole.log('\\n========================================');\nconsole.log('     DIAGNOSTIC SUMMARY');\nconsole.log('========================================');\nconsole.log(`\\nPreliminary Diagnosis: ${summary.preliminary_diagnosis}`);\nconsole.log(`Recommended Next Step: ${summary.recommended_next_step}`);\nconsole.log('\\n========================================');\n\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        2496
+      ],
+      "id": "53ef7b9a-f172-46a2-b992-a3f442a5b964",
+      "name": "Compile Diagnostic Summary"
+    }
+  ],
+  "pinData": {
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-12-19T08:50:50.004+11:00",
+          "Readable date": "December 19th 2025, 8:50:50 am",
+          "Readable time": "8:50:50 am",
+          "Day of week": "Friday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "19",
+          "Hour": "08",
+          "Minute": "50",
+          "Second": "50",
+          "Timezone": "Australia/Melbourne (UTC+11:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Prepare Neo4j Query for Standards": {
+      "main": [
+        [
+          {
+            "node": "Fetch Thin Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Field Enrichment": {
+      "main": [
+        []
+      ]
+    },
+    "Fetch Thin Standards": {
+      "main": [
+        [
+          {
+            "node": "Parse Neo4j HTTP Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Neo4j HTTP Response": {
+      "main": [
+        [
+          {
+            "node": "Pass 1: Structural Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 1: Structural Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Prepare Update Status to 'raw'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Update Status to 'raw'": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP Request (Update Status)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Neo4j HTTP Request (Update Status)": {
+      "main": [
+        [
+          {
+            "node": "Parse Update Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Update Response": {
+      "main": [
+        [
+          {
+            "node": "Re-Fetch Standards with Full Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-Fetch Standards with Full Data": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP Request (Re-fetch Full Data)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Neo4j HTTP Request (Re-fetch Full Data)": {
+      "main": [
+        [
+          {
+            "node": "Parse Re-fetched Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Re-fetched Standards": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Relationships1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Relationships1": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP Request (Fetch Relationships)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Neo4j HTTP Request (Fetch Relationships)": {
+      "main": [
+        [
+          {
+            "node": "Parse Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Neo4j HTTP Request (Re-fetch with relationships)": {
+      "main": [
+        [
+          {
+            "node": "Parse Standard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Relationships": {
+      "main": [
+        [
+          {
+            "node": "Fetch Complete Standards with Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Standards with Stored Relationships": {
+      "main": [
+        [
+          {
+            "node": "Update Status to enriching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Complete Standards with Relationships": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP Request (Re-fetch with relationships)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Standard": {
+      "main": [
+        [
+          {
+            "node": "Merge Standards with Stored Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status to enriching": {
+      "main": [
+        [
+          {
+            "node": "Execute Update to enriching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Update to enriching": {
+      "main": [
+        [
+          {
+            "node": "Prepare for Pass 2 LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for Pass 2 LLM": {
+      "main": [
+        [
+          {
+            "node": "Pass 2: LLM Context Enhancement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pass 2: LLM Context Enhancement",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Pass 2 LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Prepare Pass 3 Disambiguation Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pass 3: Disambiguation Signals",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 2: LLM Context Enhancement": {
+      "main": [
+        [
+          {
+            "node": "Parse Pass 2 LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Pass 3 Disambiguation Prompts": {
+      "main": [
+        [
+          {
+            "node": "Pass 3: Disambiguation Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 3: Disambiguation Signals": {
+      "main": [
+        [
+          {
+            "node": "Parse Pass 3 Disambiguation Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Pass 3 Disambiguation Response": {
+      "main": [
+        [
+          {
+            "node": "Pass 4: Canonical Normalisation (ICF)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 4: Canonical Normalisation (ICF)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Storage Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Storage Payloads": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Generate Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Embeddings with Payloads": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Cypher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Cypher": {
+      "main": [
+        [
+          {
+            "node": "Store in Neo4j",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Qdrant - Store Embedding",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare PostgreSQL Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PostgreSQL Batch": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase(Postgre)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant - Store Embedding": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Generate Storage Summary": {
+      "main": [
+        [
+          {
+            "node": "Check for Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Generate Storage Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase(Postgre)": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Check for Errors": {
+      "main": [
+        [
+          {
+            "node": "Send Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Query for Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Generate Embedding": {
+      "main": [
+        [
+          {
+            "node": "Merge Embeddings with Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant fetch": {
+      "main": [
+        [
+          {
+            "node": "compare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Neo4j HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "compare": {
+      "main": [
+        [
+          {
+            "node": "Prepare Reset Status Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Reset Status Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j HTTP (reset)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Qdrant fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Query for Standards(specific codes)": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare: Count Standards Query": {
+      "main": [
+        [
+          {
+            "node": "Execute: Count Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Count Standards": {
+      "main": [
+        [
+          {
+            "node": "Parse: Count Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse: Count Result": {
+      "main": [
+        [
+          {
+            "node": "Prepare: Problem Codes Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Problem Codes Query": {
+      "main": [
+        [
+          {
+            "node": "Execute: Problem Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Problem Codes": {
+      "main": [
+        [
+          {
+            "node": "Parse: Problem Codes Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse: Problem Codes Result": {
+      "main": [
+        [
+          {
+            "node": "Prepare: Embedding Audit Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare: Embedding Audit Query": {
+      "main": [
+        [
+          {
+            "node": "Execute: Embedding Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute: Embedding Audit": {
+      "main": [
+        [
+          {
+            "node": "Parse: Embedding Audit Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse: Embedding Audit Result": {
+      "main": [
+        [
+          {
+            "node": "Compile Diagnostic Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ed528e1b-241b-4058-b49f-01936c692aca",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "tpa47HugMKyND5Rh",
+  "tags": [
+    {
+      "updatedAt": "2025-11-23T12:58:39.160Z",
+      "createdAt": "2025-11-23T12:58:39.160Z",
+      "id": "KyImE5WG4Rp8t6w2",
+      "name": "Classification Foundry"
+    },
+    {
+      "updatedAt": "2025-11-23T12:58:39.059Z",
+      "createdAt": "2025-11-23T12:58:39.059Z",
+      "id": "Q2KDhY4Nthey4hTr",
+      "name": "Gen 2 Prototype"
+    },
+    {
+      "updatedAt": "2025-11-23T12:58:39.118Z",
+      "createdAt": "2025-11-23T12:58:39.118Z",
+      "id": "X3GEuQsufII0bu6P",
+      "name": "FAT Standards"
+    }
+  ]
+}

@@ -1,0 +1,1255 @@
+{
+  "name": "OBJECT-2_v2 GEN 5 Workflow (Object Fabrication/Re-Fabrication)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Fetch ThinObjects\n// Fetches Colin Barrow ThinObject for testing\nconst batchSize = 1;\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject)\n        WHERE thin.status = $status\n          AND thin.object_type = $object_type\n          AND toLower(thin.name) CONTAINS 'barrow'\n          AND NOT EXISTS((thin)<-[:FABRICATED_FROM]-(:FATObject))\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        ORDER BY thin.created_at ASC\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"raw\",\n        object_type: \"researcher\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        1392
+      ],
+      "id": "8b8bc18e-a90b-49a7-86b2-b1d0d7831462",
+      "name": "Prepare Fetch ThinObjects1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "40c2b5c0-11ee-4a84-8662-296127e77763",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "object-2-fabricate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "09937e90-6068-42c3-be5c-bda1f11b378c",
+      "name": "Webhook Trigger (Refab)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        464,
+        32
+      ],
+      "webhookId": "object-2-fabricate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge Inputs - Entry point normalization\n// Detects mode from input source and sets execution context\n\nconst inputData = $input.first().json;\n\n// Webhook wraps payload in 'body', Schedule Trigger doesn't\nconst payload = inputData.body || inputData;\n\nlet executionContext;\n\nif (payload.mode === 'refabrication') {\n  // From Webhook - refabrication mode\n  executionContext = {\n    mode: 'refabrication',\n    fat_asset_id: payload.asset_id,\n    thin_asset_id: payload.asset_id.replace(/^fat:/, 'thin:'),\n    new_version: payload.new_version || 'v2.0',\n    previous_version: payload.previous_version || 'v1.0',\n    refabrication_reason: payload.refabrication_reason || 'change_detected',\n    changed_fields: payload.changed_fields || [],\n    source_queue_entry_id: payload.source_queue_entry_id || null,\n    requires_fresh_scrape: payload.requires_fresh_scrape || false\n  };\n} else {\n  // From Schedule Trigger - normal polling mode\n  executionContext = {\n    mode: 'normal',\n    fat_asset_id: null,\n    thin_asset_id: null,\n    new_version: 'v1.0',\n    previous_version: null,\n    refabrication_reason: null,\n    changed_fields: [],\n    source_queue_entry_id: null,\n    requires_fresh_scrape: false\n  };\n}\n\nreturn [{ json: executionContext }];"
+      },
+      "id": "77598043-6afe-40a2-8eca-49533a5406f8",
+      "name": "Merge Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "normal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "86337ad1-a352-442b-8578-730a23993938"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "normal"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "refabrication",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "63cb6ba9-fb33-4ce5-8bd4-0f9968056785"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "refabrication"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ead9412a-7ded-4c97-8d3f-c12a84c3d756",
+      "name": "Route by Mode",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        960,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Fetch ThinObject - Refabrication Mode\n// Fetches specific ThinObject by asset_id for re-fabrication\n\nconst executionContext = $input.first().json;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject {asset_id: $thin_asset_id})\n        WHERE thin.object_type = $object_type\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        LIMIT 1\n      `,\n      parameters: {\n        thin_asset_id: executionContext.thin_asset_id,\n        object_type: \"researcher\"\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        144
+      ],
+      "id": "cc7e736a-6534-4575-af2d-1628deccfba7",
+      "name": "Prepare Fetch ThinObject (Refab)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        144
+      ],
+      "id": "b6269d67-9808-4470-a5a8-3da9b096f2e7",
+      "name": "Fetch ThinObject (Refab)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Neo4j Response - Refabrication Mode\n// Parses response for specific ThinObject, sets refab status\n\nconst response = $input.first().json;\nconst executionContext = $('Prepare Fetch ThinObject (Refab)').first().json.execution_context;\n\n// Handle empty results or errors\nif (!response.data || !response.data.values || response.data.values.length === 0) {\n  return [{\n    json: {\n      execution_context: executionContext,\n      neo4j_payload: null,\n      thin_objects: [],\n      skipped: true,\n      message: `ThinObject not found: ${executionContext.thin_asset_id}`\n    }\n  }];\n}\n\n// Parse Neo4j response\nconst thinObjects = response.data.values.map(row => row[0]);\nconst objectIds = thinObjects.map(obj => obj.object_id);\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        UNWIND $object_ids AS object_id\n        MATCH (thin:ThinObject {asset_id: object_id})\n        SET thin.status = $new_status\n        SET thin.refabrication_started_at = timestamp()\n        SET thin.refabrication_version = $new_version\n        RETURN thin.asset_id as updated_id\n      `,\n      parameters: {\n        object_ids: objectIds,\n        new_status: \"refabricating\",\n        new_version: executionContext.new_version\n      }\n    },\n    thin_objects: thinObjects\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        144
+      ],
+      "id": "bea837ed-6279-4f20-9110-e370f1c87576",
+      "name": "Prepare Set Status (Refab)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        144
+      ],
+      "id": "b2732ff3-6363-4ede-8e90-9a89250cbac6",
+      "name": "Set Status: Refabricating",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split ThinObjects - Normal Mode\n// Gets thin_objects and execution_context from Prepare node\n\nconst prepareData = $('Prepare Set Status Fabricating').first().json;\nconst thinObjects = prepareData.thin_objects;\nconst executionContext = prepareData.execution_context;\n\n// Attach execution context to each thin object\nreturn thinObjects.map(obj => ({ \n  json: {\n    ...obj,\n    execution_context: executionContext\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -160
+      ],
+      "id": "32b4fa9b-6fd3-444e-b6c9-4acc6f280437",
+      "name": "Split ThinObjects"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split ThinObjects - Refab Mode\n// Gets thin_objects and execution_context from Prepare node\n\nconst prepareData = $('Prepare Set Status (Refab)').first().json;\nconst thinObjects = prepareData.thin_objects;\nconst executionContext = prepareData.execution_context;\n\n// Attach execution context to each thin object\nreturn thinObjects.map(obj => ({ \n  json: {\n    ...obj,\n    execution_context: executionContext\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        144
+      ],
+      "id": "73a9fd3a-aebf-46c0-94c5-ca7f42406396",
+      "name": "Split ThinObjects (Refab)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check Execution Mode for Response\n// Routes to appropriate completion handling\n\nconst executionContext = $('Prepare PostgreSQL Payload').first().json.execution_context || {};\nconst isRefabrication = executionContext.mode === 'refabrication';\n\nreturn [{\n  json: {\n    is_refabrication: isRefabrication,\n    execution_context: executionContext\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        848
+      ],
+      "id": "57acb24f-284b-4216-8d03-5ef5a3382791",
+      "name": "Check Mode for Response"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.execution_context.mode }}",
+                    "rightValue": "refabrication",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "54e2a0a1-d836-49bb-9cbf-501ab24f8c5e"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "refab_complete"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "0f7a526c-bf9d-4a75-ad17-f1097a2f7886",
+      "name": "Route Completion",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1888,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"success\": true,\n  \"mode\": \"refabrication\",\n  \"asset_id\": $('Merge Embedding').first().json.asset_id,\n  \"version\": $('Merge Embedding').first().json.version,\n  \"previous_version\": $('Merge Embedding').first().json.provenance.previous_version,\n  \"status\": \"fabricated\",\n  \"fabricated_at\": $('Merge Embedding').first().json.provenance.fabricated_at,\n  \"message\": \"Refabrication completed successfully\"\n} }}",
+        "options": {}
+      },
+      "id": "24fabc42-9bb9-46dd-ac1e-f459758a8de6",
+      "name": "Respond to Webhook (Refab)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2176,
+        736
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "3b85234c-a4a0-4738-98ec-471d6c41d154",
+      "name": "Loop Back (Normal)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2128,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "b59c6417-cd5f-4a57-bd9d-814bc5c18189",
+      "name": "Schedule Trigger1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-4o",
+        "options": {
+          "maxTokens": 1000,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        592,
+        656
+      ],
+      "id": "7596f7ee-c179-4ead-8fb7-523c45268b68",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a research profile enrichment specialist. Always respond with valid JSON only."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        592,
+        448
+      ],
+      "id": "effd54ed-af5d-4375-978a-f23c8a6eeed2",
+      "name": "Pass 2: LLM Enrichment1"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare LLM Prompt - PROTOTYPE COMPLIANT\n// MODIFIED: Preserves execution_context\n\nconst unifiedObject = $input.first().json;\nconst executionContext = unifiedObject.execution_context;\n\nconst name = unifiedObject.name;\nconst institution = unifiedObject.institution || 'Unknown';\n\n// Format publications (top 10 most recent/cited)\nconst publications = unifiedObject.publications || [];\nconst publicationsSorted = publications\n  .sort((a, b) => {\n    const yearDiff = (b.year || 0) - (a.year || 0);\n    if (yearDiff !== 0) return yearDiff;\n    return (b.citations || 0) - (a.citations || 0);\n  })\n  .slice(0, 10);\n\nconst publicationsText = publicationsSorted.length > 0\n  ? publicationsSorted\n      .map(pub => `- ${pub.title} (${pub.year}, ${pub.citations || 0} citations)`)\n      .join('\\n')\n  : 'No individual publication records available';\n\n// Format keywords\nconst keywords = (unifiedObject.keywords || []).slice(0, 20);\nconst keywordsText = keywords.length > 0 ? keywords.join(', ') : 'None available';\n\n// Format collaborators (top 10)\nconst collaborators = (unifiedObject.collaborators || []).slice(0, 10);\nconst collaboratorsText = collaborators.length > 0 \n  ? collaborators.join(', ') \n  : 'None available';\n\n// Format metrics\nconst metrics = unifiedObject.metrics || {};\nconst hIndex = metrics.h_index || 0;\nconst totalCitations = metrics.total_citations || 0;\n\nconst prompt = `You are enriching a researcher profile for a capability intelligence system.\n\nINPUT DATA:\n- Name: ${name}\n- Institution: ${institution}\n- H-index: ${hIndex}\n- Total citations: ${totalCitations}\n\nPublications (Top 10):\n${publicationsText}\n\nKeywords:\n${keywordsText}\n\nKey Collaborators:\n${collaboratorsText}\n\nTASK: Extract and structure researcher capabilities.\n\nProvide:\n1. Research Domains (3-5 high-level fields, e.g., \"Marine Biotechnology\", \"Genetic Engineering\")\n   - These should be broad disciplinary areas\n   \n2. Core Methodologies (5-10 specific techniques, e.g., \"CRISPR gene editing\", \"Flow cytometry\", \"Next-generation sequencing\")\n   - These should be concrete methods/tools the researcher uses\n   \n3. Research Themes (3-5 recurring topics across publications)\n   - These should be specific research questions or application areas\n   \n4. Achievement Indicators:\n   - Research impact level: (Emerging / Established / Leading) based on h-index and citations\n   - Collaboration breadth: (Local / National / International) based on co-author affiliations\n   - Funding track record: (Minimal / Moderate / Extensive) if evidence exists\n   \n5. Career Stage:\n   - Estimate: early-career / mid-career / established / emeritus\n   - Based on: publication history span, h-index trajectory, institutional roles\n\nOUTPUT FORMAT: JSON ONLY. Do not include any text outside the JSON structure.\n\n{\n  \"research_domains\": [\"domain1\", \"domain2\", \"domain3\"],\n  \"methodologies\": [\"method1\", \"method2\", ...],\n  \"research_themes\": [\"theme1\", \"theme2\", \"theme3\"],\n  \"achievement_indicators\": {\n    \"research_impact\": \"Established\",\n    \"collaboration_breadth\": \"International\",\n    \"funding_track_record\": \"Moderate\"\n  },\n  \"career_stage\": \"mid-career\",\n  \"confidence\": 0.85\n}\n\nCRITICAL: Respond ONLY with valid JSON. Do not include any explanatory text, markdown formatting, or code blocks. Start your response with { and end with }.`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    object_id: unifiedObject.object_id,\n    unified_data: unifiedObject,\n    execution_context: executionContext  // ADDED: Preserve context\n  }\n}];"
+      },
+      "id": "046fcd0c-1ced-4f9d-aada-1d104554aef1",
+      "name": "Prepare LLM Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        352,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse LLM Response - For n8n LLM Node\n// MODIFIED: Preserves execution_context\n\n// Get LLM response from direct input\nconst llmResponse = $input.first().json.text;\n\n// Get unified_data and execution_context via node reference\nconst preparedData = $('Prepare LLM Prompt').first().json;\nconst unifiedObject = preparedData.unified_data;\nconst objectId = preparedData.object_id;\nconst executionContext = preparedData.execution_context;\n\n// Clean and parse\nlet cleanedResponse = llmResponse\n  .replace(/```json\\s*/g, '')\n  .replace(/```\\s*$/g, '')\n  .trim();\n\nlet enrichmentData;\ntry {\n  enrichmentData = JSON.parse(cleanedResponse);\n} catch (e) {\n  enrichmentData = {\n    research_domains: [],\n    methodologies: [],\n    research_themes: [],\n    achievement_indicators: {\n      research_impact: 'Unknown',\n      collaboration_breadth: 'Unknown',\n      funding_track_record: 'Unknown'\n    },\n    career_stage: 'unknown',\n    confidence: 0.0,\n    enrichment_error: `JSON parse failed: ${e.message}`\n  };\n}\n\nconst enrichedObject = {\n  ...unifiedObject,\n  object_id: objectId,\n  enrichment: enrichmentData,\n  enriched_at: new Date().toISOString(),\n  execution_context: executionContext  // ADDED: Preserve context\n};\n\nreturn [{ json: enrichedObject }];"
+      },
+      "id": "0f160440-afcf-45e4-aa1d-7b5a1972449b",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        880,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Fetch ThinObjects - Normal Mode\n// Fetches raw ThinObjects ready for initial fabrication\n\nconst executionContext = $input.first().json;\nconst batchSize = 5;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject)\n        WHERE thin.status = $status\n          AND thin.object_type = $object_type\n          AND NOT EXISTS((thin)<-[:FABRICATED_FROM]-(:FATObject))\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        ORDER BY thin.created_at ASC\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"raw\",\n        object_type: \"researcher\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -160
+      ],
+      "id": "a2a28673-cdcf-4335-93ac-20f5e3e6c6d5",
+      "name": "Prepare Fetch ThinObjects"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        -160
+      ],
+      "id": "087cd9ac-d731-491c-8cdb-f2f74d63a158",
+      "name": "Fetch ThinObjects",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Neo4j Response - Normal Mode\n// Parses response AND prepares status update query\n\nconst response = $input.first().json;\nconst executionContext = $('Prepare Fetch ThinObjects').first().json.execution_context;\n\n// Handle empty results or errors\nif (!response.data || !response.data.values || response.data.values.length === 0) {\n  return [{\n    json: {\n      execution_context: executionContext,\n      neo4j_payload: null,\n      thin_objects: [],\n      skipped: true,\n      message: \"No ThinObjects to process\"\n    }\n  }];\n}\n\n// Parse Neo4j response: data.values is array of [thin_object] rows\nconst thinObjects = response.data.values.map(row => row[0]);\n\n// Extract object_ids for the status update\nconst objectIds = thinObjects.map(obj => obj.object_id);\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        UNWIND $object_ids AS object_id\n        MATCH (thin:ThinObject {asset_id: object_id})\n        SET thin.status = $new_status\n        SET thin.fabricating_started_at = timestamp()\n        RETURN thin.asset_id as updated_id\n      `,\n      parameters: {\n        object_ids: objectIds,\n        new_status: \"enriching\"\n      }\n    },\n    thin_objects: thinObjects\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -160
+      ],
+      "id": "f5b429f5-5897-458f-bc59-312be523aa67",
+      "name": "Prepare Set Status Fabricating"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        -160
+      ],
+      "id": "8938a6d6-27f6-4f61-88e3-523d8776b8fb",
+      "name": "Set Status: Fabricating",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "bb08ddce-9808-4704-bac9-596ae12d6741",
+      "name": "Loop Through Objects",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2432,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Pass 1: Structural Unification\n// Merges data from multiple sources and creates unified researcher profile\n// MODIFIED: Preserves execution_context through pipeline\n\nconst thinObject = $input.first().json;\nconst executionContext = thinObject.execution_context;\n\nfunction titleSimilarity(title1, title2) {\n  const words1 = new Set(title1.toLowerCase().split(/\\s+/));\n  const words2 = new Set(title2.toLowerCase().split(/\\s+/));\n  \n  if (words1.size === 0 || words2.size === 0) return 0.0;\n  \n  const intersection = new Set([...words1].filter(x => words2.has(x)));\n  const union = new Set([...words1, ...words2]);\n  \n  return intersection.size / union.size;\n}\n\n// Parse JSON fields\nconst orcidData = JSON.parse(thinObject.orcid_data || '{}');\nconst scopusData = JSON.parse(thinObject.scopus_data || '{}');\nconst scholarData = JSON.parse(thinObject.scholar_data || '{}');\nconst universityData = JSON.parse(thinObject.university_data || '{}');\nconst patentsData = JSON.parse(thinObject.patents_data || '{}');\n\n// Preserve source_metadata for provenance\nconst sourceMetadata = thinObject.source_metadata || {\n  sources_scraped: [],\n  scrape_timestamps: {},\n  field_hashes: {}\n};\n\nconst unified = {\n  object_id: thinObject.object_id,\n  name: thinObject.name,\n  orcid: thinObject.orcid || null,\n  email: thinObject.email || null,\n  institution: thinObject.institution || null,\n  publications: [],\n  collaborators: [],\n  keywords: [],\n  affiliations: [],\n  patents: [],\n  metrics: {},\n  data_quality_flags: [],\n  source_metadata: sourceMetadata,\n  execution_context: executionContext  // ADDED: Preserve context\n};\n\n// Merge publications from all sources\nconst publicationsMap = new Map();\n\n// Add Scopus publications\n(scopusData.publications || []).forEach(pub => {\n  const doi = pub.doi;\n  if (doi) {\n    publicationsMap.set(doi, {\n      title: pub.title,\n      doi: doi,\n      year: pub.year,\n      citations: pub.citations || 0,\n      authors: pub.authors || [],\n      abstract: pub.abstract,\n      keywords: pub.keywords || [],\n      source: 'scopus'\n    });\n  }\n});\n\n// Add Scholar publications (deduplicate by title similarity)\n(scholarData.publications || []).forEach(pub => {\n  const title = (pub.title || '').toLowerCase();\n  const doi = pub.doi;\n  \n  if (doi && publicationsMap.has(doi)) {\n    const existing = publicationsMap.get(doi);\n    existing.citations = Math.max(existing.citations || 0, pub.citations || 0);\n  } else {\n    let duplicateFound = false;\n    for (const [existingDoi, existingPub] of publicationsMap.entries()) {\n      const existingTitle = (existingPub.title || '').toLowerCase();\n      if (titleSimilarity(title, existingTitle) > 0.85) {\n        duplicateFound = true;\n        break;\n      }\n    }\n    \n    if (!duplicateFound && pub.title) {\n      const pubId = doi || `scholar_${title.substring(0, 50)}`;\n      publicationsMap.set(pubId, {\n        title: pub.title,\n        doi: doi,\n        year: pub.year,\n        citations: pub.citations || 0,\n        source: 'scholar'\n      });\n    }\n  }\n});\n\nunified.publications = Array.from(publicationsMap.values());\n\n// Extract collaborators from co-authors\nconst allCoauthors = new Set();\nunified.publications.forEach(pub => {\n  (pub.authors || []).forEach(author => {\n    const authorName = (author.name || author || '').toString().trim();\n    if (authorName && authorName.toLowerCase() !== thinObject.name.toLowerCase()) {\n      allCoauthors.add(authorName);\n    }\n  });\n});\n\n// Also add co-authors from scholar data\n(scholarData.co_authors || []).forEach(coauthor => {\n  const name = coauthor.name || coauthor || '';\n  if (name && name.toLowerCase() !== thinObject.name.toLowerCase()) {\n    allCoauthors.add(name);\n  }\n});\n\nunified.collaborators = Array.from(allCoauthors);\n\n// Merge keywords from ALL sources\nconst allKeywords = new Set();\n\n// From university_data.research_interests\n(universityData.research_interests || []).forEach(kw => {\n  if (kw) allKeywords.add(kw.toLowerCase().trim());\n});\n\n// From orcid_data.keywords\n(orcidData.keywords || []).forEach(kw => {\n  if (kw) allKeywords.add(kw.toLowerCase().trim());\n});\n\n// From scholar_data.interests\n(scholarData.interests || []).forEach(kw => {\n  if (kw) allKeywords.add(kw.toLowerCase().trim());\n});\n\n// From scopus_data.keywords\n(scopusData.keywords || []).forEach(kw => {\n  if (kw) allKeywords.add(kw.toLowerCase().trim());\n});\n\n// From publication keywords\nunified.publications.forEach(pub => {\n  (pub.keywords || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n});\n\nunified.keywords = Array.from(allKeywords);\n\n// Merge affiliations - handle both string and object organization\nconst affiliations = [];\n\n(orcidData.employment || []).forEach(emp => {\n  const orgName = typeof emp.organization === 'string' \n    ? emp.organization \n    : emp.organization?.name;\n  \n  if (orgName) {\n    affiliations.push({\n      institution: orgName,\n      department: emp.department || null,\n      role: emp.role || null,\n      start_date: emp.start_year || emp.start_date || null,\n      end_date: emp.end_year || emp.end_date || null,\n      source: 'orcid'\n    });\n  }\n});\n\n// Add from university_data\nif (universityData.department || universityData.position) {\n  affiliations.push({\n    institution: thinObject.institution,\n    department: universityData.department || null,\n    position: universityData.position || null,\n    source: 'university'\n  });\n}\n\n// Add current institution if not already present\nif (thinObject.institution) {\n  const alreadyHasCurrent = affiliations.some(a => \n    a.institution === thinObject.institution && a.source === 'current'\n  );\n  if (!alreadyHasCurrent) {\n    affiliations.push({\n      institution: thinObject.institution,\n      current: true,\n      source: 'current'\n    });\n  }\n}\n\nunified.affiliations = affiliations;\n\n// Add patents\nunified.patents = patentsData.patents || [];\n\n// Calculate metrics - use document_count from scopus if publications empty\nunified.metrics = {\n  h_index: scopusData.h_index || scholarData.h_index || 0,\n  total_citations: Math.max(scopusData.citations || 0, scholarData.citations || 0),\n  publication_count: scopusData.document_count || unified.publications.length || 0,\n  collaborator_count: unified.collaborators.length,\n  patent_count: patentsData.patent_count || unified.patents.length || 0\n};\n\n// Data quality flags\nif (!unified.orcid) unified.data_quality_flags.push('missing_orcid');\nif (unified.metrics.publication_count === 0) unified.data_quality_flags.push('no_publications');\nif (unified.affiliations.length === 0) unified.data_quality_flags.push('no_affiliations');\n\n// Calculate completeness score\nlet completeness = 0;\nif (unified.orcid) completeness += 20;\nif (unified.metrics.publication_count > 0) completeness += 30;\nif (unified.affiliations.length > 0) completeness += 20;\nif (unified.metrics.h_index > 0) completeness += 15;\nif (unified.keywords.length > 0 || unified.collaborators.length > 0) completeness += 15;\n\nunified.data_completeness = completeness;\n\nreturn [{ json: unified }];"
+      },
+      "id": "c6e8d2de-59cb-4270-bc6b-da2b502e0e40",
+      "name": "Pass 1: Unification",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2672,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Pass 3: Build Graph Relationships\n// MODIFIED: Preserves execution_context\n\nconst enrichedObject = $input.first().json;\nconst executionContext = enrichedObject.execution_context;\n\nconst objectId = enrichedObject.object_id;\nconst relationships = [];\n\n// 1. Collaborator relationships\n(enrichedObject.collaborators || []).forEach(collaboratorName => {\n  const slug = collaboratorName.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n  relationships.push({\n    type: 'COLLABORATES_WITH',\n    source: objectId,\n    target: `researcher:${slug}`,\n    properties: {\n      co_author: true,\n      weight: 1\n    }\n  });\n});\n\n// 2. Institutional affiliations\n(enrichedObject.affiliations || []).forEach(affiliation => {\n  const institutionName = affiliation.institution;\n  if (institutionName) {\n    const slug = institutionName.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n    relationships.push({\n      type: 'AFFILIATED_WITH',\n      source: objectId,\n      target: `institution:${slug}`,\n      properties: {\n        role: affiliation.role || affiliation.position || null,\n        department: affiliation.department || null,\n        current: affiliation.current || false,\n        start_date: affiliation.start_date || null,\n        end_date: affiliation.end_date || null\n      }\n    });\n  }\n});\n\n// 3. Research domain connections (from LLM enrichment)\nconst domains = (enrichedObject.enrichment || {}).research_domains || [];\ndomains.forEach(domain => {\n  const slug = domain.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n  relationships.push({\n    type: 'WORKS_IN_DOMAIN',\n    source: objectId,\n    target: `domain:${slug}`,\n    properties: {\n      domain_name: domain\n    }\n  });\n});\n\n// 4. Methodology connections (from LLM enrichment)\nconst methodologies = (enrichedObject.enrichment || {}).methodologies || [];\nmethodologies.forEach(method => {\n  const slug = method.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n  relationships.push({\n    type: 'USES_METHODOLOGY',\n    source: objectId,\n    target: `method:${slug}`,\n    properties: {\n      methodology_name: method\n    }\n  });\n});\n\n// Add graph_relationships to enriched object\nconst withRelationships = {\n  ...enrichedObject,\n  graph_relationships: relationships,\n  execution_context: executionContext  // ADDED: Preserve context\n};\n\nreturn [{ json: withRelationships }];"
+      },
+      "id": "93453461-4f71-4579-9723-89c28c5cd5ce",
+      "name": "Pass 3: Build Relationships",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Pass 4: Generate ICF Views\n// MODIFIED: Dynamic versioning for refabrication support\n// Creates Dense View, Embedding View, Graph View + provenance\n\nconst enrichedObject = $input.first().json;\nconst executionContext = enrichedObject.execution_context || {};\n\n// Checksum computation function\nfunction computeChecksum(obj) {\n  const str = JSON.stringify(obj);\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  return 'sha256:' + Math.abs(hash).toString(16).padStart(16, '0');\n}\n\n// Token estimation (1 token ≈ 4 chars for English)\nfunction estimateTokens(text) {\n  return Math.ceil(text.length / 4);\n}\n\n// Transform ID: thin:researcher:colin_barrow → fat:researcher:colin_barrow\nconst thinObjectId = enrichedObject.object_id;\nconst fatObjectId = thinObjectId.replace(/^thin:/, 'fat:');\n\nconst enrichment = enrichedObject.enrichment || {};\nconst metrics = enrichedObject.metrics || {};\n\n// ====== VERSION HANDLING (NEW) ======\nconst isRefabrication = executionContext.mode === 'refabrication';\nconst version = executionContext.new_version || 'v1.0';\nconst previousVersion = executionContext.previous_version || null;\nconst refabricationReason = executionContext.refabrication_reason || null;\nconst changedFields = executionContext.changed_fields || [];\nconst sourceQueueEntryId = executionContext.source_queue_entry_id || null;\n\n// === DENSE VIEW ===\nconst denseView = {\n  object_id: fatObjectId,\n  name: enrichedObject.name,\n  orcid: enrichedObject.orcid || null,\n  institution: enrichedObject.institution || null,\n  \n  // Career profile\n  career_stage: enrichment.career_stage || 'unknown',\n  research_impact: (enrichment.achievement_indicators || {}).research_impact || 'Unknown',\n  \n  // Research capabilities\n  research_domains: enrichment.research_domains || [],\n  core_methodologies: enrichment.methodologies || [],\n  research_themes: enrichment.research_themes || [],\n  \n  // Research output\n  publication_count: metrics.publication_count || 0,\n  h_index: metrics.h_index || 0,\n  total_citations: metrics.total_citations || 0,\n  patent_count: metrics.patent_count || 0,\n  \n  // Network\n  collaborator_count: metrics.collaborator_count || 0,\n  collaboration_breadth: (enrichment.achievement_indicators || {}).collaboration_breadth || 'Unknown',\n  \n  // Top publications (for context)\n  key_publications: (enrichedObject.publications || [])\n    .sort((a, b) => (b.citations || 0) - (a.citations || 0))\n    .slice(0, 5)\n    .map(pub => ({\n      title: pub.title,\n      year: pub.year,\n      citations: pub.citations || 0\n    })),\n  \n  // Data quality\n  data_completeness: enrichedObject.data_completeness || 0,\n  data_quality_flags: enrichedObject.data_quality_flags || []\n};\n\n// Validate dense view token count\nconst denseTokens = estimateTokens(JSON.stringify(denseView));\nif (denseTokens < 1200 || denseTokens > 2000) {\n  console.warn(`Dense view tokens (${denseTokens}) outside spec range 1200-2000`);\n}\n\n// === EMBEDDING VIEW ===\nconst embeddingText = `\nResearcher: ${enrichedObject.name}\nInstitution: ${enrichedObject.institution || 'Unknown'}\nCareer Stage: ${enrichment.career_stage || 'unknown'}\n\nResearch Domains: ${(enrichment.research_domains || []).join(', ')}\n\nCore Methodologies: ${(enrichment.methodologies || []).join(', ')}\n\nResearch Themes: ${(enrichment.research_themes || []).join(', ')}\n\nKeywords: ${(enrichedObject.keywords || []).join(', ')}\n\nResearch Impact: H-index ${metrics.h_index || 0}, ${metrics.total_citations || 0} citations, ${metrics.publication_count || 0} publications\n\nPatents: ${metrics.patent_count || 0} patents\n\nCollaboration: ${(enrichment.achievement_indicators || {}).collaboration_breadth || 'Unknown'} collaboration network with ${metrics.collaborator_count || 0} collaborators\n`.trim();\n\nconst embeddingTokens = estimateTokens(embeddingText);\nif (embeddingTokens < 300 || embeddingTokens > 800) {\n  console.warn(`Embedding view tokens (${embeddingTokens}) outside spec range 300-800`);\n}\n\nconst embeddingView = {\n  text: embeddingText,\n  token_count: embeddingTokens,\n  vector: null  // Will be generated in next node\n};\n\n// === GRAPH VIEW ===\nconst graphView = {\n  relationships: enrichedObject.graph_relationships || []\n};\n\n// === FAT OBJECT (ICF Structure) ===\n// MODIFIED: Dynamic version and refabrication provenance\nconst fatObject = {\n  asset_id: fatObjectId,\n  asset_type: 'object',\n  object_type: 'researcher',\n  version: version,  // DYNAMIC VERSION\n  status: 'fabricated',\n  \n  // Three canonical views\n  views: {\n    dense: denseView,\n    embedding: embeddingView,\n    graph: graphView\n  },\n  \n  // Provenance with versioning metadata\n  provenance: {\n    fabricated_from: thinObjectId,\n    fabricated_at: new Date().toISOString(),\n    fabricated_by: isRefabrication ? 'gen2_object_refabrication_v2.0' : 'gen2_object_fabrication_v2.0',\n    enrichment_model: 'gpt-4o-2024-11-20',\n    embedding_model: 'text-embedding-3-large',\n    data_sources: enrichedObject.source_metadata?.sources_scraped || ['orcid', 'scopus', 'scholar', 'university', 'patents'],\n    scrape_timestamps: enrichedObject.source_metadata?.scrape_timestamps || {},\n    field_hashes: enrichedObject.source_metadata?.field_hashes || {},\n    checksum: computeChecksum(denseView),\n    \n    // ADDED: Refabrication metadata\n    is_refabrication: isRefabrication,\n    previous_version: previousVersion,\n    refabrication_reason: refabricationReason,\n    changed_fields: changedFields,\n    source_queue_entry_id: sourceQueueEntryId\n  },\n  \n  // ADDED: Execution context for downstream nodes\n  execution_context: executionContext\n};\n\nreturn [{ json: fatObject }];"
+      },
+      "id": "cbf4ad9e-fa7a-414e-ac15-757372811232",
+      "name": "Pass 4: Generate ICF",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "openai/text-embedding-3-large"
+            },
+            {
+              "name": "input",
+              "value": "={{ $json.views.embedding.text }}"
+            },
+            {
+              "name": "dimensions",
+              "value": "={{ 3072 }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "55c2c13d-27b9-4f86-82e0-3f05f069aca7",
+      "name": "Generate Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1600,
+        448
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge Embedding\n// MODIFIED: Preserves execution_context\n\n// Get FAT object from Pass 4 via node reference\nconst fatObject = $('Pass 4: Generate ICF').first().json;\nconst executionContext = fatObject.execution_context;\n\n// Get embedding response from Generate Embedding (direct input)\nconst embeddingResponse = $input.first().json;\n\n// Extract the embedding vector\nconst embeddingVector = embeddingResponse.data[0].embedding;\n\n// Add embedding to FAT object\nfatObject.views.embedding.vector = embeddingVector;\nfatObject.views.embedding.model = 'text-embedding-3-large';\nfatObject.views.embedding.dimensions = 3072;\n\n// Preserve execution context\nfatObject.execution_context = executionContext;\n\nreturn [{ json: fatObject }];"
+      },
+      "id": "4171a452-b06d-45e0-a749-4239dada829e",
+      "name": "Merge Embedding",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Store Neo4j - Full version with APOC relationship creation\n// UPDATED: Idempotent storage for both normal and refabrication modes\n\nconst fatObject = $input.first().json;\nconst executionContext = fatObject.execution_context || {};\nconst isRefabrication = executionContext.mode === 'refabrication';\n\nlet statement;\nlet parameters;\n\nif (isRefabrication) {\n  // REFABRICATION MODE: MERGE on asset_id + version (idempotent - safe for retries)\n  statement = `\n    // Step 1: Create or update FATObject version (idempotent)\n    MERGE (fat:FATObject {asset_id: $asset_id, version: $version})\n    SET fat.name = $name,\n        fat.orcid = $orcid,\n        fat.institution = $institution,\n        fat.status = 'fabricated',\n        fat.fabricated_at = timestamp(),\n        fat.dense_view = $dense_view,\n        fat.data_completeness = $data_completeness,\n        fat.previous_version = $previous_version,\n        fat.refabrication_reason = $refabrication_reason,\n        fat.source_queue_entry_id = $source_queue_entry_id\n    \n    // Step 2: Link to ThinObject and update its status\n    WITH fat\n    MATCH (thin:ThinObject {asset_id: $thin_object_id})\n    MERGE (fat)-[:FABRICATED_FROM]->(thin)\n    SET thin.status = 'refabricated',\n        thin.refabricated_at = timestamp(),\n        thin.latest_version = $version\n    \n    // Step 3: Create relationships to other entities (idempotent)\n    WITH fat\n    UNWIND $relationships AS rel\n    WITH fat, rel, split(rel.target, ':') AS parts\n    WITH fat, rel, parts[0] AS targetLabel, rel.target AS targetId\n    \n    // Create or merge target node dynamically\n    CALL apoc.merge.node([targetLabel], {id: targetId}) YIELD node AS targetNode\n    \n    // Create or merge relationship dynamically (idempotent)\n    CALL apoc.merge.relationship(fat, rel.type, {}, rel.properties, targetNode) YIELD rel AS mergedRel\n    \n    RETURN count(mergedRel) AS relationships_created, fat.asset_id AS created_asset_id, fat.version AS created_version\n  `;\n  \n  parameters = {\n    asset_id: fatObject.asset_id,\n    version: fatObject.version,\n    thin_object_id: fatObject.provenance.fabricated_from,\n    name: fatObject.views.dense.name,\n    orcid: fatObject.views.dense.orcid || null,\n    institution: fatObject.views.dense.institution || null,\n    dense_view: JSON.stringify(fatObject.views.dense),\n    data_completeness: fatObject.views.dense.data_completeness,\n    previous_version: fatObject.provenance.previous_version,\n    refabrication_reason: fatObject.provenance.refabrication_reason,\n    source_queue_entry_id: fatObject.provenance.source_queue_entry_id,\n    relationships: fatObject.views.graph.relationships\n  };\n} else {\n  // NORMAL MODE: Merge on asset_id (original behavior)\n  statement = `\n    // Step 1: Create or update FATObject node\n    MERGE (fat:FATObject {asset_id: $asset_id})\n    SET fat.name = $name,\n        fat.orcid = $orcid,\n        fat.institution = $institution,\n        fat.status = 'fabricated',\n        fat.fabricated_at = timestamp(),\n        fat.dense_view = $dense_view,\n        fat.data_completeness = $data_completeness,\n        fat.version = $version\n    \n    // Step 2: Link to ThinObject and update its status\n    WITH fat\n    MATCH (thin:ThinObject {asset_id: $thin_object_id})\n    MERGE (fat)-[:FABRICATED_FROM]->(thin)\n    SET thin.status = 'fabricated',\n        thin.fabricated_at = timestamp()\n    \n    // Step 3: Create relationships to other entities\n    WITH fat\n    UNWIND $relationships AS rel\n    WITH fat, rel, split(rel.target, ':') AS parts\n    WITH fat, rel, parts[0] AS targetLabel, rel.target AS targetId\n    \n    // Create or merge target node dynamically\n    CALL apoc.merge.node([targetLabel], {id: targetId}) YIELD node AS targetNode\n    \n    // Create relationship dynamically\n    CALL apoc.create.relationship(fat, rel.type, rel.properties, targetNode) YIELD rel AS createdRel\n    \n    RETURN count(createdRel) AS relationships_created\n  `;\n  \n  parameters = {\n    asset_id: fatObject.asset_id,\n    thin_object_id: fatObject.provenance.fabricated_from,\n    name: fatObject.views.dense.name,\n    orcid: fatObject.views.dense.orcid || null,\n    institution: fatObject.views.dense.institution || null,\n    dense_view: JSON.stringify(fatObject.views.dense),\n    data_completeness: fatObject.views.dense.data_completeness,\n    version: fatObject.version,\n    relationships: fatObject.views.graph.relationships\n  };\n}\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: statement,\n      parameters: parameters\n    },\n    fat_object: fatObject,\n    execution_context: executionContext\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        448
+      ],
+      "id": "438971de-9df0-423f-ad1b-2cc6cdf637a0",
+      "name": "Prepare Store Neo4j"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        304,
+        848
+      ],
+      "id": "0a37e2a9-cbfd-4c9e-ac46-cc19f5638b6a",
+      "name": "Store in Neo4j",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Qdrant Payload for FATObject storage\n// MODIFIED: Includes version in payload for refabrication support\n\nconst fatObject = $('Merge Embedding').first().json;\nconst executionContext = fatObject.execution_context || {};\n\n// Generate deterministic UUID from asset_id + version\nfunction stringToUUID(str) {\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  \n  const hex = Math.abs(hash).toString(16).padStart(8, '0');\n  const len = str.length.toString(16).padStart(4, '0');\n  \n  let hash2 = 0;\n  for (let i = str.length - 1; i >= 0; i--) {\n    hash2 = ((hash2 << 3) + hash2) + str.charCodeAt(i);\n  }\n  const hex2 = Math.abs(hash2).toString(16).padStart(12, '0');\n  \n  return `${hex}-${len}-4000-8000-${hex2}`.substring(0, 36);\n}\n\n// For refabrication, include version in UUID generation to create unique point\nconst isRefabrication = executionContext.mode === 'refabrication';\nconst pointIdSource = isRefabrication \n  ? `${fatObject.asset_id}:${fatObject.version}` \n  : fatObject.asset_id;\nconst pointId = stringToUUID(pointIdSource);\n\n// Build the Qdrant point\nconst qdrantPayload = {\n  id: pointId,\n  vector: fatObject.views.embedding.vector,\n  payload: {\n    asset_id: fatObject.asset_id,\n    version: fatObject.version,  // ADDED: Version tracking\n    object_type: \"researcher\",\n    name: fatObject.views.dense.name,\n    institution: fatObject.views.dense.institution || null,\n    orcid: fatObject.views.dense.orcid || null,\n    research_domains: fatObject.views.dense.research_domains,\n    methodologies: fatObject.views.dense.core_methodologies,\n    research_themes: fatObject.views.dense.research_themes,\n    h_index: fatObject.views.dense.h_index,\n    total_citations: fatObject.views.dense.total_citations,\n    publication_count: fatObject.views.dense.publication_count,\n    patent_count: fatObject.views.dense.patent_count,\n    career_stage: fatObject.views.dense.career_stage,\n    research_impact: fatObject.views.dense.research_impact,\n    data_completeness: fatObject.views.dense.data_completeness,\n    status: \"fabricated\",\n    fabricated_at: fatObject.provenance.fabricated_at,\n    // ADDED: Refabrication metadata\n    is_refabrication: isRefabrication,\n    previous_version: fatObject.provenance.previous_version || null\n  }\n};\n\nreturn [{\n  json: {\n    qdrant_payloads: [qdrantPayload],\n    execution_context: executionContext\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        848
+      ],
+      "id": "122c35a1-5334-4c87-8aba-9dbfe566f4b8",
+      "name": "Prepare Qdrant Payload"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points?wait=true",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n     {\n       \"points\": $json.qdrant_payloads\n     }\n   }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        784,
+        848
+      ],
+      "id": "288f9fbd-d3ad-40d2-a75b-3bc35e0886b1",
+      "name": "Store in Qdrant",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare PostgreSQL Audit Log\n// MODIFIED: Includes refabrication metadata\n\nconst fatObject = $('Merge Embedding').first().json;\nconst executionContext = fatObject.execution_context || {};\nconst isRefabrication = executionContext.mode === 'refabrication';\n\nconst supabasePayload = [{\n  asset_id: fatObject.asset_id,\n  status: 'fabricated',\n  checksum: fatObject.provenance.checksum,\n  version: fatObject.version,\n  job_id: $execution?.id || null,\n  enriched_by: fatObject.provenance.fabricated_by,\n  object_type: 'researcher',\n  data_completeness: fatObject.views.dense.data_completeness,\n  enrichment_model: fatObject.provenance.enrichment_model,\n  embedding_model: fatObject.provenance.embedding_model,\n  fabricated_at: fatObject.provenance.fabricated_at,\n  // ADDED: Refabrication metadata\n  is_refabrication: isRefabrication,\n  previous_version: fatObject.provenance.previous_version || null,\n  refabrication_reason: fatObject.provenance.refabrication_reason || null,\n  source_queue_entry_id: fatObject.provenance.source_queue_entry_id || null\n}];\n\nreturn [{\n  json: {\n    supabase_payload: supabasePayload,\n    total_records: supabasePayload.length,\n    execution_context: executionContext\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        848
+      ],
+      "id": "c7147eb2-475d-4969-864c-7fbc5887d49e",
+      "name": "Prepare PostgreSQL Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/fabrication_audit?on_conflict=asset_id,version",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates, return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1264,
+        848
+      ],
+      "id": "51b29f08-dbcf-4751-9ce3-cdf83722e714",
+      "name": "Store in Supabase(Postgre)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook Trigger (Refab)": [
+      {
+        "json": {
+          "headers": {
+            "host": "mbcrc.app.n8n.cloud",
+            "user-agent": "axios/1.12.0",
+            "content-length": "305",
+            "accept": "application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1; subreqs=1",
+            "cf-connecting-ip": "20.218.238.113",
+            "cf-ew-via": "15",
+            "cf-ipcountry": "DE",
+            "cf-ray": "9b19b34a009719af-FRA",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-worker": "n8n.cloud",
+            "content-type": "application/json",
+            "x-forwarded-for": "20.218.238.113, 172.68.193.140",
+            "x-forwarded-host": "mbcrc.app.n8n.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "traefik-prod-users-gwc-42-bd54959cf-2qqc4",
+            "x-is-trusted": "yes",
+            "x-real-ip": "20.218.238.113"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "mode": "refabrication",
+            "asset_id": "fat:researcher:colin_barrow",
+            "new_version": "v3.0",
+            "previous_version": "v2.0",
+            "refabrication_reason": "refabrication_queue - severity major (0.46)",
+            "changed_fields": [
+              "publications",
+              "collaborators",
+              "keywords"
+            ],
+            "source_queue_entry_id": "a8eba076-c918-40de-bd4c-f47635494bd8"
+          },
+          "webhookUrl": "https://mbcrc.app.n8n.cloud/webhook/object-2-fabricate",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "Webhook Trigger (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Merge Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Inputs": {
+      "main": [
+        [
+          {
+            "node": "Route by Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Mode": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch ThinObjects",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Fetch ThinObject (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch ThinObject (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Fetch ThinObject (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch ThinObject (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Set Status (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Set Status (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Set Status: Refabricating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status: Refabricating": {
+      "main": [
+        [
+          {
+            "node": "Split ThinObjects (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split ThinObjects": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split ThinObjects (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Mode for Response": {
+      "main": [
+        [
+          {
+            "node": "Route Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Completion": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Back (Normal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Back (Normal)": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Merge Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pass 2: LLM Enrichment1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 2: LLM Enrichment1": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare LLM Prompt": {
+      "main": [
+        [
+          {
+            "node": "Pass 2: LLM Enrichment1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Pass 3: Build Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch ThinObjects": {
+      "main": [
+        [
+          {
+            "node": "Fetch ThinObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch ThinObjects": {
+      "main": [
+        [
+          {
+            "node": "Prepare Set Status Fabricating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Set Status Fabricating": {
+      "main": [
+        [
+          {
+            "node": "Set Status: Fabricating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status: Fabricating": {
+      "main": [
+        [
+          {
+            "node": "Split ThinObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Through Objects": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Pass 1: Unification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 1: Unification": {
+      "main": [
+        [
+          {
+            "node": "Prepare LLM Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 3: Build Relationships": {
+      "main": [
+        [
+          {
+            "node": "Pass 4: Generate ICF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 4: Generate ICF": {
+      "main": [
+        [
+          {
+            "node": "Generate Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Embedding": {
+      "main": [
+        [
+          {
+            "node": "Merge Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Store Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Store Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Store in Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Payload": {
+      "main": [
+        [
+          {
+            "node": "Store in Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Prepare PostgreSQL Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PostgreSQL Payload": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase(Postgre)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase(Postgre)": {
+      "main": [
+        [
+          {
+            "node": "Check Mode for Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "27c2d0b7-46fe-4232-ba85-763df48f1aaf",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "teZrSkEFhH8Ig7Ii",
+  "tags": [
+    {
+      "updatedAt": "2025-12-18T21:22:51.435Z",
+      "createdAt": "2025-11-25T14:19:55.471Z",
+      "id": "23TAoanPtB83dwz5",
+      "name": "Fabrication"
+    },
+    {
+      "updatedAt": "2025-11-19T16:16:22.409Z",
+      "createdAt": "2025-11-19T16:16:22.409Z",
+      "id": "M2HE4sAVj28MumnE",
+      "name": "Gen 2"
+    },
+    {
+      "updatedAt": "2025-12-21T18:50:50.363Z",
+      "createdAt": "2025-12-21T18:50:50.363Z",
+      "id": "bMUumpA7DKh30mJG",
+      "name": "GEN 5"
+    },
+    {
+      "updatedAt": "2025-11-25T14:19:55.412Z",
+      "createdAt": "2025-11-25T14:19:55.412Z",
+      "id": "eBZKHdMEtFCUtF7o",
+      "name": "researchers"
+    }
+  ]
+}

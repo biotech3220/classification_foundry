@@ -1,0 +1,747 @@
+{
+  "name": "SYSTEM-2_CRE_Gen4",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        416
+      ],
+      "id": "724b9c0a-689c-425b-92b4-903026ccb7cb",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// CF1 - Technology Readiness Level (TRL)\n// Parse CSV and extract family metadata + vocabulary + rules\n\nconst csvContent = `CF1 — Technology Readiness Level (TRL),,,,,,,\n\"Validates that an entity's technological maturity aligns with opportunity or classification requirements.\",,,,,,,\n,,,,,,,\nSECTION A — FAMILY METADATA,,,,,,,\nField,Value,Description,,,,,\nfamily_id,CF1,Unique identifier for this constraint family,,,,,\nfamily_name,Technology Readiness Level,Full name of the constraint family,,,,,\nfamily_abbreviation,TRL,Short form used in code and references,,,,,\nfamily_type,ordinal,Ordered levels with hierarchy (1-9),,,,,\nvocabulary_mode,levels,Hierarchical ordered levels,,,,,\ndescription,Validates technological maturity alignment between entity capabilities and requirements,Plain language description of purpose,,,,,\ncriticality,critical,Failure invalidates classification result,,,,,\ngate_mode,block,Auto-approval ineligible on failure,,,,,\nassessment_stage,OBJECT-3,Workflow stage where constraint is assessed,,,,,\ndefault_threshold,0.80,Default confidence threshold for TRL matching,,,,,\ntypical_application,research grants;defence contracts;technology assessment,Common use cases,,,,,\napplies_to,researcher;equipment;facility;project,Entity types this constraint assesses,,,,,\nsource_reference,NASA TRL Scale (NPR 7123.1B),Authoritative source for definition,,,,,\nstatus,active,In production use,,,,,\ncreated_at,2025-12-15,Date constraint family was created,,,,,\nupdated_at,2025-12-15,Date of last update,,,,,\n,,,,,,,\nSECTION B — VOCABULARY TABLE,,,,,,,\ncode,value,name,description,indicators\nTRL1,1,Basic Principles Observed,Scientific research begins translation to applied R&D,basic research;fundamental study;theoretical;literature review\nTRL2,2,Technology Concept Formulated,Invention begins with practical applications identified,concept formulation;feasibility study;initial design;technology concept\nTRL3,3,Experimental Proof of Concept,Active R&D initiated with laboratory studies,proof of concept;laboratory validation;experimental;bench-scale\nTRL4,4,Technology Validated in Lab,Component validation in laboratory environment,laboratory testing;breadboard;component validation;lab-scale\nTRL5,5,Technology Validated in Relevant Environment,Validation in relevant environment,relevant environment;simulated operational;high-fidelity testing\nTRL6,6,Technology Demonstrated in Relevant Environment,Prototype demonstration in relevant environment,prototype demonstration;system model;engineering model\nTRL7,7,System Prototype Demonstration,Prototype demonstration in operational environment,operational prototype;field testing;pilot demonstration\nTRL8,8,System Complete and Qualified,Technology proven in final form,qualified system;production ready;certification complete\nTRL9,9,Actual System Proven,Successful operations in final form,operational deployment;mission proven;commercial deployment\n,,,,,,,\nSECTION C — FAMILY RULES,,,,,,,\nField,Value,Description,,,,,\nordinal_order,TRL1 < TRL2 < TRL3 < TRL4 < TRL5 < TRL6 < TRL7 < TRL8 < TRL9,Hierarchy of TRL levels,,,,,\nassignment_rule,MAX(inferred_trl_from_publications; declared_trl),How to determine value from evidence,,,,,\nmissing_data_rule,ASSIGN TRL3 with confidence 0.50,Default when evidence is lacking,,,,,\nconflict_rule,USE highest_confidence_source,Resolution when signals conflict,,,,,\nevidence_requirements,MINIMUM 1 publication OR 1 declaration,Minimum evidence threshold,,,,,\npass_condition,entity_trl >= required_trl,Entity TRL must meet or exceed required TRL,,,,,\npass_confidence,0.95,Confidence when passed,,,,,\nfail_confidence,0.00,Confidence when failed,,,,,\nfail_action,block_classification,Action on failure,,,,,\nvalidation_rule,value IN [1-9],How to validate assigned values,,,,,\nsource_hierarchy,explicit > publication > keyword > default,Order of precedence for evidence sources,,,,,`;\n\n// Split into lines\nconst lines = csvContent.split('\\n');\n\n// Find section markers\nlet sectionAStart = -1;\nlet sectionBStart = -1;\nlet sectionCStart = -1;\n\nfor (let i = 0; i < lines.length; i++) {\n  const line = lines[i];\n  if (line.includes('SECTION A')) sectionAStart = i;\n  if (line.includes('SECTION B')) sectionBStart = i;\n  if (line.includes('SECTION C')) sectionCStart = i;\n}\n\n// ===========================================\n// PARSE SECTION A (Family Metadata)\n// ===========================================\nconst sectionALines = lines.slice(sectionAStart + 2, sectionBStart);\nconst family = {};\n\nfor (const line of sectionALines) {\n  if (!line.trim()) continue;\n  const parts = line.split(',');\n  const field = parts[0]?.trim();\n  const value = parts[1]?.trim();\n  \n  if (field && value && field !== 'Field') {\n    // Handle numeric fields\n    if (field === 'default_threshold') {\n      family[field] = parseFloat(value);\n    }\n    // Handle semicolon-separated fields as arrays\n    else if (field === 'typical_application' || field === 'applies_to') {\n      family[field] = value.split(';').map(s => s.trim());\n    }\n    // All other fields as strings\n    else {\n      family[field] = value;\n    }\n  }\n}\n\n// ===========================================\n// PARSE SECTION B (Vocabulary Table)\n// ===========================================\nconst sectionBLines = lines.slice(sectionBStart + 1, sectionCStart);\nconst vocabulary = [];\n\n// Find header row (starts with \"code\")\nlet headerIndex = -1;\nfor (let i = 0; i < sectionBLines.length; i++) {\n  if (sectionBLines[i].trim().startsWith('code,')) {\n    headerIndex = i;\n    break;\n  }\n}\n\nif (headerIndex >= 0) {\n  const header = sectionBLines[headerIndex].split(',').map(h => h.trim());\n  \n  // Parse data rows after header\n  for (let i = headerIndex + 1; i < sectionBLines.length; i++) {\n    const line = sectionBLines[i];\n    if (!line.trim() || line.startsWith(',')) continue;\n    \n    const values = line.split(',');\n    const item = {};\n    \n    for (let j = 0; j < header.length && j < values.length; j++) {\n      let val = values[j]?.trim().replace(/^\"|\"$/g, '');\n      \n      if (header[j] === 'indicators' && val) {\n        item[header[j]] = val.split(';').map(s => s.trim());\n      } else if (header[j] === 'value') {\n        item[header[j]] = parseInt(val);\n      } else {\n        item[header[j]] = val;\n      }\n    }\n    \n    if (item.code && item.code.startsWith('TRL')) {\n      vocabulary.push(item);\n    }\n  }\n}\n\n// ===========================================\n// PARSE SECTION C (Family Rules)\n// ===========================================\nconst sectionCLines = lines.slice(sectionCStart + 1);\nconst family_rules = {};\n\nfor (const line of sectionCLines) {\n  if (!line.trim() || line.startsWith(',')) continue;\n  const parts = line.split(',');\n  const field = parts[0]?.trim();\n  const value = parts[1]?.trim();\n  \n  if (field && value && field !== 'Field') {\n    // Handle numeric fields\n    if (field === 'pass_confidence' || field === 'fail_confidence') {\n      family_rules[field] = parseFloat(value);\n    }\n    // All other fields as strings\n    else {\n      family_rules[field] = value;\n    }\n  }\n}\n\n// ===========================================\n// RETURN STRUCTURED OUTPUT\n// ===========================================\nreturn [{\n  json: {\n    family: family,\n    vocabulary: vocabulary,\n    family_rules: family_rules\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        0
+      ],
+      "id": "09dd477d-5dd0-4c82-9ed7-4c90125dae70",
+      "name": "CF1 - Load and Parse TRL"
+    },
+    {
+      "parameters": {
+        "jsCode": "const family = $input.first().json.family;\nconst family_rules = $input.first().json.family_rules;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MERGE (cf:ConstraintFamily {id: $family_id})\n        SET cf.name = $family_name,\n            cf.abbreviation = $family_abbreviation,\n            cf.family_type = $family_type,\n            cf.vocabulary_mode = $vocabulary_mode,\n            cf.description = $description,\n            cf.criticality = $criticality,\n            cf.gate_mode = $gate_mode,\n            cf.assessment_stage = $assessment_stage,\n            cf.default_threshold = $default_threshold,\n            cf.typical_application = $typical_application,\n            cf.applies_to = $applies_to,\n            cf.source_reference = $source_reference,\n            cf.status = 'fabricated',\n            cf.created_at = $created_at,\n            cf.updated_at = datetime(),\n            cf.fabricated_at = datetime(),\n            cf.pass_condition = $pass_condition,\n            cf.pass_confidence = $pass_confidence,\n            cf.fail_confidence = $fail_confidence,\n            cf.fail_action = $fail_action\n        RETURN cf.id AS family_id, cf.status AS status\n      `,\n      parameters: {\n        family_id: family.family_id,\n        family_name: family.family_name,\n        family_abbreviation: family.family_abbreviation,\n        family_type: family.family_type,\n        vocabulary_mode: family.vocabulary_mode,\n        description: family.description,\n        criticality: family.criticality,\n        gate_mode: family.gate_mode,\n        assessment_stage: family.assessment_stage,\n        default_threshold: family.default_threshold,\n        typical_application: family.typical_application,\n        applies_to: family.applies_to,\n        source_reference: family.source_reference,\n        created_at: family.created_at,\n        pass_condition: family_rules.pass_condition,\n        pass_confidence: family_rules.pass_confidence,\n        fail_confidence: family_rules.fail_confidence,\n        fail_action: family_rules.fail_action\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "ef03c25d-4282-49b1-a02f-1556d91e6607",
+      "name": "Create CF1 Family Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseOutput = $('CF1 - Load and Parse TRL').first().json;\nconst family = parseOutput.family;\nconst vocabulary = parseOutput.vocabulary;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (cf:ConstraintFamily {id: $family_id})\n        UNWIND $vocabulary AS item\n        MERGE (cr:ConstraintRule {code: item.code})\n        SET cr.family_id = $family_id,\n            cr.value = item.value,\n            cr.name = item.name,\n            cr.description = item.description,\n            cr.indicators = item.indicators,\n            cr.status = 'fabricated',\n            cr.updated_at = datetime(),\n            cr.fabricated_at = datetime()\n        MERGE (cf)-[:HAS_RULE]->(cr)\n        RETURN cr.code AS rule_code, cr.status AS status\n      `,\n      parameters: {\n        family_id: family.family_id,\n        vocabulary: vocabulary\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        0
+      ],
+      "id": "c5bcbd63-9e2a-43a0-ad35-1ede6e5a71a0",
+      "name": "Create CF1 Rules Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "f45e3bf4-021a-4adb-b753-ea47001f98bd",
+      "name": "Execute Rules Query",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// CF5 - Regulatory Compliance (REG)\n// Parse CSV and extract family metadata + vocabulary + rules\n\nconst csvContent = `CF5 — Regulatory Compliance (REG),,,,,,,\n\"Validates that an entity holds the required certifications and regulatory approvals for classification to regulated domains.\",,,,,,,\n,,,,,,,\nSECTION A — FAMILY METADATA,,,,,,,\nField,Value,Description,,,,,\nfamily_id,CF5,Unique identifier for this constraint family,,,,,\nfamily_name,Regulatory Compliance,Full name of the constraint family,,,,,\nfamily_abbreviation,REG,Short form used in code and references,,,,,\nfamily_type,categorical,Unordered categories of certification types,,,,,\nvocabulary_mode,categories,Unordered set of certification options,,,,,\ndescription,Validates certification and regulatory compliance requirements for regulated domains,Plain language description of purpose,,,,,\ncriticality,critical,Failure invalidates classification result,,,,,\ngate_mode,block,Auto-approval ineligible on failure,,,,,\nassessment_stage,OBJECT-3,Workflow stage where constraint is assessed,,,,,\ndefault_threshold,0.95,Default confidence threshold for certification verification,,,,,\ntypical_application,pharmaceutical research;medical device development;defence contracts;food safety;environmental compliance,Common use cases,,,,,\napplies_to,researcher;facility;organisation;project,Entity types this constraint assesses,,,,,\nsource_reference,FDA 21 CFR;EPA FIFRA;ITAR 22 CFR;ISO Standards,Authoritative source for definition,,,,,\nstatus,active,In production use,,,,,\ncreated_at,2025-12-15,Date constraint family was created,,,,,\nupdated_at,2025-12-15,Date of last update,,,,,\n,,,,,,,\nSECTION B — VOCABULARY TABLE,,,,,,,\ncode,value,name,description,indicators\nREG_FDA,1,FDA Approval,US Food and Drug Administration approval for pharmaceuticals and medical devices,FDA approved;FDA cleared;510(k);PMA;NDA;FDA registered\nREG_EPA,2,EPA Compliance,US Environmental Protection Agency compliance for environmental research,EPA registered;EPA compliant;FIFRA;TSCA;RCRA compliant\nREG_ITAR,3,ITAR Controlled,International Traffic in Arms Regulations for defence-related research,ITAR registered;defence contractor;export controlled;DDTC registered\nREG_GMP,4,Good Manufacturing Practice,GMP certification for pharmaceutical and food manufacturing quality,GMP certified;cGMP compliant;pharmaceutical manufacturing;GMP facility\nREG_GLP,5,Good Laboratory Practice,GLP certification for non-clinical laboratory studies,GLP certified;GLP compliant;preclinical studies;GLP laboratory\nREG_ISO9001,6,ISO 9001 Quality Management,ISO 9001 certification for quality management systems,ISO 9001;quality management system;QMS certified\nREG_ISO13485,7,ISO 13485 Medical Devices,ISO 13485 certification for medical device quality management,ISO 13485;medical device QMS;device manufacturer certified\nREG_ISO17025,8,ISO 17025 Testing Labs,ISO 17025 accreditation for testing and calibration laboratories,ISO 17025;accredited laboratory;testing laboratory\nREG_NATA,9,NATA Accreditation,National Association of Testing Authorities Australia accreditation,NATA accredited;NATA certified;Australian accreditation\nREG_TGA,10,TGA Registration,Therapeutic Goods Administration Australia registration,TGA registered;TGA approved;ARTG listed;therapeutic goods\nREG_CE,11,CE Marking,European Conformity marking for EU compliance,CE marked;CE certified;EU compliant;European conformity\nREG_HACCP,12,HACCP Certification,Hazard Analysis Critical Control Points for food safety,HACCP certified;food safety;hazard analysis\nREG_BSL,13,Biosafety Level Certification,Biosafety level certification for biological agents,BSL-1;BSL-2;BSL-3;BSL-4;biosafety;containment laboratory\nREG_ETHICS,14,Ethics Committee Approval,Human or animal research ethics approval,ethics approved;HREC;animal ethics;IRB approved\nREG_RADIATION,15,Radiation Safety Licence,Licence for handling radioactive materials,radiation licence;radioactive materials;radiation safety\n,,,,,,,\nSECTION C — FAMILY RULES,,,,,,,\nField,Value,Description,,,,,\nordinal_order,N/A,Categories are independent - no hierarchy applies,,,,,\nassignment_rule,MATCH entity_certifications AGAINST required_certifications,How to determine value from evidence,,,,,\nmissing_data_rule,FAIL with confidence 0.00,Default when evidence is lacking,,,,,\nconflict_rule,REQUIRE ALL specified certifications,Resolution when signals conflict,,,,,\nevidence_requirements,MINIMUM 1 verified certification record,Minimum evidence threshold,,,,,\npass_condition,entity_certifications CONTAINS ALL required_certifications,Entity must hold all required certifications,,,,,\npass_confidence,0.95,Confidence when passed,,,,,\nfail_confidence,0.00,Confidence when failed,,,,,\nfail_action,block_classification,Action on failure,,,,,\nvalidation_rule,certification_code IN vocabulary AND certification_status = active,How to validate assigned values,,,,,\nsource_hierarchy,official_registry > institutional_record > self_declaration,Order of precedence for evidence sources,,,,,`;\n\n// Split into lines\nconst lines = csvContent.split('\\n');\n\n// Find section markers\nlet sectionAStart = -1;\nlet sectionBStart = -1;\nlet sectionCStart = -1;\n\nfor (let i = 0; i < lines.length; i++) {\n  const line = lines[i];\n  if (line.includes('SECTION A')) sectionAStart = i;\n  if (line.includes('SECTION B')) sectionBStart = i;\n  if (line.includes('SECTION C')) sectionCStart = i;\n}\n\n// ===========================================\n// PARSE SECTION A (Family Metadata)\n// ===========================================\nconst sectionALines = lines.slice(sectionAStart + 2, sectionBStart);\nconst family = {};\n\nfor (const line of sectionALines) {\n  if (!line.trim()) continue;\n  const parts = line.split(',');\n  const field = parts[0]?.trim();\n  const value = parts[1]?.trim();\n  \n  if (field && value && field !== 'Field') {\n    // Handle numeric fields\n    if (field === 'default_threshold') {\n      family[field] = parseFloat(value);\n    }\n    // Handle semicolon-separated fields as arrays\n    else if (field === 'typical_application' || field === 'applies_to' || field === 'source_reference') {\n      family[field] = value.split(';').map(s => s.trim());\n    }\n    // All other fields as strings\n    else {\n      family[field] = value;\n    }\n  }\n}\n\n// ===========================================\n// PARSE SECTION B (Vocabulary Table)\n// ===========================================\nconst sectionBLines = lines.slice(sectionBStart + 1, sectionCStart);\nconst vocabulary = [];\n\n// Find header row (starts with \"code\")\nlet headerIndex = -1;\nfor (let i = 0; i < sectionBLines.length; i++) {\n  if (sectionBLines[i].trim().startsWith('code,')) {\n    headerIndex = i;\n    break;\n  }\n}\n\nif (headerIndex >= 0) {\n  const header = sectionBLines[headerIndex].split(',').map(h => h.trim());\n  \n  // Parse data rows after header\n  for (let i = headerIndex + 1; i < sectionBLines.length; i++) {\n    const line = sectionBLines[i];\n    if (!line.trim() || line.startsWith(',')) continue;\n    \n    const values = line.split(',');\n    const item = {};\n    \n    for (let j = 0; j < header.length && j < values.length; j++) {\n      let val = values[j]?.trim().replace(/^\"|\"$/g, '');\n      \n      if (header[j] === 'indicators' && val) {\n        item[header[j]] = val.split(';').map(s => s.trim());\n      } else if (header[j] === 'value') {\n        item[header[j]] = parseInt(val);\n      } else {\n        item[header[j]] = val;\n      }\n    }\n    \n    if (item.code && item.code.startsWith('REG_')) {\n      vocabulary.push(item);\n    }\n  }\n}\n\n// ===========================================\n// PARSE SECTION C (Family Rules)\n// ===========================================\nconst sectionCLines = lines.slice(sectionCStart + 1);\nconst family_rules = {};\n\nfor (const line of sectionCLines) {\n  if (!line.trim() || line.startsWith(',')) continue;\n  const parts = line.split(',');\n  const field = parts[0]?.trim();\n  const value = parts[1]?.trim();\n  \n  if (field && value && field !== 'Field') {\n    // Handle numeric fields\n    if (field === 'pass_confidence' || field === 'fail_confidence') {\n      family_rules[field] = parseFloat(value);\n    }\n    // All other fields as strings\n    else {\n      family_rules[field] = value;\n    }\n  }\n}\n\n// ===========================================\n// RETURN STRUCTURED OUTPUT\n// ===========================================\nreturn [{\n  json: {\n    family: family,\n    vocabulary: vocabulary,\n    family_rules: family_rules\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32,
+        192
+      ],
+      "id": "aedcc222-56d1-4b38-a1be-c8ad68e3667f",
+      "name": "CF5 - Load and Parse REG"
+    },
+    {
+      "parameters": {
+        "jsCode": "const family = $input.first().json.family;\nconst family_rules = $input.first().json.family_rules;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MERGE (cf:ConstraintFamily {id: $family_id})\n        SET cf.name = $family_name,\n            cf.abbreviation = $family_abbreviation,\n            cf.family_type = $family_type,\n            cf.vocabulary_mode = $vocabulary_mode,\n            cf.description = $description,\n            cf.criticality = $criticality,\n            cf.gate_mode = $gate_mode,\n            cf.assessment_stage = $assessment_stage,\n            cf.default_threshold = $default_threshold,\n            cf.typical_application = $typical_application,\n            cf.applies_to = $applies_to,\n            cf.source_reference = $source_reference,\n            cf.status = 'fabricated',\n            cf.created_at = $created_at,\n            cf.updated_at = datetime(),\n            cf.fabricated_at = datetime(),\n            cf.pass_condition = $pass_condition,\n            cf.pass_confidence = $pass_confidence,\n            cf.fail_confidence = $fail_confidence,\n            cf.fail_action = $fail_action\n        RETURN cf.id AS family_id, cf.status AS status\n      `,\n      parameters: {\n        family_id: family.family_id,\n        family_name: family.family_name,\n        family_abbreviation: family.family_abbreviation,\n        family_type: family.family_type,\n        vocabulary_mode: family.vocabulary_mode,\n        description: family.description,\n        criticality: family.criticality,\n        gate_mode: family.gate_mode,\n        assessment_stage: family.assessment_stage,\n        default_threshold: family.default_threshold,\n        typical_application: family.typical_application,\n        applies_to: family.applies_to,\n        source_reference: family.source_reference,\n        created_at: family.created_at,\n        pass_condition: family_rules.pass_condition,\n        pass_confidence: family_rules.pass_confidence,\n        fail_confidence: family_rules.fail_confidence,\n        fail_action: family_rules.fail_action\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ],
+      "id": "d10d951e-c4e6-4f0a-94b8-26db3b6df8d7",
+      "name": "Create CF5 Family Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseOutput = $('CF5 - Load and Parse REG').first().json;\nconst family = parseOutput.family;\nconst vocabulary = parseOutput.vocabulary;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (cf:ConstraintFamily {id: $family_id})\n        UNWIND $vocabulary AS item\n        MERGE (cr:ConstraintRule {code: item.code})\n        SET cr.family_id = $family_id,\n            cr.value = item.value,\n            cr.name = item.name,\n            cr.description = item.description,\n            cr.indicators = item.indicators,\n            cr.status = 'fabricated',\n            cr.updated_at = datetime(),\n            cr.fabricated_at = datetime()\n        MERGE (cf)-[:HAS_RULE]->(cr)\n        RETURN cr.code AS rule_code, cr.status AS status\n      `,\n      parameters: {\n        family_id: family.family_id,\n        vocabulary: vocabulary\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        192
+      ],
+      "id": "d3335fd1-b747-49b2-bc40-7573dc3e14a2",
+      "name": "Create CF5 Rules Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        464,
+        0
+      ],
+      "id": "ab8c8ded-845a-48de-9ce5-84304efca9ca",
+      "name": "Execute CF1 Family Query (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        192
+      ],
+      "id": "1aa7cb26-0b4f-44ed-890b-4bd8a81da788",
+      "name": "Execute CF5 Family Query (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        192
+      ],
+      "id": "e3e8ef91-9a4b-457d-af6c-9c9da51dc02d",
+      "name": "Execute Rules Query1",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        416
+      ],
+      "id": "6f5db92d-b4a4-4f24-8352-e6ef4ee628bf",
+      "name": "Execute Rules Query2",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const family = $input.first().json.family;\nconst family_rules = $input.first().json.family_rules;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MERGE (cf:ConstraintFamily {id: $family_id})\n        SET cf.name = $family_name,\n            cf.abbreviation = $family_abbreviation,\n            cf.family_type = $family_type,\n            cf.vocabulary_mode = $vocabulary_mode,\n            cf.description = $description,\n            cf.criticality = $criticality,\n            cf.gate_mode = $gate_mode,\n            cf.assessment_stage = $assessment_stage,\n            cf.default_threshold = $default_threshold,\n            cf.typical_application = $typical_application,\n            cf.applies_to = $applies_to,\n            cf.source_reference = $source_reference,\n            cf.status = 'fabricated',\n            cf.created_at = $created_at,\n            cf.updated_at = datetime(),\n            cf.fabricated_at = datetime(),\n            cf.pass_condition = $pass_condition,\n            cf.pass_confidence = $pass_confidence,\n            cf.fail_confidence = $fail_confidence,\n            cf.fail_action = $fail_action,\n            cf.signal_confidence_explicit = $signal_confidence_explicit,\n            cf.signal_confidence_inferred_publication = $signal_confidence_inferred_publication,\n            cf.signal_confidence_inferred_patent = $signal_confidence_inferred_patent,\n            cf.signal_confidence_inferred_keyword = $signal_confidence_inferred_keyword,\n            cf.signal_confidence_default = $signal_confidence_default\n        RETURN cf.id AS family_id, cf.status AS status\n      `,\n      parameters: {\n        family_id: family.family_id,\n        family_name: family.family_name,\n        family_abbreviation: family.family_abbreviation,\n        family_type: family.family_type,\n        vocabulary_mode: family.vocabulary_mode,\n        description: family.description,\n        criticality: family.criticality,\n        gate_mode: family.gate_mode,\n        assessment_stage: family.assessment_stage,\n        default_threshold: family.default_threshold,\n        typical_application: family.typical_application,\n        applies_to: family.applies_to,\n        source_reference: family.source_reference,\n        created_at: family.created_at,\n        pass_condition: family_rules.pass_condition,\n        pass_confidence: family_rules.pass_confidence,\n        fail_confidence: family_rules.fail_confidence,\n        fail_action: family_rules.fail_action,\n        signal_confidence_explicit: family_rules.signal_confidence_explicit,\n        signal_confidence_inferred_publication: family_rules.signal_confidence_inferred_publication,\n        signal_confidence_inferred_patent: family_rules.signal_confidence_inferred_patent,\n        signal_confidence_inferred_keyword: family_rules.signal_confidence_inferred_keyword,\n        signal_confidence_default: family_rules.signal_confidence_default\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        416
+      ],
+      "id": "c0d89faa-0174-48dc-9f5b-bcdf2dfaaf43",
+      "name": "Create CF12 Family Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseOutput = $('CF12 - Load and Parse INF').first().json;\nconst family = parseOutput.family;\nconst vocabulary = parseOutput.vocabulary;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (cf:ConstraintFamily {id: $family_id})\n        UNWIND $vocabulary AS item\n        MERGE (cr:ConstraintRule {code: item.code})\n        SET cr.family_id = $family_id,\n            cr.value = item.value,\n            cr.name = item.name,\n            cr.description = item.description,\n            cr.indicators = item.indicators,\n            cr.status = 'fabricated',\n            cr.updated_at = datetime(),\n            cr.fabricated_at = datetime()\n        MERGE (cf)-[:HAS_RULE]->(cr)\n        RETURN cr.code AS rule_code, cr.status AS status\n      `,\n      parameters: {\n        family_id: family.family_id,\n        vocabulary: vocabulary\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        416
+      ],
+      "id": "ef6d0f38-faae-4ddf-a272-8a38acb48972",
+      "name": "Create CF12 Rules Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        432,
+        416
+      ],
+      "id": "33ec5c45-8a35-449d-895c-bd8b1153bcc5",
+      "name": "Execute CF12 Family Query (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseOutput = $('CF1 - Load and Parse TRL').first().json;\nconst family = parseOutput.family;\nconst family_rules = parseOutput.family_rules;\n\nreturn [{\n  json: {\n    family_id: family.family_id,\n    family_name: family.family_name,\n    version: \"v3.6\",\n    gate_mode: family.gate_mode,\n    criticality: family.criticality,\n    default_threshold: family.default_threshold,\n    pass_confidence: family_rules.pass_confidence,\n    fail_confidence: family_rules.fail_confidence,\n    fabricated_at: new Date().toISOString(),\n    learning_history: []\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        0
+      ],
+      "id": "0d082185-33f2-4f32-9798-da32b4ab12cd",
+      "name": "Create CF1 Metadata Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/constraint_metadata?on_conflict=family_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1312,
+        0
+      ],
+      "id": "78f87882-cd4a-42fd-bc1c-1b0c73773813",
+      "name": "Execute CF1 Metadata (Postgres)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseOutput = $('CF5 - Load and Parse REG').first().json;\nconst family = parseOutput.family;\nconst family_rules = parseOutput.family_rules;\n\nreturn [{\n  json: {\n    family_id: family.family_id,\n    family_name: family.family_name,\n    version: \"v3.6\",\n    gate_mode: family.gate_mode,\n    criticality: family.criticality,\n    default_threshold: family.default_threshold,\n    pass_confidence: family_rules.pass_confidence,\n    fail_confidence: family_rules.fail_confidence,\n    fabricated_at: new Date().toISOString(),\n    learning_history: []\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ],
+      "id": "58fd2e62-3445-42d0-8fc5-6015291191ac",
+      "name": "Create CF5 Metadata Query5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/constraint_metadata?on_conflict=family_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1328,
+        192
+      ],
+      "id": "8b5c544c-309d-4cad-8f33-25f6d3bcf77b",
+      "name": "Execute CF5 Metadata (Postgres)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseOutput = $('CF12 - Load and Parse INF').first().json;\nconst family = parseOutput.family;\nconst family_rules = parseOutput.family_rules;\n\nreturn [{\n  json: {\n    family_id: family.family_id,\n    family_name: family.family_name,\n    version: \"v3.6\",\n    gate_mode: family.gate_mode,\n    criticality: family.criticality,\n    default_threshold: family.default_threshold,\n    pass_confidence: family_rules.pass_confidence,\n    fail_confidence: family_rules.fail_confidence,\n    fabricated_at: new Date().toISOString(),\n    learning_history: []\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        416
+      ],
+      "id": "35527d89-8562-4131-9ef6-ff88d5a77bf5",
+      "name": "Create CF12 Metadata Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/constraint_metadata?on_conflict=family_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1296,
+        416
+      ],
+      "id": "b953d45b-cbb2-422f-9dc6-51f3e02939f1",
+      "name": "Execute CF12 Metadata (Postgres)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// CF12 - Inference Confidence (INF)\n// Parse CSV and extract family metadata + vocabulary + rules\n// This constraint flags when capabilities are INFERRED vs EXPLICIT\n// When triggered, forces human review (HITL)\n\nconst csvContent = `CF12 — Inference Confidence (INF),,,,,,,\n\"Adjusts assessment confidence based on whether capabilities are explicitly declared or inferred from indirect evidence.\",,,,,,,\n,,,,,,,\nSECTION A — FAMILY METADATA,,,,,,,\nField,Value,Description,,,,,\nfamily_id,CF12,Unique identifier for this constraint family,,,,,\nfamily_name,Inference Confidence,Full name of the constraint family,,,,,\nfamily_abbreviation,INF,Short form used in code and references,,,,,\nfamily_type,categorical,Categories of inference paths,,,,,\nvocabulary_mode,categories,Unordered set of inference types,,,,,\ndescription,Adjusts validation thresholds and flags HITL requirement for inferred capabilities,Plain language description of purpose,,,,,\ncriticality,medium,Failure moderately affects confidence,,,,,\ngate_mode,flag,Forces human review when triggered,,,,,\nassessment_stage,OBJECT-3,Workflow stage where constraint is assessed,,,,,\ndefault_threshold,0.70,Default confidence threshold for inference assessment,,,,,\ntypical_application,patent inference;cross-domain classification;undisclosed capabilities;capability gap analysis,Common use cases,,,,,\napplies_to,researcher;equipment;facility;project,Entity types this constraint assesses,,,,,\nsource_reference,Classification Foundry CRE v4.0.3,Authoritative source for definition,,,,,\nstatus,active,In production use,,,,,\ncreated_at,2025-12-15,Date constraint family was created,,,,,\nupdated_at,2025-12-15,Date of last update,,,,,\n,,,,,,,\nSECTION B — VOCABULARY TABLE,,,,,,,\ncode,value,name,description,indicators\nINF_EXPLICIT,1,Explicit Declaration,Capability directly declared by entity with high confidence,declared;stated;explicit;self-reported;verified declaration\nINF_PUBLICATION,2,Publication Inference,Capability inferred from publication record analysis,publication;paper;journal;conference;cited work;research output\nINF_PATENT,3,Patent Inference,Capability inferred from patent claims and filings,patent;patent claim;USPTO;IP filing;invention disclosure\nINF_KEYWORD,4,Keyword Inference,Capability inferred from keyword matching only,keyword match;text analysis;NLP inference;semantic match\nINF_CROSSDOMAIN,5,Cross-Domain Inference,Capability inferred from classification in related domain,cross-domain;related field;adjacent discipline;transferable skill\nINF_EQUIPMENT,6,Equipment Inference,Capability inferred from equipment or facility access,equipment access;facility;instrument;laboratory capability\nINF_COLLABORATION,7,Collaboration Inference,Capability inferred from collaboration network,collaborator;co-author;research partner;team member capability\nINF_UNDISCLOSED,8,Undisclosed Capability,Capability exists but cannot be fully disclosed,confidential;undisclosed;classified;proprietary;NDA protected\n,,,,,,,\nSECTION C — FAMILY RULES,,,,,,,\nField,Value,Description,,,,,\nordinal_order,N/A,Categories are independent - no hierarchy applies,,,,,\nassignment_rule,IDENTIFY primary inference path from evidence signals,How to determine value from evidence,,,,,\nmissing_data_rule,ASSIGN INF_KEYWORD with confidence 0.50 and requires_hitl true,Default when evidence is lacking,,,,,\nconflict_rule,USE most_direct_evidence_path,Resolution when signals conflict,,,,,\nevidence_requirements,MINIMUM 1 signal indicating capability source,Minimum evidence threshold,,,,,\npass_condition,inference_type = INF_EXPLICIT,Only explicit declarations pass without HITL flag,,,,,\npass_confidence,1.00,Confidence when explicit declaration,,,,,\nfail_confidence,0.70,Base confidence for inferred capabilities,,,,,\nfail_action,flag_hitl,Action on non-explicit inference,,,,,\nvalidation_rule,inference_code IN vocabulary,How to validate assigned values,,,,,\nsource_hierarchy,explicit > publication > patent > equipment > collaboration > keyword,Order of precedence for evidence sources,,,,,\nsignal_confidence_explicit,1.00,Confidence when explicitly declared,,,,,\nsignal_confidence_inferred_publication,0.85,Confidence when inferred from publications,,,,,\nsignal_confidence_inferred_patent,0.85,Confidence when inferred from patents,,,,,\nsignal_confidence_inferred_keyword,0.70,Confidence when inferred from keywords,,,,,\nsignal_confidence_default,0.50,Confidence when assigned via default,,,,,`;\n\n// Split into lines\nconst lines = csvContent.split('\\n');\n\n// Find section markers\nlet sectionAStart = -1;\nlet sectionBStart = -1;\nlet sectionCStart = -1;\n\nfor (let i = 0; i < lines.length; i++) {\n  const line = lines[i];\n  if (line.includes('SECTION A')) sectionAStart = i;\n  if (line.includes('SECTION B')) sectionBStart = i;\n  if (line.includes('SECTION C')) sectionCStart = i;\n}\n\n// ===========================================\n// PARSE SECTION A (Family Metadata)\n// ===========================================\nconst sectionALines = lines.slice(sectionAStart + 2, sectionBStart);\nconst family = {};\n\nfor (const line of sectionALines) {\n  if (!line.trim()) continue;\n  const parts = line.split(',');\n  const field = parts[0]?.trim();\n  const value = parts[1]?.trim();\n  \n  if (field && value && field !== 'Field') {\n    // Handle numeric fields\n    if (field === 'default_threshold') {\n      family[field] = parseFloat(value);\n    }\n    // Handle semicolon-separated fields as arrays\n    else if (field === 'typical_application' || field === 'applies_to') {\n      family[field] = value.split(';').map(s => s.trim());\n    }\n    // All other fields as strings\n    else {\n      family[field] = value;\n    }\n  }\n}\n\n// ===========================================\n// PARSE SECTION B (Vocabulary Table)\n// ===========================================\nconst sectionBLines = lines.slice(sectionBStart + 1, sectionCStart);\nconst vocabulary = [];\n\n// Find header row (starts with \"code\")\nlet headerIndex = -1;\nfor (let i = 0; i < sectionBLines.length; i++) {\n  if (sectionBLines[i].trim().startsWith('code,')) {\n    headerIndex = i;\n    break;\n  }\n}\n\nif (headerIndex >= 0) {\n  const header = sectionBLines[headerIndex].split(',').map(h => h.trim());\n  \n  // Parse data rows after header\n  for (let i = headerIndex + 1; i < sectionBLines.length; i++) {\n    const line = sectionBLines[i];\n    if (!line.trim() || line.startsWith(',')) continue;\n    \n    const values = line.split(',');\n    const item = {};\n    \n    for (let j = 0; j < header.length && j < values.length; j++) {\n      let val = values[j]?.trim().replace(/^\"|\"$/g, '');\n      \n      if (header[j] === 'indicators' && val) {\n        item[header[j]] = val.split(';').map(s => s.trim());\n      } else if (header[j] === 'value') {\n        item[header[j]] = parseInt(val);\n      } else {\n        item[header[j]] = val;\n      }\n    }\n    \n    if (item.code && item.code.startsWith('INF_')) {\n      vocabulary.push(item);\n    }\n  }\n}\n\n// ===========================================\n// PARSE SECTION C (Family Rules)\n// ===========================================\nconst sectionCLines = lines.slice(sectionCStart + 1);\nconst family_rules = {};\n\nfor (const line of sectionCLines) {\n  if (!line.trim() || line.startsWith(',')) continue;\n  const parts = line.split(',');\n  const field = parts[0]?.trim();\n  const value = parts[1]?.trim();\n  \n  if (field && value && field !== 'Field') {\n    // Handle numeric fields\n    if (field === 'pass_confidence' || field === 'fail_confidence' || \n        field.startsWith('signal_confidence_')) {\n      family_rules[field] = parseFloat(value);\n    }\n    // All other fields as strings\n    else {\n      family_rules[field] = value;\n    }\n  }\n}\n\n// ===========================================\n// RETURN STRUCTURED OUTPUT\n// ===========================================\nreturn [{\n  json: {\n    family: family,\n    vocabulary: vocabulary,\n    family_rules: family_rules\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        416
+      ],
+      "id": "2c7eac7e-abee-4104-ae6d-0dba2cfdc088",
+      "name": "CF12 - Load and Parse INF"
+    }
+  ],
+  "pinData": {
+    "When clicking ‘Execute workflow’": [
+      {
+        "json": {
+          "timestamp": "2025-12-11T10:00:00.000Z"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "CF12 - Load and Parse INF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CF1 - Load and Parse TRL": {
+      "main": [
+        [
+          {
+            "node": "Create CF1 Family Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF1 Family Query": {
+      "main": [
+        [
+          {
+            "node": "Execute CF1 Family Query (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF1 Rules Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Rules Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CF5 - Load and Parse REG": {
+      "main": [
+        [
+          {
+            "node": "Create CF5 Family Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF5 Family Query": {
+      "main": [
+        [
+          {
+            "node": "Execute CF5 Family Query (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute CF1 Family Query (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Create CF1 Rules Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute CF5 Family Query (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Create CF5 Rules Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF5 Rules Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Rules Query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF12 Family Query": {
+      "main": [
+        [
+          {
+            "node": "Execute CF12 Family Query (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF12 Rules Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Rules Query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute CF12 Family Query (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Create CF12 Rules Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Rules Query": {
+      "main": [
+        [
+          {
+            "node": "Create CF1 Metadata Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF1 Metadata Query": {
+      "main": [
+        [
+          {
+            "node": "Execute CF1 Metadata (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Rules Query1": {
+      "main": [
+        [
+          {
+            "node": "Create CF5 Metadata Query5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF5 Metadata Query5": {
+      "main": [
+        [
+          {
+            "node": "Execute CF5 Metadata (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Rules Query2": {
+      "main": [
+        [
+          {
+            "node": "Create CF12 Metadata Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create CF12 Metadata Query": {
+      "main": [
+        [
+          {
+            "node": "Execute CF12 Metadata (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CF12 - Load and Parse INF": {
+      "main": [
+        [
+          {
+            "node": "Create CF12 Family Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "73fe05ec-19c6-484b-9625-465909342b4a",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "dMkHxk5E4GumdFcA",
+  "tags": []
+}

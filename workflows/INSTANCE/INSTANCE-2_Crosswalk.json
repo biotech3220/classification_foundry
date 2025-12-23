@@ -1,0 +1,1243 @@
+{
+  "name": "INSTANCE 2 (Crosswalk Fabrication)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -464,
+        -368
+      ],
+      "id": "7e4063bc-18b1-49b8-a76a-66ee5494356b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR)\n        WHERE s.status = 'fabricated'\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          level: s.level,\n          dense_view: s.dense_view,\n          disambiguation: s.disambiguation\n        } as standard_data\n        ORDER BY s.code\n      `,\n      parameters: {}\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        -32
+      ],
+      "id": "8254f2fc-0d63-4e5b-a48f-21c96d9db38e",
+      "name": "Prepare Fetch Standard A Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        -32
+      ],
+      "id": "c326ecd0-df59-4661-9237-3b1fdaff2f64",
+      "name": "Fetch Standard A (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:DomainHub)\n        WHERE s.status = 'fabricated'\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          level: s.level,\n          dense_view: s.dense_view\n        } as standard_data\n        ORDER BY s.code\n      `,\n      parameters: {}\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        -32
+      ],
+      "id": "ebb31096-b572-45b1-8431-4faaeed5f037",
+      "name": "Prepare Fetch Standard B Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        544,
+        -32
+      ],
+      "id": "33bf2742-62bf-4276-9710-f117c82afcf4",
+      "name": "Fetch Standard B (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const standardAResponse = $('Fetch Standard A (Neo4j)').first().json;\nconst standardBResponse = $('Fetch Standard B (Neo4j)').first().json;\n\n// Parse Standard A\nconst standardA = standardAResponse.data.values.map(row => row[0]);\n\n// Parse Standard B  \nconst standardB = standardBResponse.data.values.map(row => row[0]);\n\nreturn [{\n  json: {\n    standard_a: standardA,\n    standard_b: standardB,\n    standard_a_count: standardA.length,\n    standard_b_count: standardB.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -32
+      ],
+      "id": "7fb9edb2-184d-4c2c-b112-5ee1d3282939",
+      "name": "Parse Both Standards"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst checkpoint = data.checkpoint_status;\nconsole.log(`\\n========== CHECKPOINT STATUS ==========`);\nconsole.log(`Complete:    ${checkpoint.complete_count} codes`);\nconsole.log(`Incomplete:  ${checkpoint.incomplete_count} codes`);\nconsole.log(`Remaining:   ${checkpoint.remaining_count} codes`);\nconsole.log(`Progress:    ${checkpoint.progress_percent}%`);\nconsole.log(`========================================\\n`);\n\nif (data.standard_a_count === 0) {\n  console.log('All codes already processed! Nothing to do.');\n  return [];\n}\n\n// ⭐ MEMORY FIX: Process only 50 codes per run to avoid n8n Cloud memory limits\nconst BATCH_LIMIT = 100;\n\nconst codesToProcess = data.standard_a.slice(0, BATCH_LIMIT);\n\nconsole.log(`Processing ${codesToProcess.length} of ${data.standard_a_count} remaining codes (batch limit: ${BATCH_LIMIT})`);\n\nreturn codesToProcess.map(std => ({\n  json: {\n    source_code: String(std.code),\n    source_name: std.name,\n    source_asset_id: std.asset_id,\n    source_level: std.level,\n    source_dense_view: std.dense_view || null,\n    source_disambiguation: std.disambiguation || null\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        176
+      ],
+      "id": "1c0f6cf8-9698-4ee8-b60a-4edbb0c6dd05",
+      "name": "Split Standard A Into Items"
+    },
+    {
+      "parameters": {
+        "batchSize": 100,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        0,
+        176
+      ],
+      "id": "fb087dbc-f183-49a6-a92f-908dd345f291",
+      "name": "Loop In Batches"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\n// Collect all codes as integers for Qdrant point IDs\nconst pointIds = items.map(item => {\n  const code = item.json.source_code;\n  return parseInt(code, 10);\n}).filter(id => !isNaN(id));\n\n// Store original items for later mapping (keyed by code)\nconst itemsMap = {};\nitems.forEach(item => {\n  itemsMap[item.json.source_code] = {\n    source_code: item.json.source_code,\n    source_name: item.json.source_name,\n    source_asset_id: item.json.source_asset_id,\n    source_level: item.json.source_level,\n    source_dense_view: item.json.source_dense_view,\n    source_disambiguation: item.json.source_disambiguation\n  };\n});\n\nconsole.log(`Batch fetching ${pointIds.length} vectors from Qdrant`);\n\nreturn [{\n  json: {\n    qdrant_payload: {\n      ids: pointIds,\n      with_vectors: true,\n      with_payload: true\n    },\n    items_map: itemsMap,\n    batch_size: pointIds.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        192
+      ],
+      "id": "eaa24952-d1b9-41e7-9de1-549417292b9e",
+      "name": "Prepare Qdrant Search"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc_for_2020/points",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_payload }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "c77787d7-c2d9-4a77-9fd7-583e0b32d407",
+      "name": "Fetch Source Vector",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        528,
+        192
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const qdrantResponse = $input.first().json;\nconst itemsMap = $('Prepare Qdrant Search').first().json.items_map;\n\nconst points = qdrantResponse.result || [];\n\n// Build vector lookup: code -> vector\nconst vectorMap = {};\npoints.forEach(point => {\n  vectorMap[String(point.id)] = point.vector;\n});\n\nconsole.log(`Retrieved ${points.length} vectors, building batch search`);\n\n// Build batch search payload\nconst searches = [];\nconst searchOrder = []; // Track which code each search corresponds to\n\nfor (const [code, itemData] of Object.entries(itemsMap)) {\n  const vector = vectorMap[code];\n  if (!vector) {\n    console.log(`No vector found for code ${code}, skipping`);\n    continue;\n  }\n  \n  searches.push({\n    vector: vector,\n    limit: 5,\n    with_payload: true\n  });\n  \n  searchOrder.push({\n    code: code,\n    ...itemData\n  });\n}\n\nconsole.log(`Prepared batch search for ${searches.length} items`);\n\nreturn [{\n  json: {\n    batch_search_payload: {\n      searches: searches\n    },\n    search_order: searchOrder\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        192
+      ],
+      "id": "ec1c8186-9452-49ec-a031-ab9d23650cb8",
+      "name": "Prepare Search Standard B"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "060e0741-f406-4fc3-a8fb-454d3710fab0",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1152,
+        192
+      ],
+      "id": "62d52430-a06d-42bc-aab3-1a1eff0df769",
+      "name": "Filter Skip Items"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_oecd_fos_2007/points/search/batch ",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.batch_search_payload }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "4ae0fe51-8011-4bd5-91be-e193e47c75b5",
+      "name": "Search Standard B",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1376,
+        176
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const batchResponse = $input.first().json;\nconst searchOrder = $('Prepare Search Standard B').first().json.search_order;\n\nconst results = batchResponse.result || [];\nconst candidates = [];\n\nconsole.log(`Processing ${results.length} batch search results`);\n\nfor (let i = 0; i < results.length; i++) {\n  const searchResults = results[i] || [];\n  const sourceData = searchOrder[i];\n  \n  if (!sourceData) {\n    console.log(`No source data for index ${i}, skipping`);\n    continue;\n  }\n  \n  if (searchResults.length === 0) {\n    candidates.push({\n      json: {\n        source_code: sourceData.code,\n        source_name: sourceData.source_name,\n        source_asset_id: sourceData.source_asset_id,\n        source_level: sourceData.source_level,\n        mapping_status: \"unmapped\"\n      }\n    });\n    continue;\n  }\n  \n  for (const hit of searchResults) {\n    candidates.push({\n      json: {\n        source_code: sourceData.code,\n        source_name: sourceData.source_name,\n        source_asset_id: sourceData.source_asset_id,\n        source_level: sourceData.source_level,\n        source_dense_view: sourceData.source_dense_view,\n        source_disambiguation: sourceData.source_disambiguation,\n        target_code: hit.payload.code,\n        target_name: hit.payload.name,\n        target_asset_id: hit.payload.asset_id,\n        target_level: hit.payload.level,\n        target_dense_view: hit.payload.embedding_text || null,\n        semantic_similarity: hit.score  // ✓ Correct per-item!\n      }\n    });\n  }\n}\n\nconsole.log(`Generated ${candidates.length} candidate mappings from batch`);\n\nreturn candidates;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        176
+      ],
+      "id": "61a304b8-499d-43b9-a09f-e9c23cd952d2",
+      "name": "Parse Candidates"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc_for_2020/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"limit\": 5,\n  \"with_payload\": true,\n  \"with_vectors\": false\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "cb67799f-6301-4c17-9bca-9d2e16b9fe5f",
+      "name": "Fetch Source Vector1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1392,
+        -256
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.llm_prompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -144,
+        432
+      ],
+      "id": "64cada07-b6a6-47af-a84d-7b68809ee21f",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "options": {
+          "maxTokens": 300,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        592
+      ],
+      "id": "0a0f7fdc-e478-46a9-9cff-93303f790b1b",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst candidates = items.filter(item => !item.json.mapping_status);\n\nreturn candidates.map(item => {\n  const d = item.json;\n  \n  // Build context from dense views\n  const sourceContext = d.source_dense_view \n    ? `\\nSource Description: ${d.source_dense_view.substring(0, 500)}` \n    : '';\n  \n  const targetContext = d.target_dense_view \n    ? `\\nTarget Description: ${d.target_dense_view.substring(0, 500)}` \n    : '';\n  \n  const disambiguationContext = d.source_disambiguation \n    ? `\\nDisambiguation Signals: ${d.source_disambiguation}` \n    : '';\n\n  return {\n    json: {\n      ...d,\n      llm_prompt: `You are a research classification expert. Evaluate if these two taxonomy codes are semantically aligned.\n\nSource (ANZSRC FoR 2020): ${d.source_code} - ${d.source_name}\nSource Level: ${d.source_level}${sourceContext}${disambiguationContext}\n\nTarget (OECD FOS 2007): ${d.target_code} - ${d.target_name}\nTarget Level: ${d.target_level}${targetContext}\n\nEmbedding Similarity Score: ${d.semantic_similarity.toFixed(3)}\n\nEvaluate the mapping and respond in JSON format:\n{\n  \"alignment_score\": 0.0-1.0,\n  \"mapping_type\": \"primary|broad|narrow|related|partial\",\n  \"reasoning\": \"brief 1-2 sentence explanation\"\n}\n\nMapping type definitions:\n- primary: Strong 1:1 semantic alignment\n- broad: Target is broader than source (many-to-one)\n- narrow: Target is narrower than source (one-to-many)\n- related: Semantic relationship but not direct alignment\n- partial: Incomplete coverage, use with caution\n\nCRITICAL: Respond ONLY with valid JSON. No markdown, no code blocks.`\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        432
+      ],
+      "id": "c208a2eb-a5fd-42b3-818e-ce68f86c078f",
+      "name": "Prepare LLM Validation Prompts"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node 18: Parse LLM Response\n// Handle cases where all scores are below threshold\n\nconst items = $input.all();\nconst candidateItems = $('Prepare LLM Validation Prompts').all();\n\nconst results = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const llmResponse = items[i].json;\n  const candidateData = candidateItems[i].json;\n  \n  // Parse LLM JSON response\n  let parsed;\n  try {\n    const text = llmResponse.text || llmResponse.output || llmResponse.content || '';\n    // Remove markdown code blocks if present\n    let cleanText = text.trim();\n    if (cleanText.startsWith('```json')) {\n      cleanText = cleanText.slice(7);\n    } else if (cleanText.startsWith('```')) {\n      cleanText = cleanText.slice(3);\n    }\n    if (cleanText.endsWith('```')) {\n      cleanText = cleanText.slice(0, -3);\n    }\n    parsed = JSON.parse(cleanText.trim());\n  } catch (e) {\n    console.error(`Failed to parse LLM response for ${candidateData.source_code} → ${candidateData.target_code}:`, e.message);\n    // Skip this candidate on parse error\n    continue;\n  }\n  \n  const alignmentScore = parsed.alignment_score || 0;\n  const mappingType = parsed.mapping_type || 'related';\n  const reasoning = parsed.reasoning || '';\n  \n  // Calculate combined confidence\n  const vectorScore = candidateData.vector_score || 0;\n  const combinedConfidence = (alignmentScore * 0.6) + (vectorScore * 0.4);\n  \n  results.push({\n    json: {\n      source_code: candidateData.source_code,\n      source_name: candidateData.source_name,\n      source_asset_id: candidateData.source_asset_id,\n      source_level: candidateData.source_level,\n      target_code: candidateData.target_code,\n      target_name: candidateData.target_name,\n      target_asset_id: candidateData.target_asset_id,\n      \n      // Scores\n      vector_score: vectorScore,\n      alignment_score: alignmentScore,\n      combined_confidence: Math.round(combinedConfidence * 1000) / 1000,\n      \n      // LLM assessment\n      mapping_type: mappingType,\n      reasoning: reasoning,\n      \n      // Flag low confidence but don't filter out\n      low_confidence: alignmentScore < 0.6,\n      \n      // Pass through for downstream\n      pass_validation: true\n    }\n  });\n}\n\n// Group by source_code and pick best match per source\nconst groupedBySource = {};\nfor (const result of results) {\n  const sourceCode = result.json.source_code;\n  if (!groupedBySource[sourceCode]) {\n    groupedBySource[sourceCode] = [];\n  }\n  groupedBySource[sourceCode].push(result);\n}\n\nconst finalResults = [];\n\nfor (const [sourceCode, candidates] of Object.entries(groupedBySource)) {\n  // Sort by combined_confidence descending\n  candidates.sort((a, b) => b.json.combined_confidence - a.json.combined_confidence);\n  \n  // Take top candidate (best match)\n  const bestMatch = candidates[0];\n  \n  // If best match is below threshold, flag but KEEP IT\n  if (bestMatch.json.alignment_score < 0.6) {\n    console.log(`⚠️ Low confidence mapping: ${sourceCode} → ${bestMatch.json.target_code} (score: ${bestMatch.json.alignment_score})`);\n    bestMatch.json.requires_review = true;\n  }\n  \n  finalResults.push(bestMatch);\n  \n  // Also include secondary matches if score >= 0.5\n  for (let i = 1; i < candidates.length && i < 3; i++) {\n    if (candidates[i].json.alignment_score >= 0.5) {\n      candidates[i].json.is_secondary = true;\n      finalResults.push(candidates[i]);\n    }\n  }\n}\n\nconsole.log(`\\n========== LLM VALIDATION RESULTS ==========`);\nconsole.log(`Total validated: ${finalResults.length}`);\nconsole.log(`Low confidence (requires review): ${finalResults.filter(r => r.json.requires_review).length}`);\nconsole.log(`High confidence: ${finalResults.filter(r => !r.json.low_confidence).length}`);\n\nreturn finalResults;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        432
+      ],
+      "id": "d4ce0761-6340-4211-947b-166207a91d27",
+      "name": "Parse LLM Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n  \n  // Calculate hierarchical compatibility\n  let hierarchical_compatibility = 1.0;\n  \n  // Penalize mismatched levels\n  if (data.source_level === 'division' && data.target_level === 'field') {\n    hierarchical_compatibility = 0.85; // Broad to narrow\n  } else if (data.source_level === 'field' && data.target_level === 'group') {\n    hierarchical_compatibility = 0.80; // Narrow to broad\n  } else if (data.source_level === 'group' && data.target_level === 'group') {\n    hierarchical_compatibility = 0.95; // Same level\n  } else if (data.source_level === 'division' && data.target_level === 'group') {\n    hierarchical_compatibility = 0.90; // Similar broad levels\n  }\n  \n  // Weighted confidence calculation\n  const confidence = (\n    data.semantic_similarity * 0.35 +\n    data.alignment_score * 0.45 +\n    hierarchical_compatibility * 0.20\n  );\n  \n  return {\n    json: {\n      ...data,\n      hierarchical_compatibility: Math.round(hierarchical_compatibility * 100) / 100,\n      confidence: Math.round(confidence * 100) / 100\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        432
+      ],
+      "id": "b5af5536-ef4c-4fbc-b7b3-d45abb504e28",
+      "name": "Pass 3: Confidence Scoring"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst mappings = items.map(item => ({\n  source_asset_id: item.json.source_asset_id,\n  target_asset_id: item.json.target_asset_id,\n  confidence: item.json.combined_confidence || item.json.confidence || 0,  // ← FIX\n  alignment_score: item.json.alignment_score,\n  mapping_type: item.json.mapping_type,\n  semantic_similarity: item.json.vector_score || item.json.semantic_similarity,  // ← Also fix this\n  hierarchical_compatibility: item.json.hierarchical_compatibility,\n  reasoning: item.json.reasoning\n}));\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        UNWIND $mappings AS m\n        MATCH (a:Standard {asset_id: m.source_asset_id})\n        MATCH (b:Standard {asset_id: m.target_asset_id})\n        MERGE (a)-[r:MAPS_TO_V4]->(b)\n        SET r.confidence = m.confidence,\n            r.alignment_score = m.alignment_score,\n            r.mapping_type = m.mapping_type,\n            r.semantic_similarity = m.semantic_similarity,\n            r.hierarchical_compatibility = m.hierarchical_compatibility,\n            r.reasoning = m.reasoning,\n            r.fabricated_at = datetime()\n        RETURN count(r) as relationships_created\n      `,\n      parameters: { mappings }\n    },\n    mapping_count: mappings.length,\n    mappings: mappings\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        432
+      ],
+      "id": "0b87178b-5dd1-4dff-ac73-3d55eb6d9845",
+      "name": "Prepare Neo4j Crosswalk Write"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        432
+      ],
+      "id": "99b50432-5f95-410f-9bcc-ad5c4d0a8bfd",
+      "name": "Create MAPS_TO Relationships",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const previousData = $('Prepare Neo4j Crosswalk Write').first().json;\nconst mappings = previousData.mappings;\n\n// Create reverse mappings with adjusted confidence\nconst reverseMappings = mappings.map(m => ({\n  source_asset_id: m.target_asset_id,  // Swap\n  target_asset_id: m.source_asset_id,  // Swap\n  confidence: Math.round(m.confidence * 0.95 * 100) / 100,  // Slightly lower for reverse\n  alignment_score: m.alignment_score,\n  mapping_type: m.mapping_type === 'narrow' ? 'broad' : \n                m.mapping_type === 'broad' ? 'narrow' : m.mapping_type,  // Flip type\n  semantic_similarity: m.semantic_similarity,\n  hierarchical_compatibility: m.hierarchical_compatibility,\n  reasoning: m.reasoning + ' (reverse mapping)'\n}));\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        UNWIND $mappings AS m\n        MATCH (a:Standard {asset_id: m.source_asset_id})\n        MATCH (b:Standard {asset_id: m.target_asset_id})\n        MERGE (a)-[r:MAPS_TO_V4]->(b)\n        SET r.confidence = m.confidence,\n            r.alignment_score = m.alignment_score,\n            r.mapping_type = m.mapping_type,\n            r.semantic_similarity = m.semantic_similarity,\n            r.hierarchical_compatibility = m.hierarchical_compatibility,\n            r.reasoning = m.reasoning,\n            r.fabricated_at = datetime()\n        RETURN count(r) as relationships_created\n      `,\n      parameters: { mappings: reverseMappings }\n    },\n    reverse_mapping_count: reverseMappings.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        432
+      ],
+      "id": "41b68c0b-68ff-411a-a462-46e6bf01ee1d",
+      "name": "Prepare Reverse Mappings"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1504,
+        432
+      ],
+      "id": "17654d1e-0a7c-4f94-92b1-89f9177429e6",
+      "name": "Create Reverse MAPS_TO",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (:Standard:FoR)-[r:MAPS_TO]->(:Standard:DomainHub)\n        RETURN count(r) as forward_count\n      `,\n      parameters: {}\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        800
+      ],
+      "id": "d103310b-4612-4ef7-837c-17fdb96029ef",
+      "name": "Prepare PostgreSQL Metadata"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/crosswalk_metadata?on_conflict=crosswalk_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        800
+      ],
+      "id": "0e54c0b9-bd6d-4218-9f4b-6ed2ad6d4f13",
+      "name": "Store Crosswalk Metadata",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const supabaseData = $('Prepare Supabase Payload').first().json;\n\nconst summary = {\n  workflow: 'INSTANCE-2: Crosswalk Fabrication Engine',\n  timestamp: new Date().toISOString(),\n  crosswalk_id: 'anzsrc_for_2020_to_oecd_fos_2007',\n  \n  results: {\n    forward_mappings: supabaseData.supabase_payload.forward_mapping_count,\n    reverse_mappings: supabaseData.supabase_payload.reverse_mapping_count,\n    total_relationships: supabaseData.supabase_payload.total_mapping_count\n  },\n  \n  status: 'completed'\n};\n\nreturn [{ json: summary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        800
+      ],
+      "id": "3a72c018-0500-4948-9599-462a0644ac31",
+      "name": "Generate Summary"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nif (items.length === 0) {\n  return [];\n}\n\nconst unmapped = items.map(item => ({\n  json: {\n    crosswalk_id: 'anzsrc_for_2020_to_oecd_fos_2007',\n    code: item.json.source_code,\n    name: item.json.source_name,\n    asset_id: item.json.source_asset_id,\n    standard_side: 'A',\n    mapping_status: 'unmapped',\n    flagged_at: new Date().toISOString()\n  }\n}));\n\nconsole.log(`Collected ${unmapped.length} unmapped codes`);\n\nreturn unmapped;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -48
+      ],
+      "id": "c96c6184-2810-47b8-8735-ce0b546a8992",
+      "name": "Collect Unmapped Codes"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/crosswalk_unmapped_codes?on_conflict=crosswalk_id,code,standard_side",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1696,
+        -48
+      ],
+      "id": "9fb575b1-0d68-4cb1-849f-81ebfa624e89",
+      "name": "Store Unmapped Codes",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        800
+      ],
+      "id": "95d4f8f3-72e2-4cac-a2cf-d75d26f0a166",
+      "name": "Fetch Forward Count",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\n// Parse Neo4j response\nconst resultWrapper = Array.isArray(response) ? response[0] : response;\nconst forwardCount = resultWrapper?.data?.values?.[0]?.[0] || 0;\n\n// Reverse count should be similar\nconst reverseCount = forwardCount;\n\nreturn [{\n  json: {\n    supabase_payload: {\n      crosswalk_id: 'anzsrc_for_2020_to_oecd_fos_2007',\n      standard_a_id: 'anzsrc_for_2020',\n      standard_b_id: 'oecd_fos_2007',\n      forward_mapping_count: forwardCount,\n      reverse_mapping_count: reverseCount,\n      total_mapping_count: forwardCount + reverseCount,\n      status: 'fabricated',\n      version: '1.0',\n      fabricated_at: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        800
+      ],
+      "id": "1eee3cde-c882-4053-85f4-5a9f003c8b49",
+      "name": "Prepare Supabase Payload"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        // Get codes with COMPLETE mappings (both directions exist)\n        MATCH (a:Standard:FoR)-[:MAPS_TO_V4]->(b:Standard:DomainHub)\n        WHERE EXISTS((b)-[:MAPS_TO_V4]->(a))\n        WITH DISTINCT a.code as complete_code\n        \n        // Also get codes with ONLY forward (incomplete)\n        OPTIONAL MATCH (a2:Standard:FoR)-[:MAPS_TO_V4]->(b2:Standard:DomainHub)\n        WHERE NOT EXISTS((b2)-[:MAPS_TO_V4]->(a2))\n        \n        RETURN \n          collect(DISTINCT complete_code) as complete_codes,\n          collect(DISTINCT a2.code) as incomplete_codes\n      `,\n      parameters: {}\n    },\n    standard_a: data.standard_a,\n    standard_b: data.standard_b,\n    standard_a_count: data.standard_a_count,\n    standard_b_count: data.standard_b_count\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        992,
+        -32
+      ],
+      "id": "48f1fc63-5bc8-4351-bb23-cce3edd3ef71",
+      "name": "Prepare Fetch Processed Codes"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        -32
+      ],
+      "id": "e531709e-9375-4c3d-9726-f2dcfc412a5c",
+      "name": "Fetch Processed Codes",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_oecd_fos_2007/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"limit\": 5,\n  \"with_payload\": true,\n  \"with_vectors\": false\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "70522bc1-1795-42d7-afac-81b685298a8f",
+      "name": "Fetch Source Vector2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1376,
+        992
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const httpResponse = $input.first().json;\nconst previousData = $('Prepare Fetch Processed Codes').first().json;\n\n// Parse Neo4j response\nconst resultWrapper = Array.isArray(httpResponse) ? httpResponse[0] : httpResponse;\n\n// Initialize sets\nconst completeCodes = new Set();\nconst incompleteCodes = new Set();\n\n// Parse response - handle the nested structure\nif (resultWrapper?.data?.values && resultWrapper.data.values.length > 0) {\n  const row = resultWrapper.data.values[0];\n  \n  // First element: complete_codes array\n  if (row[0] && Array.isArray(row[0])) {\n    row[0].forEach(code => completeCodes.add(String(code)));\n  }\n  \n  // Second element: incomplete_codes array\n  if (row[1] && Array.isArray(row[1])) {\n    row[1].forEach(code => {\n      if (code !== null) incompleteCodes.add(String(code));\n    });\n  }\n}\n\nconsole.log(`✅ Complete (both directions): ${completeCodes.size} codes`);\nconsole.log(`⚠️ Incomplete (forward only): ${incompleteCodes.size} codes`);\n\n// Filter: Skip complete, but KEEP incomplete for re-processing\nconst remainingStandardA = previousData.standard_a.filter(\n  std => !completeCodes.has(String(std.code))\n);\n\n// Flag incomplete codes for logging\nconst incompleteToReprocess = remainingStandardA.filter(\n  std => incompleteCodes.has(String(std.code))\n);\n\nif (incompleteToReprocess.length > 0) {\n  console.log(`🔄 Will reprocess ${incompleteToReprocess.length} incomplete codes:`);\n  incompleteToReprocess.slice(0, 10).forEach(std => {\n    console.log(`   - ${std.code}: ${std.name}`);\n  });\n  if (incompleteToReprocess.length > 10) {\n    console.log(`   ... and ${incompleteToReprocess.length - 10} more`);\n  }\n}\n\nconsole.log(`📋 Total to process: ${remainingStandardA.length} of ${previousData.standard_a_count}`);\n\nreturn [{\n  json: {\n    standard_a: remainingStandardA,\n    standard_b: previousData.standard_b,\n    standard_a_count: remainingStandardA.length,\n    standard_b_count: previousData.standard_b_count,\n    checkpoint_status: {\n      complete_count: completeCodes.size,\n      incomplete_count: incompleteCodes.size,\n      remaining_count: remainingStandardA.length,\n      original_count: previousData.standard_a_count,\n      progress_percent: Math.round((completeCodes.size / previousData.standard_a_count) * 100)\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        176
+      ],
+      "id": "88ecedac-0ef2-41f0-86f8-0ad09f3b6fe2",
+      "name": "Prepare Fetch Standard A Query2"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "b9591461-689c-4c09-ba35-09310f72304c",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -512,
+        -32
+      ]
+    }
+  ],
+  "pinData": {
+    "When clicking ‘Execute workflow’": [
+      {
+        "json": {
+          "crosswalk_id": "anzsrc_for_2020_to_oecd_fos_2007",
+          "standard_a_taxonomy": "anzsrc_for_2020",
+          "standard_b_taxonomy": "oecd_fos_2007"
+        }
+      }
+    ],
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-12-11T22:57:30.005+11:00",
+          "Readable date": "December 11th 2025, 10:57:30 pm",
+          "Readable time": "10:57:30 pm",
+          "Day of week": "Thursday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "11",
+          "Hour": "22",
+          "Minute": "57",
+          "Second": "30",
+          "Timezone": "Australia/Melbourne (UTC+11:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare Fetch Standard A Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Standard A (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Standard B Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Standard B (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Standard A (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Standard B Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Standard B (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Parse Both Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Both Standards": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Processed Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Standard A Into Items": {
+      "main": [
+        [
+          {
+            "node": "Loop In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop In Batches": {
+      "main": [
+        [
+          {
+            "node": "Prepare PostgreSQL Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Qdrant Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Search": {
+      "main": [
+        [
+          {
+            "node": "Fetch Source Vector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Source Vector": {
+      "main": [
+        [
+          {
+            "node": "Prepare Search Standard B",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Search Standard B": {
+      "main": [
+        [
+          {
+            "node": "Filter Skip Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Skip Items": {
+      "main": [
+        [
+          {
+            "node": "Search Standard B",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Collect Unmapped Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Standard B": {
+      "main": [
+        [
+          {
+            "node": "Parse Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Candidates": {
+      "main": [
+        [
+          {
+            "node": "Prepare LLM Validation Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare LLM Validation Prompts": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Pass 3: Confidence Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 3: Confidence Scoring": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Crosswalk Write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Crosswalk Write": {
+      "main": [
+        [
+          {
+            "node": "Create MAPS_TO Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create MAPS_TO Relationships": {
+      "main": [
+        [
+          {
+            "node": "Prepare Reverse Mappings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Reverse Mappings": {
+      "main": [
+        [
+          {
+            "node": "Create Reverse MAPS_TO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Reverse MAPS_TO": {
+      "main": [
+        [
+          {
+            "node": "Loop In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PostgreSQL Metadata": {
+      "main": [
+        [
+          {
+            "node": "Fetch Forward Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Crosswalk Metadata": {
+      "main": [
+        [
+          {
+            "node": "Generate Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Unmapped Codes": {
+      "main": [
+        [
+          {
+            "node": "Store Unmapped Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Forward Count": {
+      "main": [
+        [
+          {
+            "node": "Prepare Supabase Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Supabase Payload": {
+      "main": [
+        [
+          {
+            "node": "Store Crosswalk Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Processed Codes": {
+      "main": [
+        [
+          {
+            "node": "Fetch Processed Codes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Processed Codes": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Standard A Query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Standard A Query2": {
+      "main": [
+        [
+          {
+            "node": "Split Standard A Into Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Standard A Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6408ca0f-c5ae-4863-b570-95c89441bd6b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "a5xZBZyxc7Y5cAut",
+  "tags": [
+    {
+      "updatedAt": "2025-12-18T21:22:51.435Z",
+      "createdAt": "2025-11-25T14:19:55.471Z",
+      "id": "23TAoanPtB83dwz5",
+      "name": "Fabrication"
+    }
+  ]
+}
