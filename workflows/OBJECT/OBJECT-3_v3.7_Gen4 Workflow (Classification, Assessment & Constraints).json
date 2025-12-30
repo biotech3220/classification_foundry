@@ -1,5 +1,5 @@
 {
-  "name": "OBJECT-3_v3.6.2_Gen4 Workflow (Classification, Assessment & Constraints)",
+  "name": "OBJECT-3_v3.7_Gen4 Workflow (Classification, Assessment & Constraints)",
   "nodes": [
     {
       "parameters": {},
@@ -9,7 +9,7 @@
         -1248,
         0
       ],
-      "id": "c5f7a9b0-c0c2-43e2-9ef0-0a486362b6b1",
+      "id": "f93ec061-c5f3-46b5-8feb-51df766d3959",
       "name": "When clicking ‘Execute workflow’"
     },
     {
@@ -38,7 +38,7 @@
         -800,
         0
       ],
-      "id": "fcd56201-8e40-457a-99e0-dc8303df7394",
+      "id": "e6100a10-3f64-48be-96e6-e287f9f86607",
       "name": "Fetch FATObjects",
       "credentials": {
         "httpBasicAuth": {
@@ -49,7 +49,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Parse Neo4j response and prepare for Qdrant embedding fetch\nconst response = $input.first().json;\n\nconst fields = response.data.fields;\nconst values = response.data.values;\n\nconst results = [];\n\nfor (const row of values) {\n  // Map fields to values\n  const obj = {};\n  fields.forEach((field, idx) => {\n    obj[field] = row[idx];\n  });\n  \n  // Parse dense_view from JSON string\n  let denseViewParsed = {};\n  if (typeof obj.dense_view === 'string') {\n    try {\n      denseViewParsed = JSON.parse(obj.dense_view);\n    } catch (e) {\n      denseViewParsed = {};\n    }\n  }\n  \n  // Create text version for LLM prompts\n  const dv = denseViewParsed;\n  const denseViewText = `\nResearcher: ${dv.name || obj.name}\nInstitution: ${dv.institution || obj.institution}\nORCID: ${dv.orcid || obj.orcid}\nCareer Stage: ${dv.career_stage || 'unknown'}\nResearch Impact: ${dv.research_impact || 'unknown'}\n\nResearch Domains: ${(dv.research_domains || []).join(', ')}\n\nCore Methodologies: ${(dv.core_methodologies || []).join(', ')}\n\nResearch Themes: ${(dv.research_themes || []).join(', ')}\n\nMetrics:\n- H-index: ${dv.h_index || 0}\n- Total Citations: ${dv.total_citations || 0}\n- Publications: ${dv.publication_count || 0}\n- Patents: ${dv.patent_count || 0}\n\nCollaboration: ${dv.collaboration_breadth || 'unknown'} network with ${dv.collaborator_count || 0} collaborators\n`.trim();\n\n  // Build Qdrant scroll request to fetch embedding vector\n  const qdrantScrollRequest = {\n    filter: {\n      must: [\n        {\n          key: \"asset_id\",\n          match: {\n            value: obj.asset_id\n          }\n        }\n      ]\n    },\n    limit: 1,\n    with_payload: true,\n    with_vector: true\n  };\n\n  results.push({\n    json: {\n      asset_id: obj.asset_id,\n      name: obj.name,\n      orcid: obj.orcid,\n      institution: obj.institution,\n      data_completeness: obj.data_completeness,\n      status: obj.status,\n      version: obj.version,\n      fabricated_at: obj.fabricated_at,\n      dense_view_parsed: denseViewParsed,\n      dense_view_text: denseViewText,\n      qdrant_scroll_request: qdrantScrollRequest\n    }\n  });\n}\n\nreturn results;"
+        "jsCode": "// Parse Neo4j response with v3.7 dense_view structure\n// Handles both raw_evidence and enriched_context from OBJECT-2\n// Version: v3.7.0\n\nconst response = $input.first().json;\n\nconst fields = response.data.fields;\nconst values = response.data.values;\n\nconst results = [];\n\nfor (const row of values) {\n  // Map fields to values\n  const obj = {};\n  fields.forEach((field, idx) => {\n    obj[field] = row[idx];\n  });\n  \n  // Parse dense_view from JSON string\n  let denseViewParsed = {};\n  if (typeof obj.dense_view === 'string') {\n    try {\n      denseViewParsed = JSON.parse(obj.dense_view);\n    } catch (e) {\n      console.log(`⚠️ Failed to parse dense_view for ${obj.asset_id}`);\n      denseViewParsed = {};\n    }\n  } else if (typeof obj.dense_view === 'object' && obj.dense_view !== null) {\n    denseViewParsed = obj.dense_view;\n  }\n  \n  const dv = denseViewParsed;\n  \n  // ============================================================\n  // EXTRACT raw_evidence (from OBJECT-2)\n  // ============================================================\n  const rawEvidence = dv.raw_evidence || {};\n  const publications = rawEvidence.publications || [];\n  const grants = rawEvidence.grants || [];\n  const biography = rawEvidence.biography || dv.biography || '';\n  const researchInterests = rawEvidence.research_interests || dv.research_interests || [];\n  \n  // ============================================================\n  // EXTRACT enriched_context (from OBJECT-2 LLM enrichment)\n  // ============================================================\n  const enrichedContext = dv.enriched_context || {};\n  const careerStage = enrichedContext.career_stage || dv.career_stage || 'unknown';\n  const researchDomains = enrichedContext.research_domains || dv.research_domains || [];\n  const methodologies = enrichedContext.methodologies || dv.core_methodologies || dv.methodologies || [];\n  const themes = enrichedContext.themes || dv.research_themes || [];\n  const keywords = enrichedContext.keywords || dv.keywords || [];\n  \n  // ============================================================\n  // DATA QUALITY CHECK (v3.7 requirement)\n  // ============================================================\n  const missingFields = [];\n  if (publications.length === 0) missingFields.push('publications');\n  if (grants.length === 0) missingFields.push('grants');\n  if (!biography || biography.length < 50) missingFields.push('biography');\n  if (researchInterests.length === 0) missingFields.push('research_interests');\n  \n  const hasDataQualityIssue = missingFields.length > 0;\n  const dataQualityPenalty = hasDataQualityIssue ? 0.10 : 0;\n  \n  if (hasDataQualityIssue) {\n    console.log(`⚠️ Data quality warning for ${obj.name}: Missing ${missingFields.join(', ')}`);\n  }\n  \n  // ============================================================\n  // BUILD RICH dense_view_text FOR LLM (v3.7 format)\n  // ============================================================\n  \n  // Format publications for prompt (top 10)\n  const pubText = publications.slice(0, 10).map((p, i) => {\n    const title = p.title || 'Untitled';\n    const abstract = p.abstract ? ` - ${p.abstract.slice(0, 150)}...` : '';\n    const kw = (p.keywords || []).join(', ');\n    return `  ${i+1}. ${title}${abstract}${kw ? ` [${kw}]` : ''}`;\n  }).join('\\n');\n  \n  // Format grants for prompt\n  const grantText = grants.slice(0, 10).map((g, i) => {\n    const title = g.title || 'Untitled Grant';\n    const funder = g.funder ? ` (${g.funder})` : '';\n    const amount = g.amount ? ` - $${Number(g.amount).toLocaleString()}` : '';\n    const dates = g.dates ? ` [${g.dates}]` : '';\n    return `  ${i+1}. ${title}${funder}${amount}${dates}`;\n  }).join('\\n');\n  \n  const denseViewText = `\n============================================================\nRESEARCHER PROFILE\n============================================================\n\nName: ${dv.name || obj.name}\nInstitution: ${dv.institution || obj.institution || 'Unknown'}\nORCID: ${dv.orcid || obj.orcid || 'Not available'}\nCareer Stage: ${careerStage}\n\n------------------------------------------------------------\nRAW EVIDENCE (from source data)\n------------------------------------------------------------\n\nBIOGRAPHY:\n${biography || 'No biography available'}\n\nRESEARCH INTERESTS:\n${researchInterests.length > 0 ? researchInterests.join(', ') : 'Not specified'}\n\nPUBLICATIONS (Top ${Math.min(publications.length, 10)} of ${publications.length}):\n${pubText || '  No publications available'}\n\nGRANTS:\n${grantText || '  No grants available'}\n\n------------------------------------------------------------\nENRICHED CONTEXT (from LLM analysis)\n------------------------------------------------------------\n\nResearch Domains: ${researchDomains.join(', ') || 'Not extracted'}\n\nCore Methodologies: ${methodologies.join(', ') || 'Not extracted'}\n\nResearch Themes: ${themes.join(', ') || 'Not extracted'}\n\nKeywords: ${keywords.join(', ') || 'Not extracted'}\n\n------------------------------------------------------------\nMETRICS\n------------------------------------------------------------\n\nH-index: ${dv.h_index || dv.achievement_scale?.h_index || 0}\nTotal Citations: ${dv.total_citations || 0}\nPublication Count: ${dv.publication_count || publications.length || 0}\nPatent Count: ${dv.patent_count || 0}\nResearch Impact: ${dv.research_impact || dv.achievement_indicators?.research_impact || 'Unknown'}\nCollaboration Breadth: ${dv.collaboration_breadth || dv.achievement_indicators?.collaboration_breadth || 'Unknown'}\n`.trim();\n\n  const qdrantScrollRequest = {\n    filter: {\n      must: [{\n        key: \"asset_id\",\n        match: { value: obj.asset_id }\n      }]\n    },\n    limit: 1,\n    with_payload: true,\n    with_vector: true\n  };\n\n  results.push({\n    json: {\n      asset_id: obj.asset_id,\n      name: obj.name,\n      orcid: obj.orcid,\n      institution: obj.institution,\n      data_completeness: obj.data_completeness,\n      status: obj.status,\n      version: obj.version,\n      fabricated_at: obj.fabricated_at,\n      dense_view_parsed: denseViewParsed,\n      dense_view_text: denseViewText,\n      raw_evidence: {\n        publications: publications,\n        grants: grants,\n        biography: biography,\n        research_interests: researchInterests\n      },\n      enriched_context: enrichedContext,\n      career_stage: careerStage,\n      research_domains: researchDomains,\n      methodologies: methodologies,\n      research_themes: themes,\n      data_quality: {\n        has_issue: hasDataQualityIssue,\n        missing_fields: missingFields,\n        confidence_penalty: dataQualityPenalty\n      },\n      qdrant_scroll_request: qdrantScrollRequest\n    }\n  });\n}\n\nreturn results;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -57,7 +57,7 @@
         -608,
         0
       ],
-      "id": "7473f4e2-a912-4867-99f3-4cb1cb60c66c",
+      "id": "2f36ed24-f953-456d-9df3-d1f34ada326f",
       "name": "Parse Neo4j Response"
     },
     {
@@ -86,7 +86,7 @@
           }
         }
       },
-      "id": "26d58873-ccef-47a1-bb38-d662918c32b0",
+      "id": "5a5f5c89-fdc0-47f9-bdc5-2b2c582735be",
       "name": "Fetch Embedding Vector",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
@@ -107,7 +107,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Node 1f: Merge Embedding\n// Purpose: Extract FATObject data and embedding vector from Qdrant response\n// The Qdrant payload contains all the researcher data we need\n\nconst qdrantResponse = $input.first().json;\n\n// Handle the response structure - it's wrapped in an array from the HTTP Request\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\n\n// Extract points from Qdrant response\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  throw new Error('No points found in Qdrant response');\n}\n\nconst point = points[0];\nconst embeddingVector = point.vector;\nconst payload = point.payload;\n\nif (!embeddingVector || !Array.isArray(embeddingVector)) {\n  throw new Error('Vector not returned or invalid format');\n}\n\nif (!payload || !payload.asset_id) {\n  throw new Error('Payload missing or invalid');\n}\n\nreturn [{\n  json: {\n    // Core identifiers\n    asset_id: payload.asset_id,\n    qdrant_point_id: point.id,\n    \n    // Researcher info from payload\n    name: payload.name,\n    orcid: payload.orcid,\n    institution: payload.institution,\n    \n    // Research profile data from payload\n    research_domains: payload.research_domains || [],\n    methodologies: payload.methodologies || [],\n    research_themes: payload.research_themes || [],\n    \n    // Metrics from payload\n    h_index: payload.h_index,\n    total_citations: payload.total_citations,\n    publication_count: payload.publication_count,\n    patent_count: payload.patent_count,\n    career_stage: payload.career_stage,\n    research_impact: payload.research_impact,\n    \n    // The embedding vector (3072 dimensions)\n    embedding_vector: embeddingVector,\n    embedding_dimensions: embeddingVector.length,\n    \n    // Metadata\n    data_completeness: payload.data_completeness,\n    status: payload.status,\n    fabricated_at: payload.fabricated_at\n  }\n}];"
+        "jsCode": "// ============================================================\n// Node: Merge Embedding\n// Version: v3.7.0\n// Purpose: Merge Qdrant embedding vector with researcher data from earlier nodes\n// ============================================================\n\nconst qdrantResponse = $input.first().json;\n\n// ============================================================\n// GET DATA FROM PREVIOUS NODE (Handle Sparse Data or Parse Neo4j Response)\n// This contains dense_view_text, raw_evidence, etc.\n// ============================================================\nlet previousData = {};\n\n// Try to get from Handle Sparse Data first\ntry {\n  previousData = $('Handle Sparse Data').first().json;\n} catch (e) {\n  // Fallback to Parse Neo4j Response\n  try {\n    previousData = $('Parse Neo4j Response').first().json;\n  } catch (e2) {\n    console.log('⚠️ Could not find previous node data');\n  }\n}\n\n// ============================================================\n// PARSE QDRANT RESPONSE\n// ============================================================\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  throw new Error('No points found in Qdrant response');\n}\n\nconst point = points[0];\nconst embeddingVector = point.vector;\nconst payload = point.payload;\n\nif (!embeddingVector || !Array.isArray(embeddingVector)) {\n  throw new Error('Vector not returned or invalid format');\n}\n\nif (!payload || !payload.asset_id) {\n  throw new Error('Payload missing or invalid');\n}\n\n// ============================================================\n// MERGE: Combine Qdrant data with previous node data\n// Priority: previousData > payload (for text fields)\n// ============================================================\nconst mergedData = {\n  // Core identifiers\n  asset_id: payload.asset_id,\n  qdrant_point_id: point.id,\n  \n  // Researcher info (prefer previous node data)\n  name: previousData.name || payload.name,\n  orcid: previousData.orcid || payload.orcid,\n  institution: previousData.institution || payload.institution,\n  \n  // ============================================================\n  // CRITICAL: dense_view_text from previous node (NOT Qdrant)\n  // ============================================================\n  dense_view_text: previousData.dense_view_text || '',\n  dense_view_parsed: previousData.dense_view_parsed || {},\n  \n  // ============================================================\n  // v3.7: raw_evidence and enriched_context from previous node\n  // ============================================================\n  raw_evidence: previousData.raw_evidence || {},\n  enriched_context: previousData.enriched_context || {},\n  \n  // Research profile (merge both sources)\n  career_stage: previousData.career_stage || payload.career_stage || 'unknown',\n  research_domains: previousData.research_domains || payload.research_domains || [],\n  methodologies: previousData.methodologies || payload.methodologies || [],\n  research_themes: previousData.research_themes || payload.research_themes || [],\n  \n  // Metrics (prefer Qdrant payload as it may be more accurate)\n  h_index: payload.h_index || previousData.h_index || 0,\n  total_citations: payload.total_citations || previousData.total_citations || 0,\n  publication_count: payload.publication_count || previousData.publication_count || 0,\n  patent_count: payload.patent_count || previousData.patent_count || 0,\n  research_impact: payload.research_impact || previousData.research_impact || 'Unknown',\n  \n  // The embedding vector (3072 dimensions)\n  embedding_vector: embeddingVector,\n  embedding_dimensions: embeddingVector.length,\n  \n  // Data quality from previous node\n  data_quality: previousData.data_quality || {},\n  data_completeness: payload.data_completeness || previousData.data_completeness || 0,\n  \n  // Status\n  status: payload.status || previousData.status,\n  fabricated_at: payload.fabricated_at || previousData.fabricated_at\n};\n\n// ============================================================\n// VALIDATION: Ensure dense_view_text is not empty\n// ============================================================\nif (!mergedData.dense_view_text || mergedData.dense_view_text.trim().length === 0) {\n  console.log('⚠️ WARNING: dense_view_text is empty!');\n  console.log('   previousData keys:', Object.keys(previousData));\n  console.log('   payload keys:', Object.keys(payload));\n  \n  // Build fallback dense_view_text from available data\n  const fallbackText = `\nResearcher: ${mergedData.name}\nInstitution: ${mergedData.institution}\nCareer Stage: ${mergedData.career_stage}\nResearch Domains: ${mergedData.research_domains.join(', ')}\nMethodologies: ${mergedData.methodologies.join(', ')}\nResearch Themes: ${mergedData.research_themes.join(', ')}\nH-index: ${mergedData.h_index}\n  `.trim();\n  \n  mergedData.dense_view_text = fallbackText;\n  console.log('   Created fallback dense_view_text');\n}\n\nconsole.log(`✅ Merge Embedding: ${mergedData.name}`);\nconsole.log(`   Embedding dimensions: ${mergedData.embedding_dimensions}`);\nconsole.log(`   dense_view_text length: ${mergedData.dense_view_text.length} chars`);\nconsole.log(`   raw_evidence.publications: ${(mergedData.raw_evidence.publications || []).length}`);\n\nreturn [{\n  json: mergedData\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -115,7 +115,7 @@
         1456,
         0
       ],
-      "id": "d627de2c-aaf9-4caf-9153-59ae1d16355e",
+      "id": "41d6fb3f-8ee7-45e2-ac1d-cbd6b71078d0",
       "name": "Merge Embedding"
     },
     {
@@ -128,7 +128,7 @@
         1776,
         1504
       ],
-      "id": "e9379e84-6e07-4582-873e-704be96be897",
+      "id": "42dfe35b-3348-4632-a75e-24fd41e3cb81",
       "name": "Prepare Fetch FATObjects(Colin)"
     },
     {
@@ -150,7 +150,7 @@
         1616,
         288
       ],
-      "id": "bf97a95f-171f-45ef-8059-4d357a0682c0",
+      "id": "9a1948e3-0da3-454d-82fe-fd93adcf95c4",
       "name": "Pass 2: LLM Enrichment"
     },
     {
@@ -163,12 +163,12 @@
         -1584,
         608
       ],
-      "id": "9516d93a-5487-4fab-8adb-6a4093174aaf",
+      "id": "f581cd0f-59a8-4b77-a0cd-ad92d188a6ae",
       "name": "Parse LLM Response"
     },
     {
       "parameters": {
-        "jsCode": "// Calculate Final Confidence\n// Gen 4: Includes CRE blocking constraint handling\n\nconst inputData = $input.first().json;\n\nconst classifications = inputData.classifications || [];\nconst cf1Penalty = inputData.cf1_assessment?.penalty || 0.0;  // ANZSRC hierarchy penalty\nconst crosswalkModifier = inputData.crosswalk_assessment?.modifier || 0.0;\nconst creAssessment = inputData.cre_assessment || {};\n\n// ============================================================\n// GEN 4: CHECK FOR BLOCKING CONSTRAINT FAILURES\n// ============================================================\nif (creAssessment.blocking_failures?.length > 0) {\n  console.log(`🚫 BLOCKED by CRE constraints: ${creAssessment.blocking_failures.join(', ')}`);\n  \n  return [{\n    json: {\n      ...inputData,\n      final_confidence: 0.0,\n      classification_failed: true,\n      classification_blocked: true,\n      failure_reason: `Blocked by CRE constraints: ${creAssessment.blocking_failures.join(', ')}`,\n      blocking_constraints: creAssessment.blocking_failures\n    }\n  }];\n}\n\n// Check if we have any classifications\nif (classifications.length === 0) {\n  return [{\n    json: {\n      ...inputData,\n      final_confidence: 0.0,\n      classification_failed: true,\n      failure_reason: 'No valid classifications after assessment'\n    }\n  }];\n}\n\n// ============================================================\n// CALCULATE CONFIDENCE WITH ALL MODIFIERS\n// ============================================================\nconst crePenalty = creAssessment.cre_penalty || 0.0;\n\n// Apply ALL penalties/modifiers to each classification\nconst adjustedClassifications = classifications.map(c => {\n  const totalAdjustment = -cf1Penalty + crosswalkModifier - crePenalty;\n  const adjustedConfidence = Math.max(0.0, Math.min(1.0, c.confidence + totalAdjustment));\n  \n  return {\n    ...c,\n    base_confidence: c.confidence,\n    cf1_adjustment: -cf1Penalty,\n    crosswalk_adjustment: crosswalkModifier,\n    cre_adjustment: -crePenalty,\n    adjusted_confidence: Math.round(adjustedConfidence * 10000) / 10000\n  };\n});\n\n// Calculate final confidence (mean of adjusted confidences)\nconst confidences = adjustedClassifications.map(c => c.adjusted_confidence);\nconst finalConfidence = Math.round((confidences.reduce((a, b) => a + b, 0) / confidences.length) * 10000) / 10000;\n\n// Determine routing threshold\nconst FAIL_THRESHOLD = 0.60;\nconst classificationFailed = finalConfidence < FAIL_THRESHOLD;\nconst failureReason = classificationFailed \n  ? `Final confidence ${finalConfidence.toFixed(2)} below threshold ${FAIL_THRESHOLD}`\n  : null;\n\n// Log summary\nconsole.log(`✅ Confidence Calculation:`);\nconsole.log(`   Base mean: ${(classifications.reduce((a, c) => a + c.confidence, 0) / classifications.length).toFixed(3)}`);\nconsole.log(`   ANZSRC hierarchy penalty: ${cf1Penalty > 0 ? '-' : ''}${(cf1Penalty * 100).toFixed(0)}%`);\nconsole.log(`   Crosswalk modifier: ${crosswalkModifier >= 0 ? '+' : ''}${(crosswalkModifier * 100).toFixed(0)}%`);\nconsole.log(`   CRE penalty: ${crePenalty > 0 ? '-' : ''}${(crePenalty * 100).toFixed(0)}%`);\nconsole.log(`   Final confidence: ${finalConfidence.toFixed(3)}`);\n\nreturn [{\n  json: {\n    // Core data\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    qdrant_point_id: inputData.qdrant_point_id,\n    reasoning: inputData.reasoning,\n    model: inputData.model,\n    \n    // Assessment results (pass through)\n    cf1_assessment: inputData.cf1_assessment,\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    cre_assessment: inputData.cre_assessment,  // NEW: CRE results\n    \n    // Standard A classifications with adjustments\n    classifications: adjustedClassifications,\n    classification_count: adjustedClassifications.length,\n    \n    // Standard B classifications (pass through unchanged)\n    standard_b_classifications: inputData.standard_b_classifications,\n    standard_b_count: inputData.standard_b_count,\n    \n    // Final confidence calculation\n    final_confidence: finalConfidence,\n    confidence_breakdown: {\n      base_mean: Math.round((classifications.reduce((a, c) => a + c.confidence, 0) / classifications.length) * 10000) / 10000,\n      cf1_penalty: cf1Penalty,\n      crosswalk_modifier: crosswalkModifier,\n      cre_penalty: crePenalty,  // NEW\n      net_adjustment: Math.round((-cf1Penalty + crosswalkModifier - crePenalty) * 10000) / 10000\n    },\n    \n    // Routing signals\n    classification_failed: classificationFailed,\n    classification_blocked: false,\n    failure_reason: failureReason,\n    \n    // Timestamp\n    classified_at: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// ============================================================\n// Calculate Final Confidence\n// Version: v3.7.0\n// Gen 4 + v3.7: Includes CRE blocking + data quality penalty\n// ============================================================\n\nconst inputData = $input.first().json;\n\nconst classifications = inputData.classifications || [];\nconst cf1Penalty = inputData.cf1_assessment?.penalty || 0.0;\nconst crosswalkModifier = inputData.crosswalk_assessment?.modifier || 0.0;\nconst creAssessment = inputData.cre_assessment || {};\n\n// ============================================================\n// v3.7: DATA QUALITY PENALTY\n// Per Definition Card v3.7 Section 3:\n// \"If dense_view lacks required fields, OBJECT-3 SHOULD:\n//  1. Emit data_quality_warning signal with missing field list\n//  2. Apply -10% confidence penalty to final score\n//  3. Flag classification for human review regardless of confidence\"\n// ============================================================\nconst dataQuality = inputData.data_quality || {};\nconst dataQualityPenalty = dataQuality.confidence_penalty || 0;\nconst forceHumanReview = dataQuality.has_issue || false;\n\nif (dataQuality.has_issue) {\n  console.log(`⚠️ DATA QUALITY WARNING (v3.7):`);\n  console.log(`   Missing fields: ${(dataQuality.missing_fields || []).join(', ')}`);\n  console.log(`   Applying -${(dataQualityPenalty * 100).toFixed(0)}% confidence penalty`);\n  console.log(`   Flagging for human review: YES`);\n}\n\n// ============================================================\n// GEN 4: CHECK FOR BLOCKING CONSTRAINT FAILURES\n// ============================================================\nif (creAssessment.blocking_failures?.length > 0) {\n  console.log(`🚫 BLOCKED by CRE constraints: ${creAssessment.blocking_failures.join(', ')}`);\n  \n  return [{\n    json: {\n      // Core data\n      asset_id: inputData.asset_id,\n      name: inputData.name,\n      qdrant_point_id: inputData.qdrant_point_id,\n      reasoning: inputData.reasoning,\n      model: inputData.model,\n      \n      // Assessment results\n      cf1_assessment: inputData.cf1_assessment,\n      crosswalk_assessment: inputData.crosswalk_assessment,\n      cre_assessment: inputData.cre_assessment,\n      data_quality: inputData.data_quality,\n      \n      // Classifications (empty due to blocking)\n      classifications: [],\n      classification_count: 0,\n      standard_b_classifications: inputData.standard_b_classifications,\n      standard_b_count: inputData.standard_b_count,\n      \n      // Failure state\n      final_confidence: 0.0,\n      classification_failed: true,\n      classification_blocked: true,\n      force_human_review: true,\n      failure_reason: `Blocked by CRE constraints: ${creAssessment.blocking_failures.join(', ')}`,\n      blocking_constraints: creAssessment.blocking_failures,\n      \n      // Timestamp\n      classified_at: new Date().toISOString()\n    }\n  }];\n}\n\n// ============================================================\n// CHECK FOR EMPTY CLASSIFICATIONS\n// ============================================================\nif (classifications.length === 0) {\n  console.log(`❌ No valid classifications after assessment`);\n  \n  return [{\n    json: {\n      // Core data\n      asset_id: inputData.asset_id,\n      name: inputData.name,\n      qdrant_point_id: inputData.qdrant_point_id,\n      reasoning: inputData.reasoning,\n      model: inputData.model,\n      \n      // Assessment results\n      cf1_assessment: inputData.cf1_assessment,\n      crosswalk_assessment: inputData.crosswalk_assessment,\n      cre_assessment: inputData.cre_assessment,\n      data_quality: inputData.data_quality,\n      \n      // Empty classifications\n      classifications: [],\n      classification_count: 0,\n      standard_b_classifications: inputData.standard_b_classifications,\n      standard_b_count: inputData.standard_b_count,\n      \n      // Failure state\n      final_confidence: 0.0,\n      classification_failed: true,\n      classification_blocked: false,\n      force_human_review: true,\n      failure_reason: 'No valid classifications after assessment',\n      \n      // Timestamp\n      classified_at: new Date().toISOString()\n    }\n  }];\n}\n\n// ============================================================\n// CALCULATE CONFIDENCE WITH ALL MODIFIERS\n// Includes: CF1, Crosswalk, CRE, Data Quality (v3.7)\n// ============================================================\nconst crePenalty = creAssessment.cre_penalty || 0.0;\n\n// Apply ALL penalties/modifiers to each classification\nconst adjustedClassifications = classifications.map(c => {\n  // Total adjustment = -cf1 + crosswalk - cre - dataQuality\n  const totalAdjustment = -cf1Penalty + crosswalkModifier - crePenalty - dataQualityPenalty;\n  const adjustedConfidence = Math.max(0.0, Math.min(1.0, c.confidence + totalAdjustment));\n  \n  return {\n    ...c,\n    base_confidence: c.confidence,\n    adjustments: {\n      cf1: -cf1Penalty,\n      crosswalk: crosswalkModifier,\n      cre: -crePenalty,\n      data_quality: -dataQualityPenalty,\n      total: Math.round(totalAdjustment * 10000) / 10000\n    },\n    adjusted_confidence: Math.round(adjustedConfidence * 10000) / 10000\n  };\n});\n\n// Calculate final confidence (mean of adjusted confidences)\nconst confidences = adjustedClassifications.map(c => c.adjusted_confidence);\nconst baseMean = classifications.reduce((a, c) => a + c.confidence, 0) / classifications.length;\nconst finalConfidence = Math.round((confidences.reduce((a, b) => a + b, 0) / confidences.length) * 10000) / 10000;\n\n// ============================================================\n// DETERMINE ROUTING SIGNALS\n// Per researcher_instance_spec_v2.2 Section 8:\n// - Auto-Approve: >= 0.85\n// - Human Review: 0.60-0.85\n// - Rejection: < 0.60\n// ============================================================\nconst FAIL_THRESHOLD = 0.60;\nconst AUTO_APPROVE_THRESHOLD = 0.85;\n\nconst classificationFailed = finalConfidence < FAIL_THRESHOLD;\nconst failureReason = classificationFailed \n  ? `Final confidence ${finalConfidence.toFixed(2)} below threshold ${FAIL_THRESHOLD}`\n  : null;\n\n// v3.7: Force human review if data quality issues exist, regardless of confidence\nconst requiresHumanReview = forceHumanReview || (finalConfidence >= FAIL_THRESHOLD && finalConfidence < AUTO_APPROVE_THRESHOLD);\n\n// Determine routing recommendation (for OBJECT-4)\nlet routingRecommendation = 'REJECT';\nif (!classificationFailed) {\n  if (forceHumanReview) {\n    routingRecommendation = 'HUMAN_REVIEW';\n  } else if (finalConfidence >= AUTO_APPROVE_THRESHOLD) {\n    routingRecommendation = 'AUTO_APPROVE';\n  } else {\n    routingRecommendation = 'HUMAN_REVIEW';\n  }\n}\n\n// ============================================================\n// LOG SUMMARY\n// ============================================================\nconsole.log(`\\n============================================================`);\nconsole.log(`✅ CONFIDENCE CALCULATION COMPLETE`);\nconsole.log(`============================================================`);\nconsole.log(`   Researcher: ${inputData.name}`);\nconsole.log(`   Classifications: ${adjustedClassifications.length} codes`);\nconsole.log(`\\n   CONFIDENCE BREAKDOWN:`);\nconsole.log(`   ├─ Base mean:           ${baseMean.toFixed(3)}`);\nconsole.log(`   ├─ CF1 penalty:         ${cf1Penalty > 0 ? '-' : ' '}${(cf1Penalty * 100).toFixed(0)}%`);\nconsole.log(`   ├─ Crosswalk modifier:  ${crosswalkModifier >= 0 ? '+' : ''}${(crosswalkModifier * 100).toFixed(0)}%`);\nconsole.log(`   ├─ CRE penalty:         ${crePenalty > 0 ? '-' : ' '}${(crePenalty * 100).toFixed(0)}%`);\nconsole.log(`   ├─ Data quality penalty:${dataQualityPenalty > 0 ? '-' : ' '}${(dataQualityPenalty * 100).toFixed(0)}%`);\nconsole.log(`   └─ FINAL CONFIDENCE:    ${finalConfidence.toFixed(3)}`);\nconsole.log(`\\n   ROUTING:`);\nconsole.log(`   ├─ Classification failed: ${classificationFailed}`);\nconsole.log(`   ├─ Force human review:    ${forceHumanReview}`);\nconsole.log(`   └─ Recommendation:        ${routingRecommendation}`);\nconsole.log(`============================================================\\n`);\n\n// ============================================================\n// RETURN OUTPUT\n// ============================================================\nreturn [{\n  json: {\n    // Core identifiers\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    orcid: inputData.orcid,\n    institution: inputData.institution,\n    qdrant_point_id: inputData.qdrant_point_id,\n    \n    // LLM metadata\n    reasoning: inputData.reasoning,\n    model: inputData.model,\n    \n    // Assessment results (pass through)\n    cf1_assessment: inputData.cf1_assessment,\n    crosswalk_assessment: inputData.crosswalk_assessment,\n    cre_assessment: inputData.cre_assessment,\n    data_quality: inputData.data_quality,\n    \n    // Hierarchical search metadata (v3.7)\n    retrieval_sources: inputData.retrieval_sources,\n    matched_groups: inputData.matched_groups,\n    \n    // Standard A classifications with adjustments\n    classifications: adjustedClassifications,\n    classification_count: adjustedClassifications.length,\n    \n    // Standard B classifications (pass through unchanged)\n    standard_b_classifications: inputData.standard_b_classifications,\n    standard_b_count: inputData.standard_b_count,\n    \n    // Final confidence calculation\n    final_confidence: finalConfidence,\n    confidence_breakdown: {\n      base_mean: Math.round(baseMean * 10000) / 10000,\n      cf1_penalty: cf1Penalty,\n      crosswalk_modifier: crosswalkModifier,\n      cre_penalty: crePenalty,\n      data_quality_penalty: dataQualityPenalty,\n      net_adjustment: Math.round((-cf1Penalty + crosswalkModifier - crePenalty - dataQualityPenalty) * 10000) / 10000\n    },\n    \n    // Routing signals (for OBJECT-4)\n    classification_failed: classificationFailed,\n    classification_blocked: false,\n    force_human_review: forceHumanReview,\n    requires_human_review: requiresHumanReview,\n    failure_reason: failureReason,\n    routing_recommendation: routingRecommendation,\n    \n    // Thresholds applied (for audit trail)\n    thresholds_applied: {\n      fail_threshold: FAIL_THRESHOLD,\n      auto_approve_threshold: AUTO_APPROVE_THRESHOLD,\n      min_code_confidence: 0.70\n    },\n    \n    // Timestamp\n    classified_at: new Date().toISOString(),\n    workflow_version: 'OBJECT-3_v3.7.0'\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -176,7 +176,7 @@
         944,
         624
       ],
-      "id": "6ea5ccef-8848-49f8-aaba-300eb4f1d87c",
+      "id": "dfa7efdc-1f86-4f5b-8499-bcf77a26fc5e",
       "name": "Calculate Final Confidence"
     },
     {
@@ -189,7 +189,7 @@
         1168,
         624
       ],
-      "id": "2dedebcb-d763-4516-a285-5a452e7196b2",
+      "id": "2b13e08c-b5c4-4d73-a35f-abd9318dbd7d",
       "name": "Prepare Neo4j Write Query"
     },
     {
@@ -218,7 +218,7 @@
         -896,
         896
       ],
-      "id": "6a570b8c-a7d9-4bc4-90a2-a0d69302f5f8",
+      "id": "44a803e3-9185-42ea-8002-f9d5d4798b13",
       "name": "Write to Neo4j",
       "credentials": {
         "httpBasicAuth": {
@@ -255,7 +255,7 @@
         -368,
         896
       ],
-      "id": "87b44d19-6911-4509-ba70-a53109dd44cc",
+      "id": "bad79b10-b397-46d7-b387-8b8b38cb981b",
       "name": "Update Qdrant",
       "credentials": {
         "qdrantRestApi": {
@@ -266,15 +266,15 @@
     },
     {
       "parameters": {
-        "jsCode": "// Final Output - Dual Standard Summary\n// Gen 4: References CRE assessment directly from source node\n\nconst inputData = $('Prepare Qdrant Payload').first().json;\nconst neo4jResult = $('Write to Neo4j').first().json;\nconst qdrantResult = $('Update Qdrant').first().json;\nconst postgresResult = $input.first().json;\n\n// Direct reference to CRE assessment from source node\nconst creAssessment = $('Merge CRE Output').first().json.cre_assessment || null;\n\n// Parse Neo4j response for relationship counts\nconst neo4jValues = neo4jResult?.data?.values?.[0] || [];\nconst standardARelationships = neo4jValues[2] || 0;\nconst standardBRelationships = neo4jValues[3] || 0;\n\n// Get crosswalk status\nconst crosswalkStatus = inputData.crosswalk_assessment?.alignment_status \n  || (inputData.crosswalk_assessment?.alignment_score === null \n      ? \"no_crosswalks\" \n      : inputData.crosswalk_assessment?.alignment_score >= 0.50 \n        ? \"aligned\" \n        : inputData.crosswalk_assessment?.alignment_score >= 0.30\n          ? \"acceptable\"\n          : \"misaligned\");\n\nconst output = {\n  // === Classification Result ===\n  asset_id: inputData.asset_id,\n  name: inputData.name,\n  status: \"classified\",\n  \n  // === Standard A Classifications (ANZSRC) ===\n  standard_a: {\n    taxonomy: \"ANZSRC_FoR_2020\",\n    role: \"primary_classification\",\n    classifications: inputData.classifications.map(c => ({\n      code: c.code,\n      name: c.name,\n      confidence: c.adjusted_confidence || c.confidence,\n      justification: c.justification,\n      evidence: c.evidence || []\n    })),\n    count: inputData.classification_count\n  },\n  \n  // === Standard B Classifications (OECD FOS) ===\n  standard_b: {\n    taxonomy: \"OECD_FOS_2007\",\n    role: \"domain_hub\",\n    classifications: (inputData.standard_b_classifications || []).map(c => ({\n      code: c.code,\n      name: c.name,\n      confidence: c.confidence,\n      justification: c.justification\n    })),\n    count: inputData.standard_b_count || 0\n  },\n  \n  // === Confidence & Assessment ===\n  assessment: {\n    final_confidence: inputData.final_confidence,\n    confidence_breakdown: inputData.confidence_breakdown,\n    \n    // ANZSRC Hierarchy Check\n    anzsrc_hierarchy: {\n      passed: inputData.cf1_assessment?.passed || false,\n      violations: inputData.cf1_assessment?.violations?.length || 0,\n      flags: inputData.cf1_assessment?.flags?.length || 0,\n      penalty: inputData.cf1_assessment?.penalty || 0\n    },\n    \n    // Crosswalk Assessment\n    crosswalk: {\n      alignment_score: inputData.crosswalk_assessment?.alignment_score || null,\n      modifier: inputData.crosswalk_assessment?.modifier || 0,\n      mappings_checked: inputData.crosswalk_assessment?.total_mappings_checked || 0,\n      status: crosswalkStatus\n    },\n    \n    // === GEN 4: CRE ASSESSMENT (Direct Reference) ===\n    cre: creAssessment ? {\n      skipped: creAssessment.skipped || false,\n      cf1_trl: creAssessment.cf1_result || null,\n      cf5_regulatory: creAssessment.cf5_result || null,\n      blocking_failures: creAssessment.blocking_failures || [],\n      penalising_failures: creAssessment.penalising_failures || [],\n      cre_penalty: creAssessment.cre_penalty || 0,\n      requires_hitl: creAssessment.requires_hitl || false\n    } : null\n  },\n  \n  // === Reasoning ===\n  reasoning: inputData.reasoning,\n  \n  // === OBJECT-4 Routing Preview ===\n  routing: {\n    recommendation: inputData.final_confidence >= 0.85 \n      ? \"AUTO_APPROVE\" \n      : inputData.final_confidence >= 0.60 \n        ? \"HUMAN_REVIEW\" \n        : \"REJECT\",\n    confidence_threshold: inputData.final_confidence >= 0.85 \n      ? \">=0.85\" \n      : inputData.final_confidence >= 0.60 \n        ? \"0.60-0.85\" \n        : \"<0.60\",\n    requires_validation: inputData.final_confidence < 0.85,\n    blocked_by_cre: creAssessment?.blocking_failures?.length > 0 || false\n  },\n  \n  // === Storage Confirmation ===\n  storage: {\n    neo4j: {\n      status: \"success\",\n      standard_a_relationships: standardARelationships,\n      standard_b_relationships: standardBRelationships,\n      total_relationships: standardARelationships + standardBRelationships\n    },\n    qdrant: {\n      status: qdrantResult?.status || \"ok\",\n      point_id: inputData.qdrant_point_id\n    },\n    postgresql: {\n      status: postgresResult?.id ? \"success\" : \"ok\",\n      job_id: postgresResult?.job_id || null,\n      record_id: postgresResult?.id || null\n    }\n  },\n  \n  // === Metadata ===\n  metadata: {\n    classified_at: inputData.classified_at,\n    classified_by: \"object3_classifier_v3.6.1\",\n    model: inputData.model || \"openai/gpt-4o\",\n    workflow_version: \"OBJECT-3_v3.6.1_Gen4_CRE\"\n  }\n};\n\n// Log summary\nconsole.log(`✅ Classification Complete: ${output.name}`);\nconsole.log(`   CRE CF1 (TRL): ${creAssessment?.cf1_result?.passed ? 'PASSED' : 'N/A'} (Level ${creAssessment?.cf1_result?.inferred_level || 'N/A'})`);\nconsole.log(`   CRE CF5 (Regulatory): ${creAssessment?.cf5_result?.passed ? 'PASSED' : 'N/A'}`);\nconsole.log(`   Final Confidence: ${output.assessment.final_confidence}`);\nconsole.log(`   Routing: ${output.routing.recommendation}`);\n\nreturn [{\n  json: output\n}];"
+        "jsCode": "// Final Output - Dual Standard Summary + Signal Confirmation\n// Gen 4 + v3.7.2: References CRE assessment and signal emission\n// Version: v3.7.2 - Fixed signal reference\n\n// ============================================================\n// GET DATA FROM UPSTREAM NODES\n// ============================================================\nconst inputData = $('Prepare Qdrant Payload').first().json;\nconst neo4jResult = $('Write to Neo4j').first().json;\nconst qdrantResult = $('Update Qdrant').first().json;\nconst postgresResult = $('Store Crosswalk Metadata').first().json;\n\n// FIXED: Get signal data from Prepare Classification Signals node (not HTTP response)\nconst signalData = $('Prepare Classification Signals').first().json;\nconst signalsEmitted = signalData.signals_emitted || [];\nconst signalCount = signalData.signal_count || 0;\n\n// Direct reference to CRE assessment from source node\nconst creAssessment = $('Merge CRE Output').first().json.cre_assessment || null;\n\n// Parse Neo4j response for relationship counts\nconst neo4jValues = neo4jResult?.data?.values?.[0] || [];\nconst standardARelationships = neo4jValues[2] || 0;\nconst standardBRelationships = neo4jValues[3] || 0;\n\n// Get crosswalk status\nconst crosswalkStatus = inputData.crosswalk_assessment?.alignment_status \n  || (inputData.crosswalk_assessment?.alignment_score === null \n      ? \"no_crosswalks\" \n      : inputData.crosswalk_assessment?.alignment_score >= 0.50 \n        ? \"aligned\" \n        : inputData.crosswalk_assessment?.alignment_score >= 0.30\n          ? \"acceptable\"\n          : \"misaligned\");\n\nconst output = {\n  // === Classification Result ===\n  asset_id: inputData.asset_id,\n  name: inputData.name,\n  status: \"classified\",\n  \n  // === Standard A Classifications (ANZSRC) ===\n  standard_a: {\n    taxonomy: \"ANZSRC_FoR_2020\",\n    role: \"primary_classification\",\n    classifications: inputData.classifications.map(c => ({\n      code: c.code,\n      name: c.name,\n      confidence: c.adjusted_confidence || c.confidence,\n      justification: c.justification,\n      evidence: c.evidence || []\n    })),\n    count: inputData.classification_count\n  },\n  \n  // === Standard B Classifications (OECD FOS) ===\n  standard_b: {\n    taxonomy: \"OECD_FOS_2007\",\n    role: \"domain_hub\",\n    classifications: (inputData.standard_b_classifications || []).map(c => ({\n      code: c.code,\n      name: c.name,\n      confidence: c.confidence,\n      justification: c.justification\n    })),\n    count: inputData.standard_b_count || 0\n  },\n  \n  // === Confidence & Assessment ===\n  assessment: {\n    final_confidence: inputData.final_confidence,\n    confidence_breakdown: inputData.confidence_breakdown,\n    \n    // ANZSRC Hierarchy Check\n    anzsrc_hierarchy: {\n      passed: inputData.cf1_assessment?.passed || false,\n      violations: inputData.cf1_assessment?.violations?.length || 0,\n      flags: inputData.cf1_assessment?.flags?.length || 0,\n      penalty: inputData.cf1_assessment?.penalty || 0\n    },\n    \n    // Crosswalk Assessment\n    crosswalk: {\n      alignment_score: inputData.crosswalk_assessment?.alignment_score || null,\n      modifier: inputData.crosswalk_assessment?.modifier || 0,\n      mappings_checked: inputData.crosswalk_assessment?.total_mappings_checked || 0,\n      status: crosswalkStatus\n    },\n    \n    // === GEN 4: CRE ASSESSMENT (Direct Reference) ===\n    cre: creAssessment ? {\n      skipped: creAssessment.skipped || false,\n      cf1_trl: creAssessment.cf1_result || null,\n      cf5_regulatory: creAssessment.cf5_result || null,\n      blocking_failures: creAssessment.blocking_failures || [],\n      penalising_failures: creAssessment.penalising_failures || [],\n      cre_penalty: creAssessment.cre_penalty || 0,\n      requires_hitl: creAssessment.requires_hitl || false\n    } : null\n  },\n  \n  // === Reasoning ===\n  reasoning: inputData.reasoning,\n  \n  // === OBJECT-4 Routing Preview ===\n  routing: {\n    recommendation: inputData.final_confidence >= 0.85 \n      ? \"AUTO_APPROVE\" \n      : inputData.final_confidence >= 0.60 \n        ? \"HUMAN_REVIEW\" \n        : \"REJECT\",\n    confidence_threshold: inputData.final_confidence >= 0.85 \n      ? \">=0.85\" \n      : inputData.final_confidence >= 0.60 \n        ? \"0.60-0.85\" \n        : \"<0.60\",\n    requires_validation: inputData.final_confidence < 0.85,\n    blocked_by_cre: creAssessment?.blocking_failures?.length > 0 || false\n  },\n  \n  // === Storage Confirmation ===\n  storage: {\n    neo4j: {\n      status: \"success\",\n      standard_a_relationships: standardARelationships,\n      standard_b_relationships: standardBRelationships,\n      total_relationships: standardARelationships + standardBRelationships\n    },\n    qdrant: {\n      status: qdrantResult?.status || \"ok\",\n      point_id: inputData.qdrant_point_id\n    },\n    postgresql: {\n      status: postgresResult?.id ? \"success\" : \"ok\",\n      job_id: postgresResult?.job_id || null,\n      record_id: postgresResult?.id || null\n    }\n  },\n  \n  // === v3.7.2: SIGNALS EMITTED (Fixed reference) ===\n  signals: {\n    count: signalCount,\n    types: signalsEmitted.map(s => s.signal_type),\n    written_to_neo4j: true,\n    details: signalsEmitted.map(s => ({\n      type: s.signal_type,\n      category: s.category,\n      value: s.value\n    }))\n  },\n  \n  // === Metadata ===\n  metadata: {\n    classified_at: inputData.classified_at,\n    classified_by: \"object3_classifier_v3.7.2\",\n    model: inputData.model || \"open-oss-120b\",\n    workflow_version: \"OBJECT-3_v3.7.2_Gen4_Signals\"\n  }\n};\n\n// ============================================================\n// LOG SUMMARY\n// ============================================================\nconsole.log(`\\n============================================================`);\nconsole.log(`✅ CLASSIFICATION COMPLETE: ${output.name}`);\nconsole.log(`============================================================`);\nconsole.log(`   Standard A: ${output.standard_a.count} codes (ANZSRC FoR 2020)`);\nconsole.log(`   Standard B: ${output.standard_b.count} codes (OECD FOS 2007)`);\nconsole.log(`   Final Confidence: ${output.assessment.final_confidence}`);\nconsole.log(`   Routing: ${output.routing.recommendation}`);\nconsole.log(`   ────────────────────────────────────────────────────────`);\nconsole.log(`   CRE CF1 (TRL): ${creAssessment?.cf1_result?.passed ? 'PASSED' : 'N/A'} (Level ${creAssessment?.cf1_result?.inferred_level || 'N/A'})`);\nconsole.log(`   CRE CF5 (Regulatory): ${creAssessment?.cf5_result?.passed ? 'PASSED' : 'N/A'}`);\nconsole.log(`   ────────────────────────────────────────────────────────`);\nconsole.log(`   📡 Signals: ${signalCount} emitted → Neo4j`);\nsignalsEmitted.forEach(s => {\n  const icon = s.category === 'SystemSignal' ? '⚠️' : '✅';\n  console.log(`      ${icon} ${s.signal_type}`);\n});\nconsole.log(`============================================================\\n`);\n\nreturn [{\n  json: output\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        352,
+        768,
         896
       ],
-      "id": "ff45ba82-16e0-4597-ada4-33a1eaab9862",
+      "id": "1edbeb93-d1c5-40e5-815b-989e340a7835",
       "name": "Final Output"
     },
     {
@@ -287,7 +287,7 @@
         -640,
         896
       ],
-      "id": "97b11ec1-07cd-40ab-a8b4-e92f674b5b1d",
+      "id": "a8415e22-0c99-4aaa-9f30-a33bae793664",
       "name": "Prepare Qdrant Payload"
     },
     {
@@ -300,7 +300,7 @@
         -1024,
         0
       ],
-      "id": "6e3de52f-2281-47bf-9c34-9de018af6e66",
+      "id": "3c49229b-8d43-4f99-ba9c-da64e7ca176c",
       "name": "Prepare Fetch FATObjects"
     },
     {
@@ -329,7 +329,7 @@
         2032,
         1504
       ],
-      "id": "13f15254-1e5b-4003-a38a-765584e35fb1",
+      "id": "baa995e2-661c-4d6e-8201-6f349e04a39d",
       "name": "Update Qdrant1",
       "credentials": {
         "qdrantRestApi": {
@@ -364,7 +364,7 @@
         1984,
         1264
       ],
-      "id": "74ff8d03-0da3-4ef4-b134-1c61de111f36",
+      "id": "a0652152-4aa1-4f19-9195-fbe070f0ac1e",
       "name": "Update Qdrant2",
       "credentials": {
         "qdrantRestApi": {
@@ -399,7 +399,7 @@
         816,
         0
       ],
-      "id": "383ec761-9c3d-470a-b5e2-248a2230caf8",
+      "id": "bd5dac40-1f21-4ac5-8969-20f9ce0416a7",
       "name": "Execute Status Update to Classifying",
       "credentials": {
         "httpBasicAuth": {
@@ -418,7 +418,7 @@
         1024,
         0
       ],
-      "id": "f73fe5a1-0d61-4867-8b5e-7c37c91c2996",
+      "id": "afbe56dd-55f7-4a69-8c95-ee149d6eac50",
       "name": "Parse Status Update Response"
     },
     {
@@ -431,7 +431,7 @@
         560,
         0
       ],
-      "id": "36b164a4-8703-4b95-ac60-311e0139fcc4",
+      "id": "e4b1bc9a-bf20-4249-8c2a-29aea7983930",
       "name": "Prepare Status Update to Classifying"
     },
     {
@@ -444,7 +444,7 @@
         -688,
         624
       ],
-      "id": "e79e725f-9b1f-477b-aa33-5c53b00b48c5",
+      "id": "c182f6a4-c94e-47a5-ac43-127f312bcbcf",
       "name": "Prepare Crosswalk Assessment Query"
     },
     {
@@ -473,7 +473,7 @@
         -464,
         624
       ],
-      "id": "9328ed33-59fc-4a6b-b464-48fe0562838e",
+      "id": "7a99cd02-89b0-48fa-9197-89790b505d14",
       "name": "Execute Crosswalk Assessment",
       "credentials": {
         "httpBasicAuth": {
@@ -492,7 +492,7 @@
         -224,
         624
       ],
-      "id": "7900ea93-338d-4c65-a03c-06cba686048e",
+      "id": "aee59240-cfe1-4fe9-90fa-4848f5700bdb",
       "name": "Calculate Crosswalk Alignment"
     },
     {
@@ -505,7 +505,7 @@
         -176,
         896
       ],
-      "id": "f53baef1-860d-4a70-852b-2a3dc7b34f1b",
+      "id": "ecb3db4e-5c5a-4786-b832-7f38c945c0e7",
       "name": "Prepare PostgreSQL Classification Log"
     },
     {
@@ -540,7 +540,7 @@
         80,
         896
       ],
-      "id": "5eecff3e-6c28-42fc-87c4-56b4b9576ace",
+      "id": "6e059952-b2fb-423c-9f08-ec903fbfe4a4",
       "name": "Store Crosswalk Metadata",
       "credentials": {
         "qdrantRestApi": {
@@ -579,7 +579,7 @@
         1760,
         1280
       ],
-      "id": "a383b616-e85e-45f7-a2c1-889543e341b6",
+      "id": "12d5c60c-ea7b-4b1e-88b9-ba942008c4fd",
       "name": "Execute CRE Constraint Query",
       "credentials": {
         "httpBasicAuth": {
@@ -598,7 +598,7 @@
         752,
         624
       ],
-      "id": "801c0eb5-2828-4b83-b9af-426dc2e67d8a",
+      "id": "1212d874-8f04-411f-b571-3d32faf64800",
       "name": "ANZSRC Hierarchy Check"
     },
     {
@@ -629,7 +629,7 @@
         624
       ],
       "name": "SYSTEM-2_CRE_Assessment",
-      "id": "4e8e56a7-1216-4220-a466-397679f2ab36"
+      "id": "5d82582e-c98d-4d39-9c05-43059b4c707e"
     },
     {
       "parameters": {
@@ -641,7 +641,7 @@
         544,
         624
       ],
-      "id": "8c5bb951-b4f3-450f-850b-cee70ebc385a",
+      "id": "0a937ddf-e81e-4466-adc3-914dadc59dbe",
       "name": "Merge CRE Output"
     },
     {
@@ -654,7 +654,7 @@
         64,
         624
       ],
-      "id": "ab0beebd-6276-4819-a5f2-6fbd0b864209",
+      "id": "4fcb3416-9ad5-43a4-94b8-95d0f3a6af05",
       "name": "Prepare CRE Input"
     },
     {
@@ -668,7 +668,7 @@
         1616,
         512
       ],
-      "id": "c7ad53cc-8b36-490d-88f1-5b09e748d645",
+      "id": "fe7fbc79-3674-4e94-bc6c-1f3466153f94",
       "name": "OpenRouter Chat Model",
       "credentials": {
         "openRouterApi": {
@@ -687,7 +687,7 @@
         624,
         288
       ],
-      "id": "f6e76165-575c-4a83-9147-2fc378fc5e36",
+      "id": "da5e6e9f-5d07-406a-bea8-b00075c37434",
       "name": "Prepare FOS Vector Search"
     },
     {
@@ -700,7 +700,7 @@
         1152,
         288
       ],
-      "id": "dc0fb41d-d592-41e5-aac2-1969af724deb",
+      "id": "3bc9f5b1-fd2e-4fc6-9e34-3c9e14dc0922",
       "name": "Parse FOS Candidates"
     },
     {
@@ -729,7 +729,7 @@
           }
         }
       },
-      "id": "984c620b-c017-4c58-98d8-3d8d51c4ab86",
+      "id": "2342ffa8-e6bd-4bf9-bfc3-e6612f66f247",
       "name": "Vector Search FOS (Qdrant)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
@@ -750,7 +750,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Prepare Dual-Standard LLM Prompt\n// Requests classification against BOTH ANZSRC (Standard A) AND OECD FOS (Standard B)\n\nconst inputData = $input.first().json;\n\n// Get ANZSRC field candidates (Standard A) - Top 25 from reranking\nconst anzsrcCandidates = inputData.field_candidates || [];\n\n// Get FOS candidates (Standard B)\nconst fosCandidates = inputData.fos_candidates || [];\n\n// ============================================================\n// BUILD ANZSRC CANDIDATE LIST (Standard A)\n// ============================================================\nconst anzsrcList = anzsrcCandidates.map(f => {\n  return `${f.code} - ${f.name}`;\n}).join('\\n');\n\n// ============================================================\n// BUILD FOS CANDIDATE LIST (Standard B)\n// ============================================================\nconst fosList = fosCandidates.map(f => {\n  return `${f.code} - ${f.name}`;\n}).join('\\n');\n\n// ============================================================\n// DETERMINE CODE COUNT BASED ON CAREER STAGE\n// ============================================================\nconst denseView = inputData.dense_view_text || '';\nconst careerStage = inputData.career_stage || 'mid-career';\n\nlet anzsrcCodeGuidance = '5-7';\nlet fosCodeGuidance = '2-4';\n\nif (careerStage === 'early-career' || denseView.toLowerCase().includes('early') || denseView.toLowerCase().includes('emerging')) {\n  anzsrcCodeGuidance = '3-5';\n  fosCodeGuidance = '2-3';\n} else if (careerStage === 'senior' || denseView.toLowerCase().includes('established') || denseView.toLowerCase().includes('leading')) {\n  anzsrcCodeGuidance = '7-10';\n  fosCodeGuidance = '3-5';\n}\n\n// ============================================================\n// BUILD DUAL-STANDARD LLM PROMPT\n// ============================================================\nconst userPrompt = `RESEARCHER PROFILE:\n${inputData.dense_view_text}\n\n============================================================\nDUAL-STANDARD CLASSIFICATION TASK\n============================================================\n\nYou must classify this researcher against TWO taxonomies independently.\n\n------------------------------------------------------------\nSTANDARD A: ANZSRC Field of Research 2020 (Primary Classification)\n------------------------------------------------------------\nAssign ${anzsrcCodeGuidance} codes from the candidates below.\nThese are specific 6-digit codes representing detailed research fields.\n\nCANDIDATE CODES:\n${anzsrcList}\n\n------------------------------------------------------------\nSTANDARD B: OECD Fields of Science 2007 (Domain Context)\n------------------------------------------------------------\nAssign ${fosCodeGuidance} codes from the candidates below.\nThese are broader international domain classifications.\n\nCANDIDATE CODES:\n${fosList}\n\n------------------------------------------------------------\nRESPONSE FORMAT (JSON only)\n------------------------------------------------------------\n{\n  \"standard_a\": {\n    \"taxonomy\": \"ANZSRC_FoR_2020\",\n    \"classifications\": [\n      {\n        \"code\": \"401801\",\n        \"name\": \"Bio-fabrication\",\n        \"confidence\": 0.92,\n        \"justification\": \"Evidence-based reasoning referencing specific publications, grants, or expertise\",\n        \"evidence\": [\"keyword1\", \"keyword2\"]\n      }\n    ]\n  },\n  \"standard_b\": {\n    \"taxonomy\": \"OECD_FOS_2007\",\n    \"classifications\": [\n      {\n        \"code\": \"2.10\",\n        \"name\": \"Nano-technology\",\n        \"confidence\": 0.88,\n        \"justification\": \"Broader domain alignment reasoning\"\n      }\n    ]\n  },\n  \"reasoning\": \"Overall classification rationale explaining how Standard A and Standard B classifications relate\"\n}\n\n------------------------------------------------------------\nCRITICAL RULES\n------------------------------------------------------------\n1. Respond ONLY with valid JSON - no markdown, no code blocks, no extra text\n2. Only assign codes with confidence >= 0.70\n3. Standard A codes must be from the ANZSRC candidates listed above\n4. Standard B codes must be from the OECD FOS candidates listed above\n5. Classify BOTH standards independently based on the researcher profile\n6. Standard B should provide broader international context that aligns with Standard A\n7. Include specific evidence from the profile for each classification`;\n\nreturn [{\n  json: {\n    // Pass through researcher data\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    orcid: inputData.orcid,\n    institution: inputData.institution,\n    qdrant_point_id: inputData.qdrant_point_id,\n    dense_view_text: inputData.dense_view_text,\n    research_domains: inputData.research_domains,\n    methodologies: inputData.methodologies,\n    research_themes: inputData.research_themes,\n    h_index: inputData.h_index,\n    career_stage: inputData.career_stage,\n    \n    // Candidates for reference\n    field_candidates: anzsrcCandidates,\n    field_candidate_count: anzsrcCandidates.length,\n    fos_candidates: fosCandidates,\n    fos_candidate_count: fosCandidates.length,\n    reranking: inputData.reranking,\n    \n    // LLM prompt\n    user_prompt: userPrompt,\n    \n    // Guidance used (for tracking)\n    classification_guidance: {\n      career_stage: careerStage,\n      anzsrc_code_range: anzsrcCodeGuidance,\n      fos_code_range: fosCodeGuidance\n    }\n  }\n}];"
+        "jsCode": "// ============================================================\n// Prepare Dual-Standard LLM Prompt\n// Version: v3.7.0\n// Aligned with: researcher_instance_spec_v2.2, OBJECT-3_Definition_Card_v3.7\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// Get ANZSRC field candidates (Standard A) - Top 25 from reranking\nconst anzsrcCandidates = inputData.field_candidates || [];\n\n// Get FOS candidates (Standard B)\nconst fosCandidates = inputData.fos_candidates || [];\n\n// ============================================================\n// EXTRACT RAW EVIDENCE (v3.7 requirement)\n// ============================================================\nconst rawEvidence = inputData.raw_evidence || {};\nconst enrichedContext = inputData.enriched_context || {};\n\nconst publications = rawEvidence.publications || [];\nconst grants = rawEvidence.grants || [];\nconst biography = rawEvidence.biography || '';\nconst researchInterests = rawEvidence.research_interests || [];\n\n// ============================================================\n// FORMAT PUBLICATIONS FOR PROMPT (Top 15)\n// ============================================================\nconst pubList = publications.slice(0, 15).map((p, i) => {\n  const title = p.title || 'Untitled';\n  const year = p.year ? ` (${p.year})` : '';\n  const abstract = p.abstract ? `\\n     Abstract: ${p.abstract.slice(0, 200)}...` : '';\n  const keywords = (p.keywords || []).slice(0, 5).join(', ');\n  return `  ${i+1}. ${title}${year}${abstract}${keywords ? `\\n     Keywords: ${keywords}` : ''}`;\n}).join('\\n');\n\n// ============================================================\n// FORMAT GRANTS FOR PROMPT\n// ============================================================\nconst grantList = grants.slice(0, 10).map((g, i) => {\n  const title = g.title || 'Untitled Grant';\n  const funder = g.funder ? ` (${g.funder})` : '';\n  const amount = g.amount ? ` - $${Number(g.amount).toLocaleString()}` : '';\n  const dates = g.dates ? ` [${g.dates}]` : '';\n  return `  ${i+1}. ${title}${funder}${amount}${dates}`;\n}).join('\\n');\n\n// ============================================================\n// BUILD ANZSRC CANDIDATE LIST (Standard A)\n// ============================================================\nconst anzsrcList = anzsrcCandidates.map(f => {\n  return `  ${f.code} - ${f.name}`;\n}).join('\\n');\n\n// ============================================================\n// BUILD FOS CANDIDATE LIST (Standard B)\n// ============================================================\nconst fosList = fosCandidates.map(f => {\n  return `  ${f.code} - ${f.name}`;\n}).join('\\n');\n\n// ============================================================\n// DETERMINE CODE COUNT BASED ON CAREER STAGE\n// Per researcher_instance_spec_v2.2 Section 4.3\n// ============================================================\nconst careerStage = inputData.career_stage || enrichedContext.career_stage || 'mid-career';\n\nlet anzsrcCodeGuidance = '5-7';\nlet fosCodeGuidance = '2-4';\nlet careerStageDescription = 'mid-career researcher with multi-domain expertise';\n\nif (careerStage === 'early-career' || careerStage.includes('early')) {\n  anzsrcCodeGuidance = '3-5';\n  fosCodeGuidance = '2-3';\n  careerStageDescription = 'early-career researcher with focused expertise';\n} else if (careerStage === 'senior' || careerStage.includes('senior') || careerStage === 'emeritus') {\n  anzsrcCodeGuidance = '7-10';\n  fosCodeGuidance = '3-5';\n  careerStageDescription = 'senior/established researcher with highly interdisciplinary portfolio';\n}\n\n// ============================================================\n// BUILD CLASSIFICATION PROMPT (v3.7 / instance_spec v2.2)\n// ============================================================\nconst userPrompt = `You are a research classification specialist. Your task is to classify a researcher's profile against the Australian and New Zealand Standard Research Classification (ANZSRC) Field of Research (FoR) codes.\n\n============================================================\nRESEARCHER PROFILE\n============================================================\n\nName: ${inputData.name || 'Unknown'}\nInstitution: ${inputData.institution || 'Unknown'}\nORCID: ${inputData.orcid || 'Not available'}\n\n------------------------------------------------------------\nRAW EVIDENCE (from source data - use this for justifications)\n------------------------------------------------------------\n\nBIOGRAPHY:\n${biography || 'Not available'}\n\nRESEARCH INTERESTS:\n${researchInterests.length > 0 ? researchInterests.join(', ') : 'Not specified'}\n\nPUBLICATIONS (${publications.length} total, showing top ${Math.min(publications.length, 15)}):\n${pubList || '  No publications available'}\n\nGRANTS (${grants.length} total):\n${grantList || '  No grants available'}\n\n------------------------------------------------------------\nENRICHED CONTEXT (from LLM analysis)\n------------------------------------------------------------\n\nResearch Domains: ${(enrichedContext.research_domains || inputData.research_domains || []).join(', ') || 'Not extracted'}\n\nCore Methodologies: ${(enrichedContext.methodologies || inputData.methodologies || []).join(', ') || 'Not extracted'}\n\nResearch Themes: ${(enrichedContext.themes || inputData.research_themes || []).join(', ') || 'Not extracted'}\n\nKeywords: ${(enrichedContext.keywords || []).join(', ') || 'Not extracted'}\n\n------------------------------------------------------------\nMETRICS\n------------------------------------------------------------\n\nH-index: ${inputData.h_index || 0}\nCareer Stage: ${careerStage} (${careerStageDescription})\n\n============================================================\nDUAL-STANDARD CLASSIFICATION TASK\n============================================================\n\nYou must classify this researcher against TWO taxonomies independently.\n\n------------------------------------------------------------\nSTANDARD A: ANZSRC Field of Research 2020 (Primary Classification)\n------------------------------------------------------------\n\nAssign ${anzsrcCodeGuidance} codes from the candidates below.\nThese are specific 6-digit codes representing detailed research fields.\n\nCANDIDATE CODES (from hierarchical retrieval):\n${anzsrcList || '  No candidates available'}\n\n------------------------------------------------------------\nSTANDARD B: OECD Fields of Science 2007 (Domain Context)\n------------------------------------------------------------\n\nAssign ${fosCodeGuidance} codes from the candidates below.\nThese are broader international domain classifications.\n\nCANDIDATE CODES:\n${fosList || '  No candidates available'}\n\n------------------------------------------------------------\nCLASSIFICATION RULES\n------------------------------------------------------------\n\n1. ADAPTIVE CODE COUNT based on career stage:\n   - Early-career / narrowly focused: 3-5 codes\n   - Mid-career / multi-domain: 5-7 codes\n   - Senior / highly interdisciplinary: 7-10 codes\n   \n   This researcher appears to be ${careerStage}, so assign ${anzsrcCodeGuidance} ANZSRC codes.\n\n2. EVIDENCE REQUIREMENT:\n   - Every code MUST cite SPECIFIC evidence from the profile\n   - Reference actual publication titles, grant names, or biography text\n   - Do NOT assign codes based on vague similarity\n\n3. CONFIDENCE THRESHOLD:\n   - Only assign codes where confidence >= 0.70\n   - Rank codes by relevance (primary expertise first)\n\n4. HIERARCHICAL CONSTRAINTS:\n   - Don't assign both parent and child codes (e.g., not both 31 and 3106)\n   - Prefer most specific (6-digit) codes over broad codes\n   - Avoid redundant classifications (highly overlapping sibling codes)\n\n------------------------------------------------------------\nRESPONSE FORMAT (JSON only)\n------------------------------------------------------------\n{\n  \"standard_a\": {\n    \"taxonomy\": \"ANZSRC_FoR_2020\",\n    \"classifications\": [\n      {\n        \"code\": \"310601\",\n        \"name\": \"Biocatalysis and enzyme technology\",\n        \"confidence\": 0.92,\n        \"justification\": \"12 publications on lipase engineering including 'Title of specific paper'; ARC grant 'Enzyme optimisation for industrial bioprocessing'\",\n        \"evidence\": [\"Lipase immobilisation research\", \"ARC DP210101234\"]\n      }\n    ]\n  },\n  \"standard_b\": {\n    \"taxonomy\": \"OECD_FOS_2007\",\n    \"classifications\": [\n      {\n        \"code\": \"1.6\",\n        \"name\": \"Biological Sciences\",\n        \"confidence\": 0.88,\n        \"justification\": \"Broader domain alignment with biotechnology focus evident across publication portfolio\"\n      }\n    ]\n  },\n  \"career_stage_assessed\": \"${careerStage}\",\n  \"classification_depth_rationale\": \"Explanation of why N codes were assigned based on career breadth\",\n  \"reasoning\": \"Overall summary of how Standard A and Standard B classifications collectively represent the researcher's expertise\"\n}\n\n------------------------------------------------------------\nCRITICAL RULES\n------------------------------------------------------------\n1. Respond ONLY with valid JSON - no markdown, no code blocks, no extra text\n2. Standard A codes MUST be from the ANZSRC candidates listed above\n3. Standard B codes MUST be from the OECD FOS candidates listed above\n4. Every justification must reference SPECIFIC evidence (publication titles, grant names)\n5. Do NOT under-classify senior researchers - a 30-year career spanning multiple domains should have 7-10 codes\n6. Do NOT over-classify early-career researchers - limited evidence should result in 3-5 focused codes`;\n\n// ============================================================\n// RETURN OUTPUT\n// ============================================================\nreturn [{\n  json: {\n    // Pass through researcher data\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    orcid: inputData.orcid,\n    institution: inputData.institution,\n    qdrant_point_id: inputData.qdrant_point_id,\n    \n    // Dense view for downstream nodes\n    dense_view_text: inputData.dense_view_text,\n    \n    // Raw evidence (pass through for audit)\n    raw_evidence: inputData.raw_evidence,\n    enriched_context: inputData.enriched_context,\n    \n    // Research profile\n    research_domains: inputData.research_domains,\n    methodologies: inputData.methodologies,\n    research_themes: inputData.research_themes,\n    h_index: inputData.h_index,\n    career_stage: careerStage,\n    \n    // Data quality (pass through)\n    data_quality: inputData.data_quality,\n    \n    // Candidates for reference\n    field_candidates: anzsrcCandidates,\n    field_candidate_count: anzsrcCandidates.length,\n    fos_candidates: fosCandidates,\n    fos_candidate_count: fosCandidates.length,\n    \n    // Hierarchical search metadata\n    matched_groups: inputData.matched_groups,\n    retrieval_sources: inputData.retrieval_sources,\n    reranking: inputData.reranking,\n    \n    // LLM prompt\n    user_prompt: userPrompt,\n    \n    // Guidance used (for tracking/audit)\n    classification_guidance: {\n      career_stage: careerStage,\n      career_stage_description: careerStageDescription,\n      anzsrc_code_range: anzsrcCodeGuidance,\n      fos_code_range: fosCodeGuidance\n    },\n    \n    // Retry tracking\n    llm_retry_count: inputData.llm_retry_count || 0\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -758,7 +758,7 @@
         1424,
         288
       ],
-      "id": "0343e715-575c-4023-befe-8dc133cc770b",
+      "id": "2db3824b-9bb0-4ad2-845e-7f3b92cf0153",
       "name": "Prepare Dual-Standard LLM Prompt"
     },
     {
@@ -768,10 +768,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -832,
-        288
+        -1664,
+        -144
       ],
-      "id": "88a19102-98d7-422c-959d-3e23dbb65571",
+      "id": "876cee0c-ac77-4e3c-b7ff-f50aa164d030",
       "name": "Prepare Vector Search FIELDS"
     },
     {
@@ -794,7 +794,7 @@
         "jsonBody": "={{ JSON.stringify($json.cohere_request_body) }}",
         "options": {}
       },
-      "id": "821c72df-bfd1-4fa0-8d95-685194f0a340",
+      "id": "54336a36-ce47-4c68-9770-4de82be9c753",
       "name": "Cohere Rerank",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
@@ -827,12 +827,12 @@
         -80,
         288
       ],
-      "id": "993c3186-be4f-4737-b972-2929957c3093",
+      "id": "7842436c-8a4d-4258-8fc2-0fbb12c1276c",
       "name": "Prepare Cohere Request"
     },
     {
       "parameters": {
-        "jsCode": "// Parse Cohere Rerank Results\nconst cohereResponse = $input.first().json;\nconst originalData = $('Parse Vector Search Results1').first().json;\n\nconst fieldCandidates = originalData.field_candidates;\nconst rerankedResults = cohereResponse.results || [];\n\n// Map reranked indices back to original candidates\nconst rerankedCandidates = rerankedResults.map(result => ({\n  ...fieldCandidates[result.index],\n  rerank_score: result.relevance_score\n}));\n\nreturn [{\n  json: {\n    ...originalData,\n    field_candidates: rerankedCandidates,\n    field_candidate_count: rerankedCandidates.length,\n    reranking: {\n      applied: true,\n      model: 'rerank-v3.5',\n      original_count: fieldCandidates.length,\n      reranked_count: rerankedCandidates.length\n    }\n  }\n}];"
+        "jsCode": "// Parse Cohere Rerank Results\nconst cohereResponse = $input.first().json;\nconst originalData = $('Parse Vector Search Results').first().json;\n\nconst fieldCandidates = originalData.field_candidates;\nconst rerankedResults = cohereResponse.results || [];\n\n// Map reranked indices back to original candidates\nconst rerankedCandidates = rerankedResults.map(result => ({\n  ...fieldCandidates[result.index],\n  rerank_score: result.relevance_score\n}));\n\nreturn [{\n  json: {\n    ...originalData,\n    field_candidates: rerankedCandidates,\n    field_candidate_count: rerankedCandidates.length,\n    reranking: {\n      applied: true,\n      model: 'rerank-v3.5',\n      original_count: fieldCandidates.length,\n      reranked_count: rerankedCandidates.length\n    }\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -840,13 +840,13 @@
         416,
         288
       ],
-      "id": "3ca68185-3e59-4d60-adc5-d8118b865d95",
+      "id": "5148d1fd-540f-47d7-888f-1bccedfbb97c",
       "name": "Parse Cohere Rerank Results"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc_for_2020/points/query",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc1_for_2020/points/query",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "qdrantRestApi",
         "sendHeaders": true,
@@ -860,10 +860,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.qdrant_request_body) }}",
+        "jsonBody": "={{ JSON.stringify($json.qdrant_field_request) }}",
         "options": {}
       },
-      "id": "51e6a469-afdf-4aa1-be78-a04a001ba137",
+      "id": "8d7b0017-0a6f-4b56-81ab-c82985c1007a",
       "name": "Vector Search FIELDS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
@@ -884,19 +884,6 @@
     },
     {
       "parameters": {
-        "jsCode": "// Node: Parse Vector Search Results1 (FIXED)\n// Input: Qdrant vector search response (DIRECT FIELD SEARCH)\n// Output: Structured field candidates WITH embedding_text for LLM classification\n// FIX: Added embedding_text extraction from Qdrant payload\n\nconst qdrantResponse = $input.first().json;\nconst originalData = $('Prepare Vector Search FIELDS').first().json;\n\n// Handle response structure\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  throw new Error(`No candidate standards found for asset_id: ${originalData.asset_id}`);\n}\n\n// Extract FIELD candidates with scores AND embedding_text\nconst fieldCandidates = points.map(point => ({\n  code: point.payload.code,\n  name: point.payload.name,\n  level: point.payload.level,\n  division_code: point.payload.division_code || String(point.payload.code).substring(0, 2),\n  group_code: point.payload.group_code,\n  embedding_text: point.payload.embedding_text || null,  // ← FIX: Extract embedding_text\n  score: point.score\n}));\n\n// Get unique field codes\nconst fieldCodes = [...new Set(fieldCandidates.map(c => c.code))];\n\n// Log candidate pool size for tracking\nconsole.log(`Direct field search returned ${points.length} field candidates`);\nconsole.log(`Fields with embedding_text: ${fieldCandidates.filter(f => f.embedding_text).length}`);\n\nreturn [{\n  json: {\n    // Pass through researcher data\n    asset_id: originalData.asset_id,\n    name: originalData.name,\n    orcid: originalData.orcid,\n    institution: originalData.institution,\n    qdrant_point_id: originalData.qdrant_point_id,\n    research_domains: originalData.research_domains,\n    methodologies: originalData.methodologies,\n    research_themes: originalData.research_themes,\n    h_index: originalData.h_index,\n    career_stage: originalData.career_stage,\n    dense_view_text: $('Parse Neo4j Response').first().json.dense_view_text,\n    \n    // Pass through embedding for FOS search later\n    embedding_vector: originalData.embedding_vector,\n    \n    // FIELD candidate data (now includes embedding_text)\n    field_candidates: fieldCandidates,\n    field_codes: fieldCodes,\n    vector_candidate_count: points.length\n  }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -352,
-        288
-      ],
-      "id": "977dd199-bc9d-47a6-a8da-c590bbaa5ba6",
-      "name": "Parse Vector Search Results1"
-    },
-    {
-      "parameters": {
         "options": {}
       },
       "type": "n8n-nodes-base.splitInBatches",
@@ -905,7 +892,7 @@
         -320,
         -384
       ],
-      "id": "46ab1843-9191-44dd-9167-a70fcbffcb0d",
+      "id": "55b7dafe-2e49-4131-a301-06db6ea0c9d6",
       "name": "Loop Over Items"
     },
     {
@@ -914,14 +901,14 @@
       "name": "Replace Me",
       "typeVersion": 1,
       "position": [
-        1808,
-        64
+        1872,
+        1152
       ],
-      "id": "7c77930d-99a7-4018-9a07-0b689a9b58e0"
+      "id": "b24054d0-4320-4837-8fc1-5f926b73d175"
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// Node: Check Data Quality\n// Purpose: Route sparse-data researchers to HITL before classification\n// Insert: After SplitInBatches, before Prepare Status Update to Classifying\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// Extract data quality indicators from parsed Neo4j response\nconst denseViewParsed = inputData.dense_view_parsed || {};\nconst denseViewText = inputData.dense_view_text || '';\n\n// Check research content availability\nconst researchDomains = denseViewParsed.research_domains || [];\nconst researchThemes = denseViewParsed.research_themes || [];\nconst publicationCount = denseViewParsed.publication_count || 0;\nconst patentCount = denseViewParsed.patent_count || 0;\n\n// Calculate data sufficiency\nconst hasResearchDomains = researchDomains.length > 0;\nconst hasResearchThemes = researchThemes.length > 0;\nconst hasPublications = publicationCount > 0;\nconst hasPatents = patentCount > 0;\nconst hasDenseViewContent = denseViewText.trim().length > 150;\n\n// Require at least ONE substantive research indicator\nconst hasSufficientData = hasResearchDomains || hasResearchThemes || hasPublications || hasPatents;\n\n// Build data quality report\nconst dataQuality = {\n  research_domains_count: researchDomains.length,\n  research_themes_count: researchThemes.length,\n  publication_count: publicationCount,\n  patent_count: patentCount,\n  dense_view_length: denseViewText.length,\n  sufficient: hasSufficientData\n};\n\nif (!hasSufficientData) {\n  console.log(`⚠️ SPARSE DATA: ${inputData.name} - skipping classification`);\n  \n  return [{\n    json: {\n      ...inputData,\n      classification_skipped: true,\n      skip_reason: 'Insufficient data for automated classification',\n      data_quality: dataQuality,\n      \n      // Pre-set routing for downstream (bypasses LLM entirely)\n      routing_decision: 'SPARSE_DATA_HITL',\n      requires_hitl: true,\n      status: 'pending_review',\n      queue: 'human_review_queue',\n      confidence: 0,\n      routing_reason: `Sparse data: ${publicationCount} publications, ${researchDomains.length} domains, ${researchThemes.length} themes`\n    }\n  }];\n}\n\nconsole.log(`✅ DATA OK: ${inputData.name} - proceeding to classification`);\n\nreturn [{\n  json: {\n    ...inputData,\n    classification_skipped: false,\n    data_quality: dataQuality\n  }\n}];"
+        "jsCode": "// ============================================================\n// Handle Sparse Data Check\n// Version: v3.7.0\n// Fixed: Now checks correct paths for raw_evidence structure\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// ============================================================\n// EXTRACT DATA FROM CORRECT PATHS (v3.7 structure)\n// ============================================================\nconst rawEvidence = inputData.raw_evidence || {};\nconst enrichedContext = inputData.enriched_context || {};\n\n// Get counts from correct locations\nconst publications = rawEvidence.publications || [];\nconst grants = rawEvidence.grants || [];\nconst biography = rawEvidence.biography || '';\nconst researchInterests = rawEvidence.research_interests || [];\n\nconst researchDomains = enrichedContext.research_domains || inputData.research_domains || [];\nconst themes = enrichedContext.themes || inputData.research_themes || [];\nconst methodologies = enrichedContext.methodologies || inputData.methodologies || [];\n\n// ============================================================\n// CALCULATE DATA QUALITY METRICS\n// ============================================================\nconst publicationCount = publications.length;\nconst grantCount = grants.length;\nconst biographyLength = biography.length;\nconst researchInterestCount = researchInterests.length;\nconst domainCount = researchDomains.length;\nconst themeCount = themes.length;\n\n// ============================================================\n// DETERMINE IF DATA IS SUFFICIENT FOR CLASSIFICATION\n// Per v3.7 spec: Need publications OR biography OR research_interests\n// ============================================================\nconst hasPublications = publicationCount >= 3;\nconst hasBiography = biographyLength >= 100;\nconst hasResearchInterests = researchInterestCount >= 3;\nconst hasDomains = domainCount >= 1;\nconst hasThemes = themeCount >= 1;\n\n// Sufficient if we have at least ONE strong evidence source\nconst hasSufficientEvidence = hasPublications || hasBiography || hasResearchInterests;\n\n// Also need some enriched context\nconst hasEnrichedContext = hasDomains || hasThemes;\n\n// Final determination\nconst isSufficient = hasSufficientEvidence && hasEnrichedContext;\nconst isSparse = !isSufficient;\n\n// ============================================================\n// BUILD DATA QUALITY OBJECT\n// ============================================================\nconst dataQuality = {\n  // Counts\n  publication_count: publicationCount,\n  grant_count: grantCount,\n  biography_length: biographyLength,\n  research_interest_count: researchInterestCount,\n  research_domains_count: domainCount,\n  research_themes_count: themeCount,\n  \n  // Flags\n  has_publications: hasPublications,\n  has_biography: hasBiography,\n  has_research_interests: hasResearchInterests,\n  has_domains: hasDomains,\n  has_themes: hasThemes,\n  \n  // Overall assessment\n  has_sufficient_evidence: hasSufficientEvidence,\n  has_enriched_context: hasEnrichedContext,\n  sufficient: isSufficient,\n  \n  // v3.7: Confidence penalty for missing fields\n  missing_fields: [],\n  confidence_penalty: 0\n};\n\n// Track missing fields for v3.7 penalty\nif (!hasPublications) dataQuality.missing_fields.push('publications');\nif (!hasBiography) dataQuality.missing_fields.push('biography');\nif (grantCount === 0) dataQuality.missing_fields.push('grants');\nif (!hasResearchInterests) dataQuality.missing_fields.push('research_interests');\n\n// Apply penalty if missing required fields but still classifiable\nif (isSufficient && dataQuality.missing_fields.length > 0) {\n  dataQuality.confidence_penalty = 0.10; // -10% per v3.7 spec\n  dataQuality.has_issue = true;\n}\n\n// ============================================================\n// LOG DECISION\n// ============================================================\nconsole.log(`\\n============================================================`);\nconsole.log(`📊 DATA QUALITY CHECK: ${inputData.name}`);\nconsole.log(`============================================================`);\nconsole.log(`   Publications:        ${publicationCount} ${hasPublications ? '✅' : '⚠️'}`);\nconsole.log(`   Biography:           ${biographyLength} chars ${hasBiography ? '✅' : '⚠️'}`);\nconsole.log(`   Research Interests:  ${researchInterestCount} ${hasResearchInterests ? '✅' : '⚠️'}`);\nconsole.log(`   Grants:              ${grantCount}`);\nconsole.log(`   Research Domains:    ${domainCount} ${hasDomains ? '✅' : '⚠️'}`);\nconsole.log(`   Themes:              ${themeCount} ${hasThemes ? '✅' : '⚠️'}`);\nconsole.log(`   ─────────────────────────────────────`);\nconsole.log(`   Sufficient Evidence: ${hasSufficientEvidence ? 'YES ✅' : 'NO ❌'}`);\nconsole.log(`   Enriched Context:    ${hasEnrichedContext ? 'YES ✅' : 'NO ❌'}`);\nconsole.log(`   OVERALL:             ${isSufficient ? 'PROCEED TO CLASSIFICATION ✅' : 'ROUTE TO HITL ❌'}`);\nconsole.log(`============================================================\\n`);\n\n// ============================================================\n// ROUTING DECISION\n// ============================================================\nif (isSparse) {\n  // Route to HITL - insufficient data for automated classification\n  return [{\n    json: {\n      ...inputData,\n      data_quality: dataQuality,\n      classification_skipped: true,\n      skip_reason: 'Insufficient data for automated classification',\n      routing_decision: 'SPARSE_DATA_HITL',\n      requires_hitl: true,\n      queue: 'human_review_queue',\n      confidence: 0,\n      routing_reason: `Sparse data: ${publicationCount} publications, ${domainCount} domains, ${themeCount} themes`\n    }\n  }];\n} else {\n  // Proceed to classification\n  return [{\n    json: {\n      ...inputData,\n      data_quality: dataQuality,\n      classification_skipped: false,\n      routing_decision: 'PROCEED_TO_CLASSIFICATION'\n    }\n  }];\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -929,7 +916,7 @@
         -48,
         16
       ],
-      "id": "76e8f491-f81f-4966-807f-080825cc87eb",
+      "id": "cb943800-7db6-4280-9fce-6ba67eb077d4",
       "name": "Check Data Quality"
     },
     {
@@ -963,7 +950,7 @@
         208,
         16
       ],
-      "id": "d765c00f-085f-49f6-92e2-012689b14311",
+      "id": "1c7aa336-c6b8-4cf0-a6a5-0bd0a80c08d0",
       "name": "Handle Sparse Data"
     },
     {
@@ -976,7 +963,7 @@
         464,
         -256
       ],
-      "id": "991b8cda-ae00-41ac-871e-6ddd2f3c442f",
+      "id": "a3780988-f16a-4fb3-bd40-2b87fd7ae7d9",
       "name": "Update Neo4j Status (Sparse)"
     },
     {
@@ -989,7 +976,7 @@
         1008,
         -256
       ],
-      "id": "b5c2fc02-99b2-42af-8a86-eeec46137fd3",
+      "id": "4bb54fbd-ad18-4729-b109-81a84dbc4d1d",
       "name": "Prepare Sparse Queue Insert"
     },
     {
@@ -1024,7 +1011,7 @@
         1280,
         -256
       ],
-      "id": "23ca4262-d38f-4327-a122-1485404979b8",
+      "id": "60d2015e-8e02-4e28-a8d6-0d06bc9e159f",
       "name": "Write to Validation Queue (Sparse)",
       "credentials": {
         "qdrantRestApi": {
@@ -1068,7 +1055,7 @@
         -1376,
         608
       ],
-      "id": "0ea75c45-b131-434a-96b2-cf2327a7424d",
+      "id": "98eb008e-f706-4edb-ad12-0c83455f4261",
       "name": "Check Parse Success"
     },
     {
@@ -1081,7 +1068,7 @@
         -1568,
         992
       ],
-      "id": "2eaab08f-9799-4597-ae0b-fbb49a26a0e8",
+      "id": "5582ba28-39eb-4959-a59f-26d29327d932",
       "name": "Prepare Failure Update (Neo4j)"
     },
     {
@@ -1110,7 +1097,7 @@
         720,
         -256
       ],
-      "id": "422f35e2-0e93-469b-8e9e-5f2ddb78bc10",
+      "id": "f6b27742-edcd-4e06-b3ca-c69a72777247",
       "name": "Execute Status Update to (Sparse Data)",
       "credentials": {
         "httpBasicAuth": {
@@ -1145,7 +1132,7 @@
         -1280,
         992
       ],
-      "id": "0720f9c6-2654-4fd6-89a4-b311e2eead20",
+      "id": "71152cdc-5381-4e80-afd1-1a88dfae07c4",
       "name": "Execute Status Update to (Sparse Data)1",
       "credentials": {
         "httpBasicAuth": {
@@ -1185,8 +1172,190 @@
         -1088,
         624
       ],
-      "id": "9d99c214-0e45-4f7e-944a-4e7b3ef08ecc",
+      "id": "4e37c68c-8b7c-41b7-9786-406f663ee602",
       "name": "Classification Failed"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node: Prepare Vector Search GROUPS (Phase 2a)\n// v3.7: Hierarchical search - groups first, then fields within matched groups\n\nconst inputData = $input.first().json;\n\n// Validate embedding vector\nif (!inputData.embedding_vector || inputData.embedding_vector.length !== 3072) {\n  throw new Error(`Invalid embedding vector. Expected 3072 dimensions, got ${inputData.embedding_vector?.length || 0}`);\n}\n\n// Qdrant request for GROUP-level search (4-digit codes)\nconst qdrantGroupRequest = {\n  query: inputData.embedding_vector,\n  filter: {\n    must: [{\n      key: \"level\",\n      match: { value: \"group\" }\n    }]\n  },\n  limit: 35,\n  with_payload: true,\n  with_vector: false\n};\n\nreturn [{\n  json: {\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    orcid: inputData.orcid,\n    institution: inputData.institution,\n    qdrant_point_id: inputData.qdrant_point_id,\n    dense_view_text: inputData.dense_view_text,\n    raw_evidence: inputData.raw_evidence,\n    enriched_context: inputData.enriched_context,\n    career_stage: inputData.career_stage,\n    research_domains: inputData.research_domains,\n    methodologies: inputData.methodologies,\n    research_themes: inputData.research_themes,\n    h_index: inputData.h_index,\n    data_quality: inputData.data_quality,\n    embedding_vector: inputData.embedding_vector,\n    qdrant_group_request: qdrantGroupRequest\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1664,
+        288
+      ],
+      "id": "03b2b4fb-1a4c-4e1f-8289-cd91615c6b45",
+      "name": "Prepare Vector Search GROUPS"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc1_for_2020/points/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qdrant_group_request) }}",
+        "options": {}
+      },
+      "id": "4c632d49-0c13-4a47-9d77-233f28068dcb",
+      "name": "Vector Search GROUPS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1440,
+        288
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Group Vector Search Results & Prepare Cohere Rerank\n// Phase 2a Step 3: Rerank top 35 groups to top 20\n\nconst qdrantResponse = $input.first().json;\nconst originalData = $('Prepare Vector Search GROUPS').first().json;\n\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  console.log('⚠️ No groups found - falling back to flat field search');\n  \n  // Fallback: direct field search without group filtering\n  const fallbackFieldRequest = {\n    query: originalData.embedding_vector,\n    filter: {\n      must: [{\n        key: \"level\",\n        match: { value: \"field\" }\n      }]\n    },\n    limit: 75,\n    with_payload: true,\n    with_vector: false\n  };\n  \n  return [{\n    json: {\n      ...originalData,\n      group_candidates: [],\n      matched_group_numbers: [],\n      use_hierarchical_search: false,\n      fallback_reason: 'No group matches found',\n      qdrant_field_request: fallbackFieldRequest\n    }\n  }];\n}\n\n// Extract group candidates\nconst groupCandidates = points.map(point => ({\n  code: point.payload.code,\n  name: point.payload.name,\n  score: point.score,\n  embedding_text: point.payload.embedding_text || `${point.payload.code} - ${point.payload.name}`\n}));\n\nconsole.log(`✅ Group Vector Search: Found ${groupCandidates.length} groups`);\nconsole.log(`   Top 5: ${groupCandidates.slice(0, 5).map(g => `${g.code} (${g.score.toFixed(3)})`).join(', ')}`);\n\n// Prepare Cohere rerank to get top 20 groups\nconst cohereGroupRequest = {\n  model: \"rerank-v3.5\",\n  query: originalData.dense_view_text,\n  documents: groupCandidates.map(g => g.embedding_text),\n  top_n: 20\n};\n\nreturn [{\n  json: {\n    ...originalData,\n    group_candidates: groupCandidates,\n    cohere_group_request: cohereGroupRequest,\n    use_hierarchical_search: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        288
+      ],
+      "id": "d3154bfd-40c2-4ea8-a8f6-4b0b1617541f",
+      "name": "Parse Group Results & Prepare Cohere"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cohere.com/v2/rerank",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "cohereApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cohere_group_request) }}",
+        "options": {}
+      },
+      "id": "05fa2920-b7e2-4cb6-9bd1-6e5094ea1a96",
+      "name": "Cohere Rerank Groups",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -976,
+        288
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        },
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "cohereApi": {
+          "id": "r3yyDdVpi3CmVDjc",
+          "name": "Cohere-API TrialKey"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Extract Matched Groups\n// Version: v3.7.0\n// Purpose: Extract top 20 reranked groups and prepare field search with group filter\n// Phase 2a complete -> Phase 2b setup\n// ============================================================\n\nconst cohereResponse = $input.first().json;\nconst originalData = $('Parse Group Results & Prepare Cohere').first().json;\n\n// ============================================================\n// FALLBACK: Skip if not using hierarchical search\n// ============================================================\nif (!originalData.use_hierarchical_search) {\n  console.log('⚠️ Hierarchical search disabled, using fallback');\n  return [{ json: originalData }];\n}\n\n// ============================================================\n// PARSE COHERE RERANK RESULTS\n// ============================================================\nconst results = cohereResponse.results || [];\nconst groupCandidates = originalData.group_candidates || [];\n\nif (results.length === 0) {\n  console.log('⚠️ No rerank results, falling back to all groups');\n  return [{ json: originalData }];\n}\n\n// ============================================================\n// MAP COHERE INDICES BACK TO GROUP CODES\n// CRITICAL: Ensure codes are STRINGS for Qdrant filter\n// ============================================================\nconst matchedGroups = results.map(r => {\n  const group = groupCandidates[r.index];\n  \n  if (!group) {\n    console.log(`⚠️ No group found at index ${r.index}`);\n    return null;\n  }\n  \n  return {\n    code: String(group.code),           // ✅ ENSURE STRING\n    name: group.name || 'Unknown',\n    vector_score: group.score || 0,\n    rerank_score: r.relevance_score || 0\n  };\n}).filter(g => g !== null);\n\n// ============================================================\n// EXTRACT GROUP NUMBERS (4-digit codes as STRINGS)\n// ============================================================\nconst matchedGroupNumbers = matchedGroups.map(g => String(g.code));\n\nconsole.log(`✅ Reranked to ${matchedGroups.length} groups`);\nconsole.log(`   Top 5 groups: ${matchedGroupNumbers.slice(0, 5).join(', ')}`);\nconsole.log(`   Type check: ${typeof matchedGroupNumbers[0]}`);\n\n// ============================================================\n// BUILD QDRANT FIELD REQUEST WITH GROUP FILTER (Phase 2b)\n// ============================================================\nconst qdrantFieldRequest = {\n  query: originalData.embedding_vector,\n  filter: {\n    must: [\n      {\n        key: \"level\",\n        match: { value: \"field\" }\n      },\n      {\n        key: \"group_code\",\n        match: { any: matchedGroupNumbers }  // Strings for keyword index\n      }\n    ]\n  },\n  limit: 50,\n  with_payload: true,\n  with_vector: false\n};\n\n// ============================================================\n// OUTPUT: Pass through all data plus matched groups\n// ============================================================\nreturn [{\n  json: {\n    // Pass through original data\n    ...originalData,\n    \n    // Matched groups from reranking\n    matched_groups: matchedGroups,\n    matched_group_numbers: matchedGroupNumbers,\n    group_count: matchedGroups.length,\n    \n    // Qdrant request for field search\n    qdrant_field_request: qdrantFieldRequest,\n    \n    // Retrieval metadata\n    retrieval_sources: {\n      phase_2a_groups: matchedGroups.length,\n      phase_2a_method: 'vector_search + cohere_rerank',\n      phase_2a_top_group: matchedGroups[0]?.code || 'none'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        288
+      ],
+      "id": "ec499422-6d5f-485a-94f4-47a52724b630",
+      "name": "Extract Matched Groups"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Parse Vector Search Results (FIELD Search)\n// Version: v3.7.0\n// Input: Qdrant vector search response for FIELDS\n// Output: Structured field candidates with embedding_text for LLM\n// ============================================================\n\nconst qdrantResponse = $input.first().json;\n\n// ============================================================\n// GET ORIGINAL DATA - Use correct node name!\n// ============================================================\nconst originalData = $('Extract Matched Groups').first().json;\n\n// Handle response structure\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || responseData.points || [];\n\nif (points.length === 0) {\n  console.log('⚠️ No field candidates found, check Qdrant query');\n  throw new Error(`No candidate standards found for asset_id: ${originalData.asset_id}`);\n}\n\n// ============================================================\n// EXTRACT FIELD CANDIDATES WITH SCORES AND EMBEDDING_TEXT\n// ============================================================\nconst fieldCandidates = points.map(point => ({\n  code: String(point.payload.code),\n  name: point.payload.name,\n  level: point.payload.level,\n  division_code: point.payload.division_code || String(point.payload.code).substring(0, 2),\n  group_code: point.payload.group_code || String(point.payload.code).substring(0, 4),\n  embedding_text: point.payload.embedding_text || null,\n  score: point.score\n}));\n\n// Get unique field codes\nconst fieldCodes = [...new Set(fieldCandidates.map(c => c.code))];\n\n// Log candidate pool\nconsole.log(`✅ Field search returned ${points.length} candidates`);\nconsole.log(`   Fields with embedding_text: ${fieldCandidates.filter(f => f.embedding_text).length}`);\nconsole.log(`   Top 3 fields: ${fieldCandidates.slice(0, 3).map(f => f.code).join(', ')}`);\n\n// ============================================================\n// OUTPUT: Merge original data with field candidates\n// ============================================================\nreturn [{\n  json: {\n    // Pass through researcher data\n    asset_id: originalData.asset_id,\n    name: originalData.name,\n    orcid: originalData.orcid,\n    institution: originalData.institution,\n    qdrant_point_id: originalData.qdrant_point_id,\n    research_domains: originalData.research_domains || [],\n    methodologies: originalData.methodologies || [],\n    research_themes: originalData.research_themes || [],\n    h_index: originalData.h_index || 0,\n    career_stage: originalData.career_stage || 'unknown',\n    \n    // v3.7: raw_evidence and enriched_context\n    raw_evidence: originalData.raw_evidence || {},\n    enriched_context: originalData.enriched_context || {},\n    data_quality: originalData.data_quality || {},\n    \n    // Dense view text for LLM prompt\n    dense_view_text: originalData.dense_view_text || '',\n    \n    // Embedding for FOS search later\n    embedding_vector: originalData.embedding_vector,\n    \n    // FIELD candidate data (includes embedding_text)\n    field_candidates: fieldCandidates,\n    field_codes: fieldCodes,\n    vector_candidate_count: points.length,\n    \n    // Hierarchical search metadata\n    matched_groups: originalData.matched_groups || [],\n    matched_group_numbers: originalData.matched_group_numbers || [],\n    retrieval_sources: originalData.retrieval_sources || {}\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        288
+      ],
+      "id": "cbf887e9-9503-47fc-870a-13740e6a750f",
+      "name": "Parse Vector Search Results"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Classification Signals for Neo4j (FIXED v3)\n// Version: v3.7.2\n// Fix: Uses MERGE to prevent duplicate signals\n// ============================================================\n\nconst inputData = $('Prepare Qdrant Payload').first().json;\nconst timestamp = new Date().toISOString();\nconst assetId = inputData.asset_id;\n\n// Build signals array\nconst signals = [];\n\n// ============================================================\n// 1. classification_completed (ALWAYS emitted)\n// ============================================================\nsignals.push({\n  signal_type: \"classification_completed\",\n  category: \"AssessmentSignal\",\n  target_entity: assetId,\n  timestamp: timestamp,\n  value: inputData.final_confidence,\n  reason: \"Classification completed successfully\",\n  metadata: JSON.stringify({\n    primary_code: inputData.classifications[0]?.code || null,\n    primary_label: inputData.classifications[0]?.name || null,\n    secondary_codes: inputData.classifications.slice(1).map(c => c.code),\n    code_count: inputData.classification_count,\n    standard_b_count: inputData.standard_b_count || 0,\n    raw_confidence: inputData.confidence_breakdown?.base_mean || null,\n    crosswalk_modifier: inputData.confidence_breakdown?.crosswalk_modifier || 0,\n    model_version: inputData.model || \"open-oss-120b\"\n  }),\n  workflow_id: \"OBJECT-3\",\n  workflow_version: \"v3.7\"\n});\n\n// ============================================================\n// 2. confidence_assessed (ALWAYS emitted)\n// ============================================================\nsignals.push({\n  signal_type: \"confidence_assessed\",\n  category: \"MeasurementSignal\",\n  target_entity: assetId,\n  timestamp: timestamp,\n  value: inputData.final_confidence,\n  reason: \"Confidence score calculated with modifiers\",\n  metadata: JSON.stringify({\n    raw_confidence: inputData.confidence_breakdown?.base_mean || null,\n    cf1_penalty: inputData.confidence_breakdown?.cf1_penalty || 0,\n    crosswalk_modifier: inputData.confidence_breakdown?.crosswalk_modifier || 0,\n    cre_penalty: inputData.confidence_breakdown?.cre_penalty || 0,\n    data_quality_penalty: inputData.confidence_breakdown?.data_quality_penalty || 0,\n    net_adjustment: inputData.confidence_breakdown?.net_adjustment || 0\n  }),\n  workflow_id: \"OBJECT-3\",\n  workflow_version: \"v3.7\"\n});\n\n// ============================================================\n// 3. data_quality_warning (CONDITIONAL)\n// ============================================================\nlet dataQuality = null;\ntry {\n  dataQuality = $('Handle Sparse Data').first().json.data_quality;\n} catch (e) {\n  dataQuality = inputData.data_quality || null;\n}\n\nif (dataQuality?.has_issue) {\n  signals.push({\n    signal_type: \"data_quality_warning\",\n    category: \"SystemSignal\",\n    target_entity: assetId,\n    timestamp: timestamp,\n    value: (dataQuality.confidence_penalty || 0) * -1,\n    reason: \"Dense view missing required fields for classification grounding\",\n    metadata: JSON.stringify({\n      missing_fields: dataQuality.missing_fields || [],\n      confidence_penalty_applied: dataQuality.confidence_penalty || 0,\n      flagged_for_review: true\n    }),\n    workflow_id: \"OBJECT-3\",\n    workflow_version: \"v3.7\"\n  });\n}\n\n// ============================================================\n// 4. threshold_breach (CONDITIONAL)\n// ============================================================\nconst AUTO_APPROVE_THRESHOLD = 0.85;\nconst FAIL_THRESHOLD = 0.60;\n\nif (inputData.final_confidence < AUTO_APPROVE_THRESHOLD) {\n  const routedTo = inputData.final_confidence >= FAIL_THRESHOLD \n    ? \"validation_queue\" \n    : \"reject\";\n  \n  signals.push({\n    signal_type: \"threshold_breach\",\n    category: \"AssessmentSignal\",\n    target_entity: assetId,\n    timestamp: timestamp,\n    value: inputData.final_confidence,\n    reason: \"Confidence score below auto-approval threshold\",\n    metadata: JSON.stringify({\n      threshold: AUTO_APPROVE_THRESHOLD,\n      actual_score: inputData.final_confidence,\n      gap: Math.round((inputData.final_confidence - AUTO_APPROVE_THRESHOLD) * 10000) / 10000,\n      routed_to: routedTo\n    }),\n    workflow_id: \"OBJECT-3\",\n    workflow_version: \"v3.7\"\n  });\n}\n\n// ============================================================\n// BUILD CYPHER USING MERGE (Prevents Duplicates)\n// ============================================================\nconst signalNeo4jPayload = {\n  statement: `\n    UNWIND $signals AS sig\n    \n    MATCH (e {asset_id: sig.target_entity})\n    \n    MERGE (s:Signal {\n      target_entity: sig.target_entity,\n      signal_type: sig.signal_type,\n      workflow_id: sig.workflow_id\n    })\n    ON CREATE SET\n      s.signal_id = sig.target_entity + ':' + sig.signal_type + ':' + sig.workflow_id,\n      s.category = sig.category,\n      s.timestamp = datetime(sig.timestamp),\n      s.value = sig.value,\n      s.reason = sig.reason,\n      s.metadata = sig.metadata,\n      s.workflow_version = sig.workflow_version\n    ON MATCH SET\n      s.timestamp = datetime(sig.timestamp),\n      s.value = sig.value,\n      s.reason = sig.reason,\n      s.metadata = sig.metadata,\n      s.workflow_version = sig.workflow_version\n    \n    MERGE (e)-[:HAS_SIGNAL]->(s)\n    \n    RETURN count(s) AS signals_merged\n  `,\n  parameters: {\n    signals: signals\n  }\n};\n\n// ============================================================\n// LOG SUMMARY\n// ============================================================\nconsole.log(`\\n============================================================`);\nconsole.log(`📡 SIGNAL EMISSION: ${inputData.name}`);\nconsole.log(`============================================================`);\nsignals.forEach(s => {\n  console.log(`   ${s.category === 'SystemSignal' ? '⚠️' : '✅'} ${s.signal_type}`);\n});\nconsole.log(`   Total signals: ${signals.length}`);\nconsole.log(`============================================================\\n`);\n\n// ============================================================\n// RETURN OUTPUT\n// ============================================================\nreturn [{\n  json: {\n    ...inputData,\n    signals_emitted: signals,\n    signal_count: signals.length,\n    signal_neo4j_payload: signalNeo4jPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        896
+      ],
+      "id": "51265f01-7cbe-4d0c-96e7-2ed391c51cbb",
+      "name": "Prepare Classification Signals"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.signal_neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        528,
+        896
+      ],
+      "id": "68dc71e0-c797-4573-b95f-48a856ef9f25",
+      "name": "Write Signals to Neo4j",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
     }
   ],
   "pinData": {
@@ -1245,7 +1414,7 @@
       "main": [
         [
           {
-            "node": "Prepare Vector Search FIELDS",
+            "node": "Prepare Vector Search GROUPS",
             "type": "main",
             "index": 0
           }
@@ -1437,7 +1606,7 @@
       "main": [
         [
           {
-            "node": "Final Output",
+            "node": "Prepare Classification Signals",
             "type": "main",
             "index": 0
           }
@@ -1539,13 +1708,7 @@
     },
     "Prepare Vector Search FIELDS": {
       "main": [
-        [
-          {
-            "node": "Vector Search FIELDS",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Cohere Rerank": {
@@ -1585,18 +1748,7 @@
       "main": [
         [
           {
-            "node": "Parse Vector Search Results1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Vector Search Results1": {
-      "main": [
-        [
-          {
-            "node": "Prepare Cohere Request",
+            "node": "Parse Vector Search Results",
             "type": "main",
             "index": 0
           }
@@ -1761,18 +1913,106 @@
           }
         ]
       ]
+    },
+    "Prepare Vector Search GROUPS": {
+      "main": [
+        [
+          {
+            "node": "Vector Search GROUPS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search GROUPS": {
+      "main": [
+        [
+          {
+            "node": "Parse Group Results & Prepare Cohere",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Group Results & Prepare Cohere": {
+      "main": [
+        [
+          {
+            "node": "Cohere Rerank Groups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cohere Rerank Groups": {
+      "main": [
+        [
+          {
+            "node": "Extract Matched Groups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Matched Groups": {
+      "main": [
+        [
+          {
+            "node": "Vector Search FIELDS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Vector Search Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare Cohere Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Classification Signals": {
+      "main": [
+        [
+          {
+            "node": "Write Signals to Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Signals to Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "7ecf27ba-f1e2-467c-9402-10c497c5d516",
+  "versionId": "3374fc5b-6185-4a17-8fce-b60746c7e9d5",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },
-  "id": "SJY1dwMCF32ZggNU",
+  "id": "SOeEAqm7luyOjRhx",
   "tags": [
     {
       "updatedAt": "2025-12-16T11:15:39.965Z",
