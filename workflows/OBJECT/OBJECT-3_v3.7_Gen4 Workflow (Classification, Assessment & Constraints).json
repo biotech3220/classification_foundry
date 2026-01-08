@@ -125,8 +125,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1776,
-        1504
+        2320,
+        2144
       ],
       "id": "42dfe35b-3348-4632-a75e-24fd41e3cb81",
       "name": "Prepare Fetch FATObjects(Colin)"
@@ -147,8 +147,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        1616,
-        288
+        -1488,
+        1376
       ],
       "id": "9a1948e3-0da3-454d-82fe-fd93adcf95c4",
       "name": "Pass 2: LLM Enrichment"
@@ -160,8 +160,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1584,
-        608
+        -1200,
+        1376
       ],
       "id": "f581cd0f-59a8-4b77-a0cd-ad92d188a6ae",
       "name": "Parse LLM Response"
@@ -173,8 +173,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        944,
-        624
+        1328,
+        1392
       ],
       "id": "dfa7efdc-1f86-4f5b-8499-bcf77a26fc5e",
       "name": "Calculate Final Confidence"
@@ -186,8 +186,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1168,
-        624
+        -464,
+        2464
       ],
       "id": "2b13e08c-b5c4-4d73-a35f-abd9318dbd7d",
       "name": "Prepare Neo4j Write Query"
@@ -215,8 +215,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -896,
-        896
+        -272,
+        2464
       ],
       "id": "44a803e3-9185-42ea-8002-f9d5d4798b13",
       "name": "Write to Neo4j",
@@ -252,8 +252,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -368,
-        896
+        256,
+        2464
       ],
       "id": "bad79b10-b397-46d7-b387-8b8b38cb981b",
       "name": "Update Qdrant",
@@ -271,8 +271,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        768,
-        896
+        1392,
+        2464
       ],
       "id": "1edbeb93-d1c5-40e5-815b-989e340a7835",
       "name": "Final Output"
@@ -284,8 +284,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -640,
-        896
+        -16,
+        2464
       ],
       "id": "a8415e22-0c99-4aaa-9f30-a33bae793664",
       "name": "Prepare Qdrant Payload"
@@ -326,8 +326,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2032,
-        1504
+        2544,
+        2128
       ],
       "id": "baa995e2-661c-4d6e-8201-6f349e04a39d",
       "name": "Update Qdrant1",
@@ -361,8 +361,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1984,
-        1264
+        2528,
+        1920
       ],
       "id": "a0652152-4aa1-4f19-9195-fbe070f0ac1e",
       "name": "Update Qdrant2",
@@ -441,8 +441,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -688,
-        624
+        -304,
+        1392
       ],
       "id": "c182f6a4-c94e-47a5-ac43-127f312bcbcf",
       "name": "Prepare Crosswalk Assessment Query"
@@ -470,8 +470,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -464,
-        624
+        -80,
+        1392
       ],
       "id": "7a99cd02-89b0-48fa-9197-89790b505d14",
       "name": "Execute Crosswalk Assessment",
@@ -489,8 +489,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -224,
-        624
+        160,
+        1392
       ],
       "id": "aee59240-cfe1-4fe9-90fa-4848f5700bdb",
       "name": "Calculate Crosswalk Alignment"
@@ -502,8 +502,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -176,
-        896
+        448,
+        2464
       ],
       "id": "ecb3db4e-5c5a-4786-b832-7f38c945c0e7",
       "name": "Prepare PostgreSQL Classification Log"
@@ -537,8 +537,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        80,
-        896
+        704,
+        2464
       ],
       "id": "6e059952-b2fb-423c-9f08-ec903fbfe4a4",
       "name": "Store Crosswalk Metadata",
@@ -576,8 +576,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1760,
-        1280
+        2304,
+        1920
       ],
       "id": "12d5c60c-ea7b-4b1e-88b9-ba942008c4fd",
       "name": "Execute CRE Constraint Query",
@@ -595,8 +595,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        752,
-        624
+        1136,
+        1392
       ],
       "id": "1212d874-8f04-411f-b571-3d32faf64800",
       "name": "ANZSRC Hierarchy Check"
@@ -625,8 +625,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        320,
-        624
+        704,
+        1392
       ],
       "name": "SYSTEM-2_CRE_Assessment",
       "id": "5d82582e-c98d-4d39-9c05-43059b4c707e"
@@ -638,8 +638,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        544,
-        624
+        928,
+        1392
       ],
       "id": "0a937ddf-e81e-4466-adc3-914dadc59dbe",
       "name": "Merge CRE Output"
@@ -651,8 +651,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        64,
-        624
+        448,
+        1392
       ],
       "id": "4fcb3416-9ad5-43a4-94b8-95d0f3a6af05",
       "name": "Prepare CRE Input"
@@ -665,8 +665,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        1616,
-        512
+        -1488,
+        1616
       ],
       "id": "fe7fbc79-3674-4e94-bc6c-1f3466153f94",
       "name": "OpenRouter Chat Model",
@@ -685,7 +685,7 @@
       "typeVersion": 2,
       "position": [
         624,
-        288
+        704
       ],
       "id": "da5e6e9f-5d07-406a-bea8-b00075c37434",
       "name": "Prepare FOS Vector Search"
@@ -698,7 +698,7 @@
       "typeVersion": 2,
       "position": [
         1152,
-        288
+        704
       ],
       "id": "3bc9f5b1-fd2e-4fc6-9e34-3c9e14dc0922",
       "name": "Parse FOS Candidates"
@@ -735,7 +735,7 @@
       "typeVersion": 4.1,
       "position": [
         912,
-        288
+        704
       ],
       "credentials": {
         "openRouterApi": {
@@ -755,8 +755,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1424,
-        288
+        -1712,
+        1376
       ],
       "id": "2db3824b-9bb0-4ad2-845e-7f3b92cf0153",
       "name": "Prepare Dual-Standard LLM Prompt"
@@ -768,8 +768,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1664,
-        -144
+        2512,
+        1776
       ],
       "id": "876cee0c-ac77-4e3c-b7ff-f50aa164d030",
       "name": "Prepare Vector Search FIELDS"
@@ -800,7 +800,7 @@
       "typeVersion": 4.1,
       "position": [
         208,
-        288
+        704
       ],
       "credentials": {
         "openRouterApi": {
@@ -825,7 +825,7 @@
       "typeVersion": 2,
       "position": [
         -80,
-        288
+        704
       ],
       "id": "7842436c-8a4d-4258-8fc2-0fbb12c1276c",
       "name": "Prepare Cohere Request"
@@ -838,7 +838,7 @@
       "typeVersion": 2,
       "position": [
         416,
-        288
+        704
       ],
       "id": "5148d1fd-540f-47d7-888f-1bccedfbb97c",
       "name": "Parse Cohere Rerank Results"
@@ -869,7 +869,7 @@
       "typeVersion": 4.1,
       "position": [
         -560,
-        288
+        704
       ],
       "credentials": {
         "openRouterApi": {
@@ -901,8 +901,8 @@
       "name": "Replace Me",
       "typeVersion": 1,
       "position": [
-        1872,
-        1152
+        2304,
+        1776
       ],
       "id": "b24054d0-4320-4837-8fc1-5f926b73d175"
     },
@@ -1052,8 +1052,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -1376,
-        608
+        -992,
+        1376
       ],
       "id": "98eb008e-f706-4edb-ad12-0c83455f4261",
       "name": "Check Parse Success"
@@ -1065,8 +1065,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1568,
-        992
+        -1536,
+        1808
       ],
       "id": "5582ba28-39eb-4959-a59f-26d29327d932",
       "name": "Prepare Failure Update (Neo4j)"
@@ -1129,8 +1129,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1280,
-        992
+        -1104,
+        1808
       ],
       "id": "71152cdc-5381-4e80-afd1-1a88dfae07c4",
       "name": "Execute Status Update to (Sparse Data)1",
@@ -1169,8 +1169,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -1088,
-        624
+        -704,
+        1392
       ],
       "id": "4e37c68c-8b7c-41b7-9786-406f663ee602",
       "name": "Classification Failed"
@@ -1183,7 +1183,7 @@
       "typeVersion": 2,
       "position": [
         -1664,
-        288
+        704
       ],
       "id": "03b2b4fb-1a4c-4e1f-8289-cd91615c6b45",
       "name": "Prepare Vector Search GROUPS"
@@ -1214,7 +1214,7 @@
       "typeVersion": 4.1,
       "position": [
         -1440,
-        288
+        704
       ],
       "credentials": {
         "openRouterApi": {
@@ -1235,7 +1235,7 @@
       "typeVersion": 2,
       "position": [
         -1184,
-        288
+        704
       ],
       "id": "d3154bfd-40c2-4ea8-a8f6-4b0b1617541f",
       "name": "Parse Group Results & Prepare Cohere"
@@ -1266,7 +1266,7 @@
       "typeVersion": 4.1,
       "position": [
         -976,
-        288
+        704
       ],
       "credentials": {
         "openRouterApi": {
@@ -1291,7 +1291,7 @@
       "typeVersion": 2,
       "position": [
         -752,
-        288
+        704
       ],
       "id": "ec499422-6d5f-485a-94f4-47a52724b630",
       "name": "Extract Matched Groups"
@@ -1304,7 +1304,7 @@
       "typeVersion": 2,
       "position": [
         -352,
-        288
+        704
       ],
       "id": "cbf887e9-9503-47fc-870a-13740e6a750f",
       "name": "Parse Vector Search Results"
@@ -1316,8 +1316,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        320,
-        896
+        944,
+        2464
       ],
       "id": "51265f01-7cbe-4d0c-96e7-2ed391c51cbb",
       "name": "Prepare Classification Signals"
@@ -1345,8 +1345,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        528,
-        896
+        1152,
+        2464
       ],
       "id": "68dc71e0-c797-4573-b95f-48a856ef9f25",
       "name": "Write Signals to Neo4j",
@@ -1356,6 +1356,69 @@
           "name": "Neo4j Gen 2"
         }
       }
+    },
+    {
+      "parameters": {
+        "content": "# Fetch Researcher Data\n\n## Note: Fetches researcher profile from Neo4j and their embedding vector from Qdrant for similarity search.",
+        "height": 912,
+        "width": 3584,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1792,
+        -448
+      ],
+      "typeVersion": 1,
+      "id": "5c7f9f1c-1dff-4ff3-9f5f-5e088c781192",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# Vector Search & Rerank\n\n\n## Note: Searches Groups → Cohere reranks → expands to Fields → reranks again to find best matching codes.",
+        "height": 560,
+        "width": 3648,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1792,
+        512
+      ],
+      "typeVersion": 1,
+      "id": "df411d4a-7ee5-4f35-a9b8-779f12fe71d9",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "# Classification & Crosswalk\n\n## Note: Assigns ANZSRC codes with confidence scores, then maps to OECD equivalents via crosswalk lookup.",
+        "height": 864,
+        "width": 3664,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1792,
+        1136
+      ],
+      "typeVersion": 1,
+      "id": "1b55daf8-fd78-4595-b181-a81d5e1e6db8",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "# Write Results\n\n## Note: Saves classification signals (codes, confidence, crosswalk mappings) to Neo4j.",
+        "height": 752,
+        "width": 2496
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -720,
+        2064
+      ],
+      "typeVersion": 1,
+      "id": "e5aa2ce7-9f2f-4cdc-b682-484f7e1e51f0",
+      "name": "Sticky Note3"
     }
   ],
   "pinData": {
@@ -2007,7 +2070,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "3374fc5b-6185-4a17-8fce-b60746c7e9d5",
+  "versionId": "c63a3720-0aee-45d3-8e89-d708d64487da",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"

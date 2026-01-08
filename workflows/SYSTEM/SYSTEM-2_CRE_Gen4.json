@@ -6,7 +6,7 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -256,
+        -320,
         416
       ],
       "id": "724b9c0a-689c-425b-92b4-903026ccb7cb",
@@ -19,8 +19,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        48,
-        0
+        -112,
+        -144
       ],
       "id": "09dd477d-5dd0-4c82-9ed7-4c90125dae70",
       "name": "CF1 - Load and Parse TRL"
@@ -33,7 +33,7 @@
       "typeVersion": 2,
       "position": [
         240,
-        0
+        -144
       ],
       "id": "ef03c25d-4282-49b1-a02f-1556d91e6607",
       "name": "Create CF1 Family Query"
@@ -45,8 +45,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        688,
-        0
+        656,
+        -144
       ],
       "id": "c5bcbd63-9e2a-43a0-ad35-1ede6e5a71a0",
       "name": "Create CF1 Rules Query"
@@ -74,8 +74,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        880,
-        0
+        848,
+        -144
       ],
       "id": "f45e3bf4-021a-4adb-b753-ea47001f98bd",
       "name": "Execute Rules Query",
@@ -93,7 +93,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        32,
+        -96,
         192
       ],
       "id": "aedcc222-56d1-4b38-a1be-c8ad68e3667f",
@@ -106,7 +106,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        224,
+        256,
         192
       ],
       "id": "d10d951e-c4e6-4f0a-94b8-26db3b6df8d7",
@@ -148,8 +148,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        464,
-        0
+        432,
+        -144
       ],
       "id": "ab8c8ded-845a-48de-9ce5-84304efca9ca",
       "name": "Execute CF1 Family Query (Neo4j)",
@@ -218,7 +218,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        880,
+        864,
         192
       ],
       "id": "e3e8ef91-9a4b-457d-af6c-9c9da51dc02d",
@@ -253,7 +253,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        864,
+        880,
         416
       ],
       "id": "6f5db92d-b4a4-4f24-8352-e6ef4ee628bf",
@@ -272,7 +272,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        208,
+        256,
         416
       ],
       "id": "c0d89faa-0174-48dc-9f5b-bcdf2dfaaf43",
@@ -314,7 +314,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        432,
+        448,
         416
       ],
       "id": "33ec5c45-8a35-449d-895c-bd8b1153bcc5",
@@ -333,8 +333,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1104,
-        0
+        1248,
+        -144
       ],
       "id": "0d082185-33f2-4f32-9798-da32b4ab12cd",
       "name": "Create CF1 Metadata Query"
@@ -368,8 +368,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1312,
-        0
+        1488,
+        -144
       ],
       "id": "78f87882-cd4a-42fd-bc1c-1b0c73773813",
       "name": "Execute CF1 Metadata (Postgres)",
@@ -391,7 +391,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
+        1264,
         192
       ],
       "id": "58fd2e62-3445-42d0-8fc5-6015291191ac",
@@ -426,7 +426,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1328,
+        1504,
         192
       ],
       "id": "8b5c544c-309d-4cad-8f33-25f6d3bcf77b",
@@ -449,7 +449,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1056,
+        1264,
         416
       ],
       "id": "35527d89-8562-4131-9ef6-ff88d5a77bf5",
@@ -484,7 +484,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1296,
+        1504,
         416
       ],
       "id": "b953d45b-cbb2-422f-9dc6-51f3e02939f1",
@@ -507,11 +507,58 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        16,
+        -112,
         416
       ],
       "id": "2c7eac7e-abee-4104-ae6d-0dba2cfdc088",
       "name": "CF12 - Load and Parse INF"
+    },
+    {
+      "parameters": {
+        "content": "# Parse Constraint Families\n\n# Note: Parses CSV data for each constraint family - extracts metadata, vocabulary, and rules.",
+        "height": 1200,
+        "width": 496,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -384,
+        -576
+      ],
+      "typeVersion": 1,
+      "id": "c6c67638-76c1-4eab-9eb9-ffe512eddf2a",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# Save to Neo4j\n\n# Note: Creates ConstraintFamily and ConstraintRule nodes in Neo4j with HAS_RULE relationships.",
+        "height": 1200,
+        "width": 896,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        176,
+        -576
+      ],
+      "typeVersion": 1,
+      "id": "a42ccc13-a562-487a-b2f9-e887528be70d",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "# Save to Postgres\n\n# Note: Stores constraint metadata in Supabase for tracking and audit.",
+        "height": 1184,
+        "width": 624
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1152,
+        -560
+      ],
+      "typeVersion": 1,
+      "id": "703eb936-df3f-45f6-af13-d4b3343aec5d",
+      "name": "Sticky Note1"
     }
   ],
   "pinData": {
@@ -526,13 +573,7 @@
   "connections": {
     "When clicking ‘Execute workflow’": {
       "main": [
-        [
-          {
-            "node": "CF12 - Load and Parse INF",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "CF1 - Load and Parse TRL": {
@@ -738,7 +779,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "73fe05ec-19c6-484b-9625-465909342b4a",
+  "versionId": "9fc2500b-32bb-43ec-9a50-d1b86d0ad349",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

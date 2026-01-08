@@ -325,8 +325,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -2000,
-        1376
+        -2384,
+        2000
       ],
       "id": "fd024af8-64da-4577-9a93-508583e5966c",
       "name": "Store in Neo4j",
@@ -344,8 +344,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2240,
-        1376
+        -2624,
+        2000
       ],
       "id": "fb4dfb3b-5639-46d1-b6bb-5baa35c2bcbd",
       "name": "Prepare Neo4j Cypher"
@@ -373,8 +373,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1984,
-        1568
+        -2368,
+        2192
       ],
       "id": "5c72fdfd-9424-4ba9-94de-e796137daaf0",
       "name": "Qdrant - Store Embedding",
@@ -392,8 +392,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1984,
-        1776
+        -2368,
+        2400
       ],
       "id": "3afbbdff-9bac-4e9a-a2c0-39dae1d4298b",
       "name": "Prepare PostgreSQL Batch"
@@ -405,8 +405,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1152,
-        1520
+        -1536,
+        2144
       ],
       "id": "a2641310-0e44-4c9b-985e-1a8ca7ed5a63",
       "name": "Generate Storage Summary"
@@ -418,8 +418,8 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        -1360,
-        1504
+        -1744,
+        2128
       ],
       "id": "29de6e5a-56f3-47b6-b330-003713ff530b",
       "name": "Merge"
@@ -453,8 +453,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1680,
-        1776
+        -2064,
+        2400
       ],
       "id": "ef3ed051-72d7-4107-9299-ce7d79a93f59",
       "name": "Store in Supabase(Postgre)",
@@ -496,8 +496,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -960,
-        1504
+        -1344,
+        2128
       ],
       "id": "1e257b72-5728-4ee6-a6d1-7f722415f3f3",
       "name": "Check for Errors"
@@ -518,8 +518,8 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        -704,
-        1408
+        -1088,
+        2032
       ],
       "id": "cfc92b18-8fee-47eb-8de1-de62db04e1dd",
       "name": "Send Error Notification",
@@ -547,8 +547,8 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        -672,
-        1680
+        -1056,
+        2304
       ],
       "id": "5d2b04b4-6b59-4ce4-8fb7-83a270aff1d7",
       "name": "Send Success Notification",
@@ -799,133 +799,35 @@
     },
     {
       "parameters": {
-        "jsCode": "// =====================================================\n// TASK 1.1 STEP 1: Get Richard Williams' FAT Object\n// We need to retrieve his embedding vector\n// =====================================================\n// \n// NOTE: You may need to adjust:\n// - collection_name: Could be 'fat_researchers', 'fat_researchers_v3', 'fat_objects', etc.\n// - ID format: Could be 'richard_williams', numeric ID, or UUID\n//\n// First, let's try to find him in the researchers collection\n\nreturn [{\n  json: {\n    task: 'Task 1.1 Step 1 - Get Richard Williams embedding',\n    description: 'Retrieve FAT Object embedding for vector search',\n    note: 'If this fails, we may need to adjust collection name or ID format'\n  }\n}];"
+        "content": "# Main Pipeline:\n\n# Note: Fetches \"thin\" Domain Hub standards → AI adds details → packages into ICF → creates number fingerprint for search.",
+        "height": 1568,
+        "width": 2672,
+        "color": 6
       },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.stickyNote",
       "position": [
-        -1872,
-        2544
+        -2736,
+        176
       ],
-      "id": "b69b8123-7ecd-426f-94a5-31c97536a3aa",
-      "name": "Prepare: Fetch Richard Williams"
+      "typeVersion": 1,
+      "id": "29ab54a9-c5f2-44f3-bb9e-9a4dda69d3d3",
+      "name": "Sticky Note1"
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://f0d17c59-8785-4dc5-a0e7-8a4ddb4480d0.eu-west-1-0.aws.cloud.qdrant.io:6333/collections/fat_researchers_v3/points/scroll",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "qdrantRestApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\n  \"limit\": 10,\n  \"with_payload\": true,\n  \"with_vector\": true,\n  \"filter\": {\n    \"should\": [\n      {\n        \"key\": \"name\",\n        \"match\": {\n          \"text\": \"Richard Williams\"\n        }\n      },\n      {\n        \"key\": \"researcher_name\",\n        \"match\": {\n          \"text\": \"Richard Williams\"\n        }\n      }\n    ]\n  }\n}",
-        "options": {}
+        "content": "# Storage\n\n# Note: Saves to Neo4j (connections), Qdrant (similarity search), and Supabase (logs).",
+        "height": 848,
+        "width": 2672,
+        "color": 4
       },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.stickyNote",
       "position": [
-        -1648,
-        2544
+        -2736,
+        1776
       ],
-      "id": "ce1a8f0e-18fd-422f-8dc7-13a3cc7c49b6",
-      "name": "Execute: Scroll for Richard Williams",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "EGYFqeyPSXZKoGqV",
-          "name": "Scopus InstToken"
-        },
-        "qdrantRestApi": {
-          "id": "5kvIJD32UkQxRAis",
-          "name": "Qdrant account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// =====================================================\n// Parse Richard Williams result and extract embedding\n// =====================================================\nconst rawResponse = $input.first().json;\nconst response = Array.isArray(rawResponse) ? rawResponse[0] : rawResponse;\n\nconsole.log('=== RICHARD WILLIAMS LOOKUP ===');\nconsole.log('Response keys:', Object.keys(response || {}));\n\nconst points = response?.result?.points || [];\n\nif (points.length === 0) {\n  console.log('❌ Richard Williams NOT FOUND in fat_researchers_v3');\n  console.log('Try checking:');\n  console.log('  - Different collection name');\n  console.log('  - Different filter field (name vs researcher_name)');\n  console.log('  - ID-based lookup instead of filter');\n  \n  return [{\n    json: {\n      status: 'NOT_FOUND',\n      error: 'Richard Williams not found in fat_researchers_v3',\n      suggestion: 'Check collection name and filter fields',\n      raw_response: response\n    }\n  }];\n}\n\nconst researcher = points[0];\nconst embedding = researcher.vector;\nconst payload = researcher.payload || {};\n\nconsole.log(`✅ Found Richard Williams`);\nconsole.log(`  Point ID: ${researcher.id}`);\nconsole.log(`  Name: ${payload.name || payload.researcher_name}`);\nconsole.log(`  Embedding dimensions: ${embedding?.length || 'NO VECTOR'}`);\n\nif (!embedding || embedding.length === 0) {\n  return [{\n    json: {\n      status: 'NO_VECTOR',\n      error: 'Richard Williams found but no embedding vector',\n      point_id: researcher.id,\n      payload: payload\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    status: 'FOUND',\n    researcher: {\n      point_id: researcher.id,\n      name: payload.name || payload.researcher_name,\n      payload_keys: Object.keys(payload)\n    },\n    embedding: embedding,\n    embedding_dimensions: embedding.length\n  }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -1424,
-        2544
-      ],
-      "id": "38f0f2ae-da6a-4d01-ab11-dfb14a274037",
-      "name": "Parse: Richard Williams Result"
-    },
-    {
-      "parameters": {
-        "jsCode": "// =====================================================\n// TASK 1.1 STEP 2: Search Standards with embedding\n// =====================================================\nconst input = $input.first().json;\n\nif (input.status !== 'FOUND') {\n  // Pass through the error\n  return [{ json: input }];\n}\n\nreturn [{\n  json: {\n    task: 'Task 1.1 Step 2 - Search Standards',\n    qdrant_search_payload: {\n      vector: input.embedding,\n      limit: 100,\n      with_payload: true\n    },\n    researcher: input.researcher\n  }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -1216,
-        2544
-      ],
-      "id": "0e454015-9ac9-4baa-ae50-c434b88bd599",
-      "name": "Prepare: Standards Search"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://f0d17c59-8785-4dc5-a0e7-8a4ddb4480d0.eu-west-1-0.aws.cloud.qdrant.io:6333/collections/standards_anzsrc_for_2020/points/search",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "qdrantRestApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json.qdrant_search_payload }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -992,
-        2544
-      ],
-      "id": "f882edda-8376-4a8c-90c6-af48f603b913",
-      "name": "Execute: Standards Vector Search",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "EGYFqeyPSXZKoGqV",
-          "name": "Scopus InstToken"
-        },
-        "qdrantRestApi": {
-          "id": "5kvIJD32UkQxRAis",
-          "name": "Qdrant account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// =====================================================\n// TASK 1.1 RESULTS: Find where 400301 ranks\n// =====================================================\nconst rawResponse = $input.first().json;\nconst researcher = $('Prepare: Standards Search').first().json.researcher;\n\n// Handle array wrapper\nconst response = Array.isArray(rawResponse) ? rawResponse[0] : rawResponse;\nconst results = response?.result || [];\n\nconsole.log('=== TASK 1.1 RAW VECTOR SEARCH RESULTS ===');\nconsole.log(`Researcher: ${researcher?.name}`);\nconsole.log(`Total results returned: ${results.length}`);\n\n// Find positions of problem codes\nconst problemCodes = ['400301', '310106', '310607', '340502'];\nconst positions = {};\n\nfor (const targetCode of problemCodes) {\n  positions[targetCode] = {\n    code: targetCode,\n    position: null,\n    score: null,\n    name: null\n  };\n}\n\n// Build top results list and find problem codes\nconst topResults = [];\n\nfor (let i = 0; i < results.length; i++) {\n  const result = results[i];\n  const payload = result.payload || {};\n  const code = payload.code?.toString();\n  const name = payload.name;\n  const score = result.score;\n  \n  // Record top 20\n  if (i < 20) {\n    topResults.push({\n      rank: i + 1,\n      code: code,\n      name: name,\n      score: score?.toFixed(4)\n    });\n  }\n  \n  // Check if this is a problem code\n  if (problemCodes.includes(code)) {\n    positions[code] = {\n      code: code,\n      position: i + 1,\n      score: score?.toFixed(4),\n      name: name\n    };\n  }\n}\n\n// Log findings\nconsole.log('\\n--- TOP 20 RESULTS ---');\nfor (const r of topResults) {\n  const marker = problemCodes.includes(r.code) ? ' ⭐' : '';\n  console.log(`${r.rank}. ${r.code} - ${r.name} (${r.score})${marker}`);\n}\n\nconsole.log('\\n--- PROBLEM CODES RANKING ---');\nfor (const [code, info] of Object.entries(positions)) {\n  if (info.position) {\n    console.log(`${code}: Position ${info.position} (score: ${info.score})`);\n  } else {\n    console.log(`${code}: ❌ NOT IN TOP 100`);\n  }\n}\n\n// Determine interpretation per spec\nconst code400301 = positions['400301'];\nlet interpretation = '';\nlet nextAction = '';\n\nif (!code400301.position) {\n  interpretation = 'SEVERE: 400301 not in top 100';\n  nextAction = 'Check Qdrant storage and embedding dimensions';\n} else if (code400301.position <= 20) {\n  interpretation = 'GOOD: Retrieval is working';\n  nextAction = 'Problem is in Gen 3 reranking → Go to Phase 2B';\n} else if (code400301.position <= 50) {\n  interpretation = 'MARGINAL: Retrieval could be improved';\n  nextAction = 'Embedding quality issue → Run Tasks 2.1-2.3';\n} else {\n  interpretation = 'POOR: Retrieval problem confirmed';\n  nextAction = 'Embedding or storage issue → Run Tasks 2.1-2.3';\n}\n\nconsole.log(`\\n--- INTERPRETATION ---`);\nconsole.log(`400301 Position: ${code400301.position || 'NOT FOUND'}`);\nconsole.log(`Assessment: ${interpretation}`);\nconsole.log(`Next Action: ${nextAction}`);\n\nreturn [{\n  json: {\n    task: 'Task 1.1 - Raw Vector Search Results',\n    researcher: researcher,\n    total_results: results.length,\n    problem_codes_ranking: positions,\n    top_20_results: topResults,\n    assessment: {\n      code_400301_position: code400301.position,\n      interpretation: interpretation,\n      next_action: nextAction\n    }\n  }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -768,
-        2544
-      ],
-      "id": "7a372723-485d-408a-81a0-514f8f6c4a90",
-      "name": "Parse: Task 1.1 Results"
+      "typeVersion": 1,
+      "id": "1d8eb0c7-442d-46bb-9102-64dac6bfcb35",
+      "name": "Sticky Note2"
     }
   ],
   "pinData": {
@@ -1332,68 +1234,13 @@
           }
         ]
       ]
-    },
-    "Prepare: Fetch Richard Williams": {
-      "main": [
-        [
-          {
-            "node": "Execute: Scroll for Richard Williams",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Execute: Scroll for Richard Williams": {
-      "main": [
-        [
-          {
-            "node": "Parse: Richard Williams Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse: Richard Williams Result": {
-      "main": [
-        [
-          {
-            "node": "Prepare: Standards Search",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Prepare: Standards Search": {
-      "main": [
-        [
-          {
-            "node": "Execute: Standards Vector Search",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Execute: Standards Vector Search": {
-      "main": [
-        [
-          {
-            "node": "Parse: Task 1.1 Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "09a57802-b893-44e1-b629-204df1ffd50b",
+  "versionId": "25da4760-bc89-44b9-9176-3a0f1c116e59",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"

@@ -1,0 +1,1618 @@
+{
+  "name": "OBJECT-1_v2.1 GEN 5 Workflow (Data Acquisition-All Researchers)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "3b35b35e-898c-418a-8df4-3b00051c6714",
+      "name": "Manual Trigger - Input Researcher Data",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1488,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google"
+            },
+            {
+              "name": "q",
+              "value": "=site:deakin.edu.au \"{{ $json.researcher_name }}\" researcher"
+            },
+            {
+              "name": "num",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "78203f0b-0d0c-4d51-a1c5-dd28df723ca6",
+      "name": "Source 1: Search Deakin Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -848,
+        -384
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "gQcmQB1eL9FJrs0y",
+          "name": "SerpAPI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract Deakin profile URL from search results\nconst results = $input.item.json.organic_results || [];\n\nif (results.length === 0) {\n  return {\n    _node: 'Extract Deakin Profile URL',\n    deakin_found: false,\n    deakin_profile_url: null,\n    deakin_data: null\n  };\n}\n\nconst firstResult = results[0];\n\nreturn {\n  _node: 'Extract Deakin Profile URL',\n  deakin_found: true,\n  deakin_profile_url: firstResult.link,\n  deakin_title: firstResult.title,\n  deakin_snippet: firstResult.snippet\n};"
+      },
+      "id": "d42a4970-102c-4280-a72b-4a91ba584d2b",
+      "name": "Extract Deakin Profile URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://pub.orcid.org/v3.0/search?q={{ $json.researcher_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1ed2cf43-9f6c-4166-ad44-e8c7bdfc43ea",
+      "name": "Search ORCID by Name",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        896,
+        192
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract ORCID ID from search results\nconst orcidId = $input.item.json.orcid_id;\n\nif (orcidId) {\n  // Already have ORCID ID from input\n  return { orcid_id: orcidId };\n}\n\nconst results = $input.item.json.result || [];\n\nif (results.length === 0) {\n  return {\n    orcid_found: false,\n    orcid_id: null\n  };\n}\n\n// Take first result\nconst firstResult = results[0];\nconst orcidIdFromSearch = firstResult['orcid-identifier']?.path;\n\nreturn {\n  orcid_found: true,\n  orcid_id: orcidIdFromSearch\n};"
+      },
+      "id": "b44184d9-1d85-43c6-b0ff-cb5707c6a48f",
+      "name": "Extract ORCID ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://pub.orcid.org/v3.0/{{ $json.orcid_id }}/record",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7ff55eb5-a4be-4c21-a49f-cacda98c141c",
+      "name": "Source 2: Fetch ORCID Full Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1296,
+        192
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse ORCID record with timestamp metadata\nconst orcid = $input.item.json;\nconst person = orcid.person || {};\nconst activities = orcid['activities-summary'] || {};\n\nfunction safeExtract(obj, path, defaultValue = null) {\n  return path.split('.').reduce((acc, part) => acc?.[part], obj) ?? defaultValue;\n}\n\nconst orcidId = safeExtract(orcid, 'orcid-identifier.path');\n\nreturn {\n  _node: 'Parse ORCID Data',\n  orcid_found: !!orcidId,\n  orcid_id: orcidId,\n  \n  given_name: safeExtract(person, 'name.given-names.value'),\n  family_name: safeExtract(person, 'name.family-name.value'),\n  keywords: person.keywords?.keyword?.map(k => k.content) || [],\n  \n  publications: activities.works?.group?.slice(0, 50).map(work => {\n    const summary = work['work-summary']?.[0] || {};\n    return {\n      title: safeExtract(summary, 'title.title.value'),\n      year: safeExtract(summary, 'publication-date.year.value'),\n      type: summary.type,\n      doi: summary['external-ids']?.['external-id']?.find(id => id['external-id-type'] === 'doi')?.['external-id-value']\n    };\n  }) || [],\n  \n  employment: activities.employments?.['affiliation-group']?.map(emp => {\n    const summary = emp.summaries?.[0]?.['employment-summary'] || {};\n    return {\n      organization: safeExtract(summary, 'organization.name'),\n      role: summary['role-title'],\n      department: summary['department-name'],\n      start_year: safeExtract(summary, 'start-date.year.value'),\n      end_year: safeExtract(summary, 'end-date.year.value')\n    };\n  }) || [],\n  \n  education: activities.educations?.['affiliation-group']?.map(edu => {\n    const summary = edu.summaries?.[0]?.['education-summary'] || {};\n    return {\n      institution: safeExtract(summary, 'organization.name'),\n      degree: summary['role-title'],\n      year: safeExtract(summary, 'end-date.year.value')\n    };\n  }) || [],\n  \n  funding_count: activities.fundings?.group?.length || 0,\n  \n  _source_meta: {\n    source: 'orcid',\n    scraped_at: new Date().toISOString(),\n    success: !!orcidId,\n    url: orcidId ? `https://orcid.org/${orcidId}` : null\n  }\n};"
+      },
+      "id": "5a1a570e-f08a-4d78-a058-a5e33ffd5ce8",
+      "name": "Parse ORCID Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.elsevier.com/content/author/orcid/{{ $json.orcid_id }}?view=ENHANCED",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "X-ELS-APIKey",
+              "value": "b44b780c60c6b6731bb436c65f9ea233"
+            },
+            {
+              "name": "X-ELS-Insttoken",
+              "value": "8b6097ed3698daa5cc21857a67ee1a29"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "239c53f6-7b4d-43f5-89e2-6d7caf7f258f",
+      "name": "Search Scopus by ORCID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        896,
+        384
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Scopus author metrics with timestamp metadata\nconst response = $input.item.json['author-retrieval-response']?.[0];\n\nif (!response) {\n  return { \n    _node: 'Parse Scopus Data',\n    scopus_found: false,\n    _source_meta: {\n      source: 'scopus',\n      scraped_at: new Date().toISOString(),\n      success: false,\n      error: 'No author data returned'\n    }\n  };\n}\n\nconst coredata = response.coredata || {};\nconst hIndex = response['h-index'] || 0;\nconst subjectAreas = response['subject-areas']?.['subject-area'] || [];\nconst affilCurrent = response['affiliation-current']?.affiliation;\nconst affilHistory = response['affiliation-history']?.affiliation || [];\n\nconst scopusId = coredata['dc:identifier']?.replace('AUTHOR_ID:', '');\n\nreturn {\n  _node: 'Parse Scopus Data',\n  scopus_found: true,\n  scopus_id: scopusId,\n  \n  document_count: parseInt(coredata['document-count']) || 0,\n  citation_count: parseInt(coredata['citation-count']) || 0,\n  cited_by_count: parseInt(coredata['cited-by-count']) || 0,\n  h_index: parseInt(hIndex) || 0,\n  \n  subject_areas: subjectAreas.map(s => ({\n    area: s['$'],\n    code: s['@code'],\n    abbrev: s['@abbrev']\n  })),\n  \n  affiliation_current: {\n    name: affilCurrent?.['ip-doc']?.afdispname,\n    city: affilCurrent?.['ip-doc']?.['address']?.city,\n    country: affilCurrent?.['ip-doc']?.['address']?.country\n  },\n  \n  affiliation_history: Array.isArray(affilHistory) \n    ? affilHistory.map(aff => ({\n        name: aff['ip-doc']?.afdispname,\n        city: aff['ip-doc']?.['address']?.city,\n        country: aff['ip-doc']?.['address']?.country\n      }))\n    : [{\n        name: affilHistory['ip-doc']?.afdispname,\n        city: affilHistory['ip-doc']?.['address']?.city,\n        country: affilHistory['ip-doc']?.['address']?.country\n      }],\n  \n  _source_meta: {\n    source: 'scopus',\n    scraped_at: new Date().toISOString(),\n    success: true,\n    url: scopusId ? `https://www.scopus.com/authid/detail.uri?authorId=${scopusId}` : null\n  }\n};"
+      },
+      "id": "db9e1d27-2576-4073-8de2-60eb64aaf49d",
+      "name": "Parse Scopus Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_scholar_author"
+            },
+            {
+              "name": "author_id",
+              "value": "={{ $json.scholar_id }}"
+            },
+            {
+              "name": "num",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "86725207-dba1-4719-9ce0-2c7c3aad9300",
+      "name": "Source 4: Fetch Google Scholar Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        912,
+        576
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "gQcmQB1eL9FJrs0y",
+          "name": "SerpAPI"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Google Scholar profile with timestamp metadata\nconst scholarResponse = $input.item.json;\nconst scholar = Array.isArray(scholarResponse) ? scholarResponse[0] : scholarResponse;\n\nif (!scholar.author) {\n  return { \n    _node: 'Parse Google Scholar Data',\n    scholar_found: false,\n    _source_meta: {\n      source: 'scholar',\n      scraped_at: new Date().toISOString(),\n      success: false,\n      error: 'No author profile found'\n    }\n  };\n}\n\nconst author = scholar.author;\nconst citedBy = scholar.cited_by || {};\nconst citedByTable = citedBy.table || [];\nconst scholarId = scholar.search_parameters?.author_id;\n\nreturn {\n  _node: 'Parse Google Scholar Data',\n  scholar_found: true,\n  scholar_id: scholarId,\n  \n  name: author.name,\n  affiliation: author.affiliations,\n  email: author.email,\n  interests: (author.interests || []).map(i => i.title),\n  homepage: author.website || null,\n  \n  cited_by_all: citedByTable[0]?.citations?.all || 0,\n  cited_by_recent: citedByTable[0]?.citations?.since_2020 || 0,\n  h_index_all: citedByTable[1]?.h_index?.all || 0,\n  h_index_recent: citedByTable[1]?.h_index?.since_2020 || 0,\n  i10_index_all: citedByTable[2]?.i10_index?.all || 0,\n  i10_index_recent: citedByTable[2]?.i10_index?.since_2020 || 0,\n  \n  publications: (scholar.articles || []).slice(0, 50).map(article => ({\n    title: article.title,\n    link: article.link,\n    citation_id: article.citation_id,\n    authors: article.authors,\n    publication: article.publication,\n    cited_by: article.cited_by?.value || 0,\n    year: article.year\n  })),\n  \n  co_authors: (scholar.co_authors || []).map(co => ({\n    name: co.name,\n    affiliation: co.affiliations,\n    author_id: co.author_id,\n    thumbnail: co.thumbnail\n  })),\n  \n  citations_per_year: citedBy.graph || [],\n  \n  _source_meta: {\n    source: 'scholar',\n    scraped_at: new Date().toISOString(),\n    success: true,\n    url: scholarId ? `https://scholar.google.com/citations?user=${scholarId}` : null\n  }\n};"
+      },
+      "id": "1dba8443-2e9f-48a2-a89b-bd295caec2c3",
+      "name": "Parse Google Scholar Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_patents"
+            },
+            {
+              "name": "inventor",
+              "value": "=\"={{ $json.researcher_name }}\""
+            },
+            {
+              "name": "num",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d46ce6d9-a058-4da7-a77b-f7da2ee227c3",
+      "name": "Source 5: Search Google Patents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        896,
+        784
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "gQcmQB1eL9FJrs0y",
+          "name": "SerpAPI"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// // Parse Google Patents with timestamp metadata\n// const patents = $input.item.json.organic_results || [];\n\n// const allIpcCodes = patents.flatMap(p => p.classifications?.ipc || []);\n// const uniqueIpcCodes = [...new Set(allIpcCodes)];\n\n// const allAssignees = patents.map(p => p.assignee).filter(Boolean);\n// const uniqueAssignees = [...new Set(allAssignees)];\n\n// return {\n//   _node: 'Parse Patent Data',\n//   patent_count: patents.length,\n//   has_patents: patents.length > 0,\n  \n//   patents: patents.map(patent => ({\n//     title: patent.title,\n//     patent_id: patent.patent_id,\n//     link: patent.link,\n//     filing_date: patent.filing_date,\n//     grant_date: patent.grant_date,\n//     priority_date: patent.priority_date,\n//     publication_date: patent.publication_date,\n//     ipc_classification: patent.classifications?.ipc || [],\n//     cpc_classification: patent.classifications?.cpc || [],\n//     inventor: patent.inventor,\n//     assignee: patent.assignee,\n//     snippet: patent.snippet,\n//     status: patent.status,\n//     pdf: patent.pdf,\n//     thumbnail: patent.thumbnail\n//   })),\n  \n//   innovation_signal: patents.length > 0 ? 'high' : 'low',\n//   primary_ipc_codes: uniqueIpcCodes.slice(0, 20),\n//   primary_assignees: uniqueAssignees.slice(0, 10),\n//   granted_count: patents.filter(p => p.status === 'granted').length,\n//   pending_count: patents.filter(p => p.status === 'pending').length,\n  \n//   _source_meta: {\n//     source: 'patents',\n//     scraped_at: new Date().toISOString(),\n//     success: patents.length > 0,\n//     url: 'https://patents.google.com/'\n//   }\n// };\n\n// Patents DISABLED - return empty result\nreturn {\n  _node: 'Parse Patent Data',\n  patents: [],\n  patent_count: 0,\n  _source_meta: {\n    source: 'patents',\n    scraped_at: new Date().toISOString(),\n    success: true,\n    disabled: true,\n    note: 'Patents search disabled due to name collision issues'\n  }\n};"
+      },
+      "id": "b48062ce-d993-49da-bd6f-4ee96b9bf9d1",
+      "name": "Parse Patent Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Merge All 5 Sources (MODIFIED for OBJECT-2 raw_evidence)\n// Purpose: Combine data from all 5 sources + compute field hashes\n// Input: Results from Deakin, ORCID, Scopus, Scholar, Patents\n// Output: Merged researcher object with biography, grants, research_interests\n// VERSION: v3.3 - Added getCleanInstitution() helper for reliable institution extraction\n// ============================================================\n\n// ============================================================\n// SECTION 1: Get input from all source nodes\n// ============================================================\n\n// Get the mode and context from earlier in the pipeline\nlet mode = 'initial_acquisition';\nlet existingFieldHashes = {};\nlet assetId = null;\nlet scanInitiatedAt = null;\nlet seedInstitution = null;  // v3.2: Track seed institution\n\n// Try to get maintenance scan context\ntry {\n  const maintenanceContext = $('Prepare Maintenance Scan').first().json;\n  if (maintenanceContext && maintenanceContext.mode === 'maintenance_scan') {\n    mode = 'maintenance_scan';\n    existingFieldHashes = maintenanceContext.existing_field_hashes || {};\n    assetId = maintenanceContext.asset_id;\n    scanInitiatedAt = maintenanceContext.scan_initiated_at;\n    seedInstitution = maintenanceContext.institution || null;\n  }\n} catch (e) {\n  // Not a maintenance scan - continue with initial acquisition\n}\n\n// Try to get context from Format Researcher Data (initial acquisition path)\ntry {\n  if (mode !== 'maintenance_scan') {\n    const formatContext = $('Format Researcher Data').first().json;\n    assetId = formatContext.asset_id || `fat:researcher:${(formatContext.researcher_name || 'unknown').toLowerCase().replace(/\\s+/g, '_')}`;\n    seedInstitution = formatContext.institution_name || formatContext.institution || null;\n  }\n} catch (e) {\n  // Continue without format context\n}\n\n// Get source data - handle both array and single item responses\nfunction getSourceData(nodeName) {\n  try {\n    const items = $(nodeName).all();\n    if (items.length === 0) return null;\n    return items[0].json;\n  } catch (e) {\n    return null;\n  }\n}\n\nconst deakinData = getSourceData('Parse Crawl4AI Output') || {};\nconst orcidData = getSourceData('Parse ORCID Data') || {};\nconst scopusData = getSourceData('Parse Scopus Data') || {};\nconst scholarData = getSourceData('Parse Google Scholar Data') || {};\nconst patentsData = getSourceData('Parse Patent Data') || {};\n\n// ============================================================\n// SECTION 2: Helper functions\n// ============================================================\n\n// Title similarity for deduplication\nfunction titleSimilarity(title1, title2) {\n  if (!title1 || !title2) return 0;\n  \n  const words1 = new Set(title1.toLowerCase().split(/\\s+/).filter(w => w.length > 2));\n  const words2 = new Set(title2.toLowerCase().split(/\\s+/).filter(w => w.length > 2));\n  \n  if (words1.size === 0 || words2.size === 0) return 0;\n  \n  const intersection = new Set([...words1].filter(x => words2.has(x)));\n  const union = new Set([...words1, ...words2]);\n  \n  return intersection.size / union.size;\n}\n\n// v3.3: Extract clean institution name with priority order\nfunction getCleanInstitution() {\n  // Priority 1: Seed institution (most reliable - from ResearcherSeed)\n  if (seedInstitution && seedInstitution !== 'Unknown') {\n    console.log(`🏛️ Institution from seed: ${seedInstitution}`);\n    return seedInstitution;\n  }\n  \n  // Priority 2: Scopus current affiliation (usually clean)\n  if (scopusData.affiliation_current?.name) {\n    console.log(`🏛️ Institution from Scopus: ${scopusData.affiliation_current.name}`);\n    return scopusData.affiliation_current.name;\n  }\n  \n  // Priority 3: ORCID current employment (extract institution only)\n  const currentEmployment = (orcidData.employment || []).find(emp => !emp.end_year && !emp.end_date);\n  if (currentEmployment) {\n    const orgName = typeof currentEmployment.organization === 'string' \n      ? currentEmployment.organization \n      : currentEmployment.organization?.name || currentEmployment.organization;\n    if (orgName) {\n      console.log(`🏛️ Institution from ORCID employment: ${orgName}`);\n      return orgName;\n    }\n  }\n  \n  // Priority 4: Deakin/university scraped data\n  if (deakinData.institution) {\n    console.log(`🏛️ Institution from university scrape: ${deakinData.institution}`);\n    return deakinData.institution;\n  }\n  \n  // Priority 5: Scholar affiliation (often messy, use as last resort)\n  if (scholarData.affiliation) {\n    const affil = scholarData.affiliation;\n    \n    // Try to extract just the university name if it contains common patterns\n    const uniMatch = affil.match(/(?:University of [A-Za-z\\s]+|[A-Za-z\\s]+ University|[A-Za-z\\s]+ Institute of Technology)/i);\n    if (uniMatch) {\n      const cleanName = uniMatch[0].trim();\n      console.log(`🏛️ Institution extracted from Scholar: ${cleanName}`);\n      return cleanName;\n    }\n    \n    // If short enough and doesn't look like a role description, use as-is\n    if (affil.length < 50 && !affil.toLowerCase().includes('professor') && \n        !affil.toLowerCase().includes('researcher') && !affil.toLowerCase().includes('postdoc')) {\n      console.log(`🏛️ Institution from Scholar (short): ${affil}`);\n      return affil;\n    }\n    \n    // Last attempt: if it has a comma, take the last part (often the institution)\n    if (affil.includes(',')) {\n      const parts = affil.split(',').map(p => p.trim());\n      const lastPart = parts[parts.length - 1];\n      if (lastPart.toLowerCase().includes('university') || lastPart.toLowerCase().includes('institute')) {\n        console.log(`🏛️ Institution from Scholar (last part): ${lastPart}`);\n        return lastPart;\n      }\n    }\n  }\n  \n  console.log(`⚠️ Institution: Unknown (no reliable source found)`);\n  return 'Unknown';\n}\n\n// ============================================================\n// SECTION 3: Build merged researcher object\n// ============================================================\n\nconst merged = {\n  // Core identifiers\n  asset_id: assetId,\n  name: orcidData.given_name && orcidData.family_name \n    ? `${orcidData.given_name} ${orcidData.family_name}`\n    : deakinData.name || scholarData.name || 'Unknown',\n  orcid: orcidData.orcid_id || null,\n  email: deakinData.contact_email || deakinData.email || null,\n  \n  // v3.3: Use helper function for clean institution extraction\n  institution: getCleanInstitution(),\n  \n  // Collections to be populated\n  publications: [],\n  collaborators: [],\n  keywords: [],\n  affiliations: [],\n  patents: [],\n  \n  // ===== Fields required for OBJECT-2 raw_evidence =====\n  grants: [],\n  biography: deakinData.biography || orcidData.biography || '',\n  research_interests: deakinData.research_interests || [],\n  current_projects: deakinData.current_projects || [],\n  expertise_keywords: deakinData.expertise_keywords || [],\n  // ===== END =====\n  \n  metrics: {},\n  data_quality_flags: [],\n  \n  // Metadata\n  mode: mode,\n  merged_at: new Date().toISOString()\n};\n\n// ============================================================\n// SECTION 4: Merge publications from all sources\n// ============================================================\n\nconst publicationsMap = new Map();\n\n// Add ORCID publications (often most complete list with DOIs)\n(orcidData.publications || []).forEach(pub => {\n  const doi = pub.doi;\n  const key = doi || `orcid_${(pub.title || '').toLowerCase().substring(0, 50)}`;\n  \n  if (key && !publicationsMap.has(key)) {\n    publicationsMap.set(key, {\n      title: pub.title,\n      doi: doi,\n      year: pub.year,\n      citations: pub.citations || 0,\n      type: pub.type,\n      abstract: pub.abstract || '',\n      keywords: pub.keywords || [],\n      source: 'orcid'\n    });\n  }\n});\n\n// Add Scopus publications\n(scopusData.publications || []).forEach(pub => {\n  const doi = pub.doi;\n  const key = doi || `scopus_${(pub.title || '').toLowerCase().substring(0, 50)}`;\n  \n  if (doi && publicationsMap.has(doi)) {\n    // Merge with existing - Scopus often has better abstracts\n    const existing = publicationsMap.get(doi);\n    existing.citations = Math.max(existing.citations || 0, pub.citations || 0);\n    if (!existing.abstract && pub.abstract) {\n      existing.abstract = pub.abstract;\n    }\n    if ((!existing.keywords || existing.keywords.length === 0) && pub.keywords) {\n      existing.keywords = pub.keywords;\n    }\n  } else if (!publicationsMap.has(key)) {\n    publicationsMap.set(key, {\n      title: pub.title,\n      doi: doi,\n      year: pub.year,\n      citations: pub.citations || 0,\n      authors: pub.authors || [],\n      abstract: pub.abstract || '',\n      keywords: pub.keywords || [],\n      source: 'scopus'\n    });\n  }\n});\n\n// Add Scholar publications (often has highest citation counts)\n(scholarData.publications || scholarData.articles || []).forEach(pub => {\n  const title = pub.title || '';\n  const doi = pub.doi;\n  \n  if (doi && publicationsMap.has(doi)) {\n    // Merge citations (Scholar often has higher counts)\n    const existing = publicationsMap.get(doi);\n    existing.citations = Math.max(existing.citations || 0, pub.citations || pub.cited_by || 0);\n    // Scholar sometimes has author info\n    if (pub.authors && (!existing.authors || existing.authors.length === 0)) {\n      existing.authors = pub.authors;\n    }\n  } else {\n    // Check for title duplicates\n    let isDuplicate = false;\n    for (const [existingKey, existingPub] of publicationsMap.entries()) {\n      if (titleSimilarity(title, existingPub.title) > 0.85) {\n        isDuplicate = true;\n        // Update citation count if higher\n        existingPub.citations = Math.max(existingPub.citations || 0, pub.citations || pub.cited_by || 0);\n        break;\n      }\n    }\n    \n    if (!isDuplicate && title) {\n      const key = doi || `scholar_${title.toLowerCase().substring(0, 50)}`;\n      publicationsMap.set(key, {\n        title: title,\n        doi: doi,\n        year: pub.year,\n        citations: pub.citations || pub.cited_by || 0,\n        authors: pub.authors || '',\n        publication_venue: pub.publication || '',\n        source: 'scholar'\n      });\n    }\n  }\n});\n\n// Sort by citations (highest first) for dense_view\nmerged.publications = Array.from(publicationsMap.values())\n  .sort((a, b) => (b.citations || 0) - (a.citations || 0));\n\n// ============================================================\n// SECTION 5: Extract collaborators\n// ============================================================\n\nconst collaboratorsSet = new Set();\nconst researcherNameLower = merged.name.toLowerCase();\n\n// From publications\nmerged.publications.forEach(pub => {\n  // Handle authors as either array or string\n  let authorsList = [];\n  if (Array.isArray(pub.authors)) {\n    authorsList = pub.authors;\n  } else if (typeof pub.authors === 'string' && pub.authors) {\n    // Split string like \"M Puri, D Sharma, CJ Barrow\" into array\n    authorsList = pub.authors.split(',').map(a => a.trim());\n  }\n  \n  authorsList.forEach(author => {\n    const authorName = (typeof author === 'string' ? author : author.name || '').trim();\n    if (authorName && authorName.toLowerCase() !== researcherNameLower) {\n      collaboratorsSet.add(authorName);\n    }\n  });\n});\n\n// From Scholar co-authors\n(scholarData.co_authors || []).forEach(coauthor => {\n  const name = (typeof coauthor === 'string' ? coauthor : coauthor.name || '').trim();\n  if (name && name.toLowerCase() !== researcherNameLower) {\n    collaboratorsSet.add(name);\n  }\n});\n\nmerged.collaborators = Array.from(collaboratorsSet);\n\n// ============================================================\n// SECTION 6: Merge keywords from all sources\n// (research_interests is kept SEPARATE - not merged here)\n// ============================================================\n\nconst keywordsSet = new Set();\n\n// From ORCID keywords\n(orcidData.keywords || []).forEach(kw => {\n  if (kw) keywordsSet.add(kw.toLowerCase().trim());\n});\n\n// From Scholar interests\n(scholarData.interests || []).forEach(kw => {\n  if (kw) keywordsSet.add(kw.toLowerCase().trim());\n});\n\n// From Scopus subject areas (these are broad categories)\n(scopusData.subject_areas || []).forEach(area => {\n  const areaName = area.area || area;\n  if (areaName) keywordsSet.add(areaName.toLowerCase().trim());\n});\n\n// From publication keywords\nmerged.publications.forEach(pub => {\n  (pub.keywords || []).forEach(kw => {\n    if (kw) keywordsSet.add(kw.toLowerCase().trim());\n  });\n});\n\n// From Deakin expertise_keywords (but NOT research_interests - keep separate)\n(deakinData.expertise_keywords || []).forEach(kw => {\n  if (kw) keywordsSet.add(kw.toLowerCase().trim());\n});\n\nmerged.keywords = Array.from(keywordsSet);\n\n// ============================================================\n// SECTION 7: Merge affiliations\n// ============================================================\n\nconst affiliations = [];\n\n// From ORCID employment\n(orcidData.employment || []).forEach(emp => {\n  const orgName = typeof emp.organization === 'string' \n    ? emp.organization \n    : emp.organization?.name || emp.organization;\n  \n  if (orgName) {\n    affiliations.push({\n      institution: orgName,\n      department: emp.department || null,\n      role: emp.role || emp['role-title'] || null,\n      start_date: emp.start_year || emp.start_date || null,\n      end_date: emp.end_year || emp.end_date || null,\n      current: !emp.end_year && !emp.end_date,\n      source: 'orcid'\n    });\n  }\n});\n\n// From Scopus affiliation history\n(scopusData.affiliation_history || []).forEach(aff => {\n  if (aff.name) {\n    affiliations.push({\n      institution: aff.name,\n      city: aff.city,\n      country: aff.country,\n      source: 'scopus'\n    });\n  }\n});\n\n// Current affiliation from Scopus\nif (scopusData.affiliation_current?.name) {\n  const currentExists = affiliations.some(a => \n    a.institution === scopusData.affiliation_current.name && a.current\n  );\n  if (!currentExists) {\n    affiliations.push({\n      institution: scopusData.affiliation_current.name,\n      city: scopusData.affiliation_current.city,\n      country: scopusData.affiliation_current.country,\n      current: true,\n      source: 'scopus'\n    });\n  }\n}\n\n// From Deakin/university data\nif (deakinData.department || deakinData.position) {\n  affiliations.push({\n    institution: merged.institution,\n    department: deakinData.department || deakinData.school || null,\n    position: deakinData.position || null,\n    current: true,\n    source: 'university'\n  });\n}\n\nmerged.affiliations = affiliations;\n\n// ============================================================\n// SECTION 8: Patents\n// ============================================================\n\nmerged.patents = (patentsData.patents || []).map(patent => ({\n  title: patent.title,\n  patent_id: patent.patent_id,\n  filing_date: patent.filing_date,\n  grant_date: patent.grant_date,\n  publication_date: patent.publication_date,\n  inventor: patent.inventor,\n  assignee: patent.assignee,\n  snippet: patent.snippet,\n  pdf: patent.pdf\n}));\n\n// ============================================================\n// SECTION 9: Extract grants (from ORCID funding if available)\n// ============================================================\n\nconst grantsArray = [];\n\n// From ORCID funding\n(orcidData.funding || orcidData.fundings || []).forEach(fund => {\n  const title = fund.title || fund.grant_title || '';\n  if (title) {\n    grantsArray.push({\n      title: title,\n      funder: fund.organization?.name || fund.funder || fund.funding_organization || '',\n      amount: fund.amount || fund.total_funding || null,\n      dates: (fund.start_date?.year && fund.end_date?.year) \n             ? `${fund.start_date.year}-${fund.end_date.year}` \n             : (fund.start_year && fund.end_year ? `${fund.start_year}-${fund.end_year}` : ''),\n      role: fund.role || 'Investigator',\n      source: 'orcid'\n    });\n  }\n});\n\n// From Deakin data (if available)\n(deakinData.grants || deakinData.funding || []).forEach(grant => {\n  const title = grant.title || grant.name || '';\n  if (title) {\n    // Check for duplicates\n    const exists = grantsArray.some(g => \n      g.title.toLowerCase() === title.toLowerCase()\n    );\n    if (!exists) {\n      grantsArray.push({\n        title: title,\n        funder: grant.funder || grant.funding_body || '',\n        amount: grant.amount || grant.value || null,\n        dates: grant.dates || \n               (grant.start_year && grant.end_year ? `${grant.start_year}-${grant.end_year}` : ''),\n        role: grant.role || 'Chief Investigator',\n        source: 'university'\n      });\n    }\n  }\n});\n\nmerged.grants = grantsArray;\n\n// ============================================================\n// SECTION 10: Calculate metrics\n// ============================================================\n\nmerged.metrics = {\n  h_index: Math.max(\n    scopusData.h_index || 0,\n    scholarData.h_index_all || scholarData.h_index || 0\n  ),\n  total_citations: Math.max(\n    scopusData.citation_count || scopusData.cited_by_count || 0,\n    scholarData.cited_by_all || scholarData.citations || 0\n  ),\n  publication_count: Math.max(\n    scopusData.document_count || 0,\n    merged.publications.length\n  ),\n  collaborator_count: merged.collaborators.length,\n  patent_count: patentsData.patent_count || merged.patents.length || 0,\n  grant_count: merged.grants.length,\n  keyword_count: merged.keywords.length,\n  affiliation_count: merged.affiliations.length,\n  research_interest_count: merged.research_interests.length,\n  current_project_count: merged.current_projects.length\n};\n\n// ============================================================\n// SECTION 11: Data quality flags\n// ============================================================\n\nif (!merged.orcid) merged.data_quality_flags.push('missing_orcid');\nif (merged.metrics.publication_count === 0) merged.data_quality_flags.push('no_publications');\nif (merged.affiliations.length === 0) merged.data_quality_flags.push('no_affiliations');\nif (merged.keywords.length === 0) merged.data_quality_flags.push('no_keywords');\n\n// Quality flags for OBJECT-2 required fields\nif (merged.grants.length === 0) merged.data_quality_flags.push('no_grants');\nif (!merged.biography) merged.data_quality_flags.push('no_biography');\nif (merged.research_interests.length === 0) merged.data_quality_flags.push('no_research_interests');\n\n// Calculate completeness score (updated weights)\nlet completeness = 0;\nif (merged.orcid) completeness += 15;\nif (merged.metrics.publication_count > 0) completeness += 20;\nif (merged.affiliations.length > 0) completeness += 15;\nif (merged.metrics.h_index > 0) completeness += 10;\nif (merged.keywords.length > 0) completeness += 5;\nif (merged.collaborators.length > 0) completeness += 5;\n// NEW fields contribute to completeness\nif (merged.biography) completeness += 10;\nif (merged.research_interests.length > 0) completeness += 10;\nif (merged.grants.length > 0) completeness += 5;\nif (merged.current_projects.length > 0) completeness += 5;\n\nmerged.data_completeness = completeness;\n\n// ============================================================\n// SECTION 12: Compute field hashes for change detection\n// ============================================================\n\nfunction computeHash(value) {\n  // Simple but effective hash for comparison\n  const str = JSON.stringify(value, Object.keys(value || {}).sort());\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash; // Convert to 32-bit integer\n  }\n  return Math.abs(hash).toString(16).padStart(8, '0');\n}\n\n// Compute hashes for key fields\nconst newFieldHashes = {\n  identity: computeHash({\n    name: merged.name,\n    orcid: merged.orcid,\n    institution: merged.institution\n  }),\n  affiliation: computeHash(merged.affiliations.map(a => a.institution).sort()),\n  publications: computeHash({\n    count: merged.publications.length,\n    titles: merged.publications.map(p => p.title).sort()\n  }),\n  metrics: computeHash(merged.metrics),\n  patents: computeHash(merged.patents.map(p => p.title).sort()),\n  collaborators: computeHash(merged.collaborators.sort().slice(0, 50)),\n  keywords: computeHash(merged.keywords.sort())\n};\n\nmerged.field_hashes = newFieldHashes;\n\n// ============================================================\n// SECTION 13: Change detection (maintenance scan only)\n// ============================================================\n\nif (mode === 'maintenance_scan') {\n  const changedFields = [];\n  const changeDetails = {};\n  \n  for (const [field, newHash] of Object.entries(newFieldHashes)) {\n    const existingHash = existingFieldHashes[field];\n    \n    if (existingHash && existingHash !== newHash) {\n      changedFields.push(field);\n      changeDetails[field] = {\n        previous_hash: existingHash,\n        new_hash: newHash,\n        changed: true\n      };\n    } else if (!existingHash) {\n      // New field not previously tracked\n      changeDetails[field] = {\n        previous_hash: null,\n        new_hash: newHash,\n        changed: false,\n        note: 'field_not_previously_tracked'\n      };\n    } else {\n      changeDetails[field] = {\n        previous_hash: existingHash,\n        new_hash: newHash,\n        changed: false\n      };\n    }\n  }\n  \n  // Determine scan status\n  const scanStatus = changedFields.length > 0 ? 'changes_detected' : 'verified_unchanged';\n  \n  console.log(`Scan complete: ${scanStatus}`);\n  console.log(`Changed fields: ${changedFields.length > 0 ? changedFields.join(', ') : 'none'}`);\n  \n  merged.scan_result = {\n    scan_status: scanStatus,\n    changed_fields: changedFields,\n    change_count: changedFields.length,\n    change_details: changeDetails,\n    new_field_hashes: newFieldHashes,\n    existing_field_hashes: existingFieldHashes,\n    scanned_at: new Date().toISOString(),\n    scan_initiated_at: scanInitiatedAt,\n    scan_duration_ms: scanInitiatedAt \n      ? new Date().getTime() - new Date(scanInitiatedAt).getTime() \n      : null\n  };\n  \n  // Include fresh data if changes detected (for GOVERN-3)\n  if (scanStatus === 'changes_detected') {\n    merged.fresh_data = {\n      publications: merged.publications,\n      metrics: merged.metrics,\n      affiliations: merged.affiliations,\n      collaborators: merged.collaborators,\n      keywords: merged.keywords,\n      patents: merged.patents,\n      grants: merged.grants,\n      biography: merged.biography,\n      research_interests: merged.research_interests\n    };\n  }\n}\n\n// ============================================================\n// SECTION 14: Source metadata\n// ============================================================\n\nmerged.source_metadata = {\n  sources_scraped: [\n    deakinData._source_meta ? 'deakin' : null,\n    orcidData._source_meta ? 'orcid' : null,\n    scopusData._source_meta ? 'scopus' : null,\n    scholarData._source_meta ? 'scholar' : null,\n    patentsData._source_meta ? 'patents' : null\n  ].filter(Boolean),\n  \n  scrape_timestamps: {\n    deakin: deakinData._source_meta?.scraped_at,\n    orcid: orcidData._source_meta?.scraped_at,\n    scopus: scopusData._source_meta?.scraped_at,\n    scholar: scholarData._source_meta?.scraped_at,\n    patents: patentsData._source_meta?.scraped_at\n  },\n  \n  source_success: {\n    deakin: deakinData._source_meta?.success || false,\n    orcid: orcidData._source_meta?.success || orcidData.orcid_found || false,\n    scopus: scopusData._source_meta?.success || scopusData.scopus_found || false,\n    scholar: scholarData._source_meta?.success || scholarData.scholar_found || false,\n    patents: patentsData._source_meta?.success || false\n  }\n};\n\n// ============================================================\n// SECTION 15: Source verification metadata\n// ============================================================\n\nmerged.source_verification = {\n  status: mode === 'maintenance_scan' ? 'maintenance_scan_complete' : 'initial_ingest',\n  changes_detected: mode === 'maintenance_scan' ? (merged.scan_result?.change_count > 0) : false,\n  changed_fields: mode === 'maintenance_scan' ? (merged.scan_result?.changed_fields || []) : [],\n  change_count: mode === 'maintenance_scan' ? (merged.scan_result?.change_count || 0) : 0\n};\n\nmerged.scan_result = merged.scan_result || null;\n\n// ============================================================\n// SECTION 16: Hash metadata\n// ============================================================\n\nmerged.hash_metadata = {\n  computed_at: new Date().toISOString(),\n  algorithm: 'djb2',\n  field_count: Object.keys(newFieldHashes).length\n};\n\n// ============================================================\n// SECTION 17: Return result\n// ============================================================\n\nconsole.log(`Merge complete for: ${merged.name}`);\nconsole.log(`Institution: ${merged.institution}`);\nconsole.log(`Publications: ${merged.metrics.publication_count}, H-index: ${merged.metrics.h_index}`);\nconsole.log(`Biography: ${merged.biography ? 'YES (' + merged.biography.length + ' chars)' : 'NO'}`);\nconsole.log(`Research Interests: ${merged.research_interests.length}`);\nconsole.log(`Grants: ${merged.grants.length}`);\nconsole.log(`Current Projects: ${merged.current_projects.length}`);\nconsole.log(`Mode: ${mode}`);\n\nreturn [{\n  json: merged\n}];"
+      },
+      "id": "c1af7cb9-5ac0-485f-ba9c-87f23b1042a7",
+      "name": "Merge All 5 Sources",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Output summary for validation\nconst researcher = $input.item.json;\n\n// Get values using the ACTUAL structure from Merge All 5 Sources\nconst metrics = researcher.metrics || {};\nconst sourceMetadata = researcher.source_metadata || {};\nconst sourcesSscraped = sourceMetadata.sources_scraped || [];\nconst keywords = researcher.keywords || [];\n\nreturn {\n  json: {\n    summary: {\n      name: researcher.name,\n      sources_found: sourcesSscraped.length,\n      data_quality: researcher.data_completeness || 0,\n      publications: metrics.publication_count || 0,\n      citations: metrics.total_citations || 0,\n      h_index: metrics.h_index || 0,\n      patents: metrics.patent_count || 0,\n      keywords_count: keywords.length\n    },\n    \n    // Flag for next workflow\n    ready_for_enrichment: sourcesSscraped.length >= 2 && (researcher.data_completeness || 0) >= 40,\n    \n    // Full data for next node\n    thin_object: researcher\n  }\n};"
+      },
+      "id": "2b4d7b6f-4fef-4f36-af29-28f61cf38893",
+      "name": "Generate Acquisition Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3040,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.ready_for_enrichment }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "9557362d-611b-424d-9ca5-05c47305b631",
+      "name": "Quality Gate: Check Data Completeness",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        3616,
+        432
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "81490def-b7fb-45de-b8b6-0d768b72d5bb",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        4624,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1936,
+        352
+      ],
+      "id": "1c75fbc3-7900-4965-998c-904526ce7d01",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3968,
+        224
+      ],
+      "id": "0a27c387-5f2a-4ce0-8518-52b6b1e8fa61",
+      "name": "Neo4j - Create Standard Node",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const thinObject = $input.item.json.thin_object || $input.item.json;\n\n// Extract from proper sources\nconst biography = thinObject.biography || thinObject.research_profile?.biography || '';\nconst research_interests = thinObject.research_interests || [];  // FROM DEAKIN, not keywords\nconst current_projects = thinObject.current_projects || [];\nconst expertise_keywords = thinObject.expertise_keywords || [];\nconst collaborators = thinObject.collaborators || [];\n\nconst singleQuery = {\n  statement: `\n    MERGE (thin:ThinObject:Researcher {asset_id: $asset_id})\n    SET thin.status = $status,\n        thin.object_type = $object_type,\n        thin.name = $name,\n        thin.email = $email,\n        thin.orcid = $orcid,\n        thin.institution = $institution,\n        \n        // ✅ NEW: Direct fields for OBJECT-2\n        thin.biography = $biography,\n        thin.research_interests = $research_interests,\n        thin.current_projects = $current_projects,\n        thin.expertise_keywords = $expertise_keywords,\n        thin.collaborators = $collaborators,\n        thin.keywords = $keywords,\n        thin.publications = $publications,\n        thin.patents = $patents,\n        thin.affiliations = $affiliations,\n        thin.grants = $grants,\n        thin.metrics = $metrics,\n        \n        // Raw source data (keep for backward compatibility)\n        thin.orcid_data = $orcid_data,\n        thin.scopus_data = $scopus_data,\n        thin.scholar_data = $scholar_data,\n        thin.university_data = $university_data,\n        thin.patents_data = $patents_data,\n        thin.source_metadata = $source_metadata,\n        \n        thin.data_quality_flags = $data_quality_flags,\n        thin.data_completeness = $data_completeness,\n        thin.field_hashes = $field_hashes,\n        thin.created_at = coalesce(thin.created_at, datetime()),\n        thin.updated_at = datetime()\n    RETURN thin.asset_id AS asset_id, \n           thin.name AS name, \n           thin.status AS status\n  `,\n  parameters: {\n    asset_id: `thin:researcher:${thinObject.name.toLowerCase().replace(/ /g, '_')}`,\n    status: \"raw\",\n    object_type: \"researcher\",\n    name: thinObject.name,\n    email: thinObject.email || null,\n    orcid: thinObject.orcid || null,\n    institution: thinObject.institution || null,\n    \n    // ✅ NEW: Direct fields\n    biography: biography,\n    research_interests: research_interests,\n    current_projects: current_projects,\n    expertise_keywords: expertise_keywords,\n    collaborators: collaborators,\n    keywords: thinObject.keywords || [],\n    publications: JSON.stringify(thinObject.publications || []),\n    patents: JSON.stringify(thinObject.patents || []),\n    affiliations: JSON.stringify(thinObject.affiliations || []),\n    grants: JSON.stringify(thinObject.grants || []),\n    metrics: JSON.stringify(thinObject.metrics || {}),\n    \n    // Raw source data\n    orcid_data: JSON.stringify(thinObject.orcid_data || {}),\n    scopus_data: JSON.stringify(thinObject.scopus_data || {}),\n    scholar_data: JSON.stringify(thinObject.scholar_data || {}),\n    university_data: JSON.stringify({\n      biography: biography,\n      research_interests: research_interests,  // ✅ FIXED\n      current_projects: current_projects,\n      expertise_keywords: expertise_keywords\n    }),\n    patents_data: JSON.stringify(thinObject.patents_data || {}),\n    source_metadata: JSON.stringify(thinObject.source_metadata || {}),\n    \n    data_quality_flags: thinObject.data_quality_flags || [],\n    data_completeness: thinObject.data_completeness || 0,\n    field_hashes: JSON.stringify(thinObject.field_hashes || {})\n  }\n};\n\nreturn { json: singleQuery };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3776,
+        224
+      ],
+      "id": "9d058d7e-c2a1-483a-9d91-02467fa7c087",
+      "name": "Prepare Neo4j Parameters"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Parse Crawl4AI Output with NAME VALIDATION\n// Version: v2.1 - Prevents data contamination from wrong profiles\n// ============================================================\n\nconst crawlData = $input.item.json;\n\n// ============================================================\n// Get the intended researcher name from earlier in the pipeline\n// ============================================================\nlet intendedName = '';\ntry {\n  intendedName = $('Format Researcher Data').first().json.researcher_name || '';\n} catch (e) {\n  // Try alternate path\n  try {\n    intendedName = $('Split In Batches').first().json.researcher_name || '';\n  } catch (e2) {\n    intendedName = '';\n  }\n}\n\nconsole.log(`🔍 Parsing Crawl4AI output for: \"${intendedName}\"`);\n\nconst data = Array.isArray(crawlData) ? crawlData[0] : crawlData;\n\n// ============================================================\n// Handle scrape failure\n// ============================================================\nif (!data.success) {\n  console.log(`❌ Crawl4AI scrape failed`);\n  return {\n    _node: 'Parse Crawl4AI Output',\n    profile_found: false,\n    _source_meta: {\n      source: 'university',\n      scraped_at: new Date().toISOString(),\n      success: false,\n      error: data.error || 'Scrape failed',\n      url: data.url || null\n    }\n  };\n}\n\n// ============================================================\n// NAME VALIDATION: Check if scraped data matches intended researcher\n// This prevents data contamination from search pages or wrong profiles\n// ============================================================\nconst scrapedName = data.name || '';\nconst scrapedBio = data.biography || '';\n\n// Extract meaningful name parts (ignore short words like \"Dr\", \"Mr\", etc.)\nconst intendedNameParts = intendedName.toLowerCase()\n  .split(/\\s+/)\n  .filter(p => p.length > 2 && !['dr', 'mr', 'ms', 'mrs', 'prof', 'professor'].includes(p));\n\nconst scrapedNameLower = scrapedName.toLowerCase();\nconst scrapedBioLower = (scrapedBio || '').toLowerCase().substring(0, 500); // Check first 500 chars\n\n// Calculate name match score\nlet nameMatchScore = 0;\nintendedNameParts.forEach(part => {\n  if (scrapedNameLower.includes(part) || scrapedBioLower.includes(part)) {\n    nameMatchScore++;\n  }\n});\n\nconst matchRatio = intendedNameParts.length > 0 \n  ? nameMatchScore / intendedNameParts.length \n  : 0;\n\nconsole.log(`   Intended: \"${intendedName}\"`);\nconsole.log(`   Scraped:  \"${scrapedName}\"`);\nconsole.log(`   Match ratio: ${(matchRatio * 100).toFixed(0)}%`);\n\n// ============================================================\n// REJECT if less than 50% name match\n// ============================================================\nif (matchRatio < 0.5) {\n  console.log(`⚠️ NAME MISMATCH DETECTED - REJECTING scraped data`);\n  console.log(`   This prevents contamination from wrong profile data`);\n  \n  return {\n    _node: 'Parse Crawl4AI Output',\n    profile_found: false,\n    _source_meta: {\n      source: 'university',\n      scraped_at: new Date().toISOString(),\n      success: false,\n      error: `Name mismatch: expected \"${intendedName}\", scraped \"${scrapedName}\"`,\n      url: data.url || null,\n      rejected_due_to: 'name_mismatch',\n      intended_name: intendedName,\n      scraped_name: scrapedName,\n      match_ratio: matchRatio\n    }\n  };\n}\n\n// ============================================================\n// SUCCESS - Name validated, return scraped data\n// ============================================================\nconsole.log(`✅ Name validation PASSED - using scraped data`);\n\nreturn {\n  _node: 'Parse Crawl4AI Output',\n  profile_found: true,\n  name: data.name || null,\n  profile_url: data.url || null,\n  contact_email: data.email || null,\n  department: data.department || null,\n  school: data.school || null,\n  position: data.position || null,\n  institution: data.institution || null,\n  research_interests: data.research_interests || [],\n  current_projects: data.current_projects || [],\n  expertise_keywords: data.research_interests || [],\n  biography: data.biography || null,\n  _source_meta: {\n    source: 'university',\n    scraped_at: new Date().toISOString(),\n    success: true,\n    url: data.url || null,\n    name_validated: true,\n    intended_name: intendedName,\n    scraped_name: scrapedName,\n    match_ratio: matchRatio\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        -32
+      ],
+      "id": "5438df92-1479-48ab-9b0b-c72fa8cb0d8a",
+      "name": "Parse Crawl4AI Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch pending ResearcherSeeds for OBJECT-1 (ALL institutions except Deakin)\nconst cypherPayload = {\n  statement: `\n    MATCH (seed:ResearcherSeed)\n    WHERE seed.status = 'pending'\n    RETURN seed.name AS researcher_name,\n           seed.orcid_id AS orcid_id,\n           seed.scholar_id AS scholar_id,\n           seed.institution AS institution,\n           seed.department AS department,\n           seed.web_profile_url AS web_profile_url\n    ORDER BY seed.created_at ASC\n    LIMIT $limit\n  `,\n  parameters: {\n    limit: 200\n  }\n};\nreturn [{\n  json: {\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        352
+      ],
+      "id": "fc1f9ab4-663a-46c9-9bd8-c9767d292237",
+      "name": "Prepare Fetch Seeds Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Update seed status to 'acquiring' when starting\nconst researcher = $input.first().json;\n\nconst cypherPayload = {\n  statement: `\n    MATCH (seed:ResearcherSeed {name: $name})\n    SET seed.status = 'acquiring',\n        seed.acquiring_started_at = timestamp()\n    RETURN seed.name AS updated\n  `,\n  parameters: {\n    name: researcher.researcher_name\n  }\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypherPayload,\n    researcher: researcher\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        368
+      ],
+      "id": "a3eaf204-b1d3-47db-ba19-b938db600486",
+      "name": "Update status 'acquiring'"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        176,
+        368
+      ],
+      "id": "f6a6b09d-6fbd-4897-8ea6-55b92030733a",
+      "name": "Update to Aquiring",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transform Neo4j response to individual researcher items\nconst response = $input.first().json;\n\nconst fields = response.data.fields;\nconst values = response.data.values;\n\n// Map each row to an object using field names\nconst researchers = values.map(row => {\n  const obj = {};\n  fields.forEach((field, index) => {\n    obj[field] = row[index];\n  });\n  return obj;\n});\n\n// Return each researcher as separate item for the loop\nreturn researchers.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        352
+      ],
+      "id": "c6f5932a-eae3-47eb-bace-aa353b502df7",
+      "name": "Transform Neo4j Response"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        352
+      ],
+      "id": "38476ca4-f6d2-4982-8413-b09a544012c8",
+      "name": "Fetch Seeds HTTP node",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get researcher data from the Loop node\nconst input = $('Split In Batches').first().json;\n\nconst formattedResearcher = {\n  // Mode identification (Gen 2: always initial_ingest)\n  mode: 'initial_ingest',\n  \n  // Existing fields\n  researcher_name: input.researcher_name,\n  department: input.department || \"\",\n  institution_name: input.institution,\n  institution_domain: input.institution_domain,\n  web_profile_url: input.web_profile_url || \"\",\n  orcid_id: input.orcid_id,\n  scholar_id: input.scholar_id\n};\n\nreturn [{\n  json: formattedResearcher\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        368
+      ],
+      "id": "30d45883-30d7-4c45-b09c-8f3a7ab01340",
+      "name": "Format Researcher Data"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -272,
+        352
+      ],
+      "id": "e9065107-658d-4928-a061-f3015403db38",
+      "name": "Split In Batches"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1664,
+        368
+      ],
+      "id": "9f036d2e-6606-4b4e-9b04-07d3ce8392dc",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Compute Field Hashes (BULLETPROOF VERSION - NO CRYPTO)\n// ============================================================\n\nconst mergedData = $input.first().json;\n\n// Simple hash function - NO crypto module, cannot crash\nfunction computeHash(value) {\n  let str = '';\n  \n  try {\n    if (value === undefined || value === null) {\n      str = 'null';\n    } else if (typeof value === 'string') {\n      str = value;\n    } else if (typeof value === 'number') {\n      str = String(value);\n    } else if (Array.isArray(value)) {\n      str = JSON.stringify(value);\n    } else if (typeof value === 'object') {\n      str = JSON.stringify(value);\n    } else {\n      str = String(value);\n    }\n  } catch (e) {\n    str = 'error';\n  }\n  \n  // Ensure str is ALWAYS a valid string\n  if (!str || typeof str !== 'string') {\n    str = 'empty';\n  }\n  \n  // Simple djb2 hash - cannot fail\n  let hash = 5381;\n  for (let i = 0; i < str.length; i++) {\n    hash = ((hash << 5) + hash) + str.charCodeAt(i);\n    hash = hash & hash;\n  }\n  \n  return Math.abs(hash).toString(16).padStart(8, '0');\n}\n\n// Get values safely\nconst name = mergedData.name || '';\nconst email = mergedData.email || '';\nconst orcid = mergedData.orcid || '';\nconst publications = mergedData.publications || [];\nconst collaborators = mergedData.collaborators || [];\nconst keywords = mergedData.keywords || [];\nconst affiliations = mergedData.affiliations || [];\nconst patents = mergedData.patents || [];\nconst metrics = mergedData.metrics || {};\n\n// Compute hashes\nconst currentHashes = {\n  identity: computeHash({ name: name, email: email, orcid: orcid }),\n  affiliation: computeHash(affiliations),\n  publications: computeHash({\n    count: publications.length,\n    titles: publications.map(function(p) { return (p && p.title) ? p.title : ''; }).sort()\n  }),\n  metrics: computeHash(metrics),\n  patents: computeHash(patents),\n  collaborators: computeHash(collaborators.slice(0, 50).sort()),\n  keywords: computeHash(keywords.sort())\n};\n\n// Checksum\nconst checksum = computeHash(Object.values(currentHashes).join('-'));\n\n// Mode and existing hashes\nconst mode = mergedData.mode || 'initial_acquisition';\nconst existingHashes = mergedData.existing_field_hashes || {};\n\n// Find changed fields\nlet changedFields = [];\nlet verificationStatus = 'initial_ingest';\n\nif (mode === 'maintenance_scan' && Object.keys(existingHashes).length > 0) {\n  for (const field of Object.keys(currentHashes)) {\n    if (existingHashes[field] && currentHashes[field] !== existingHashes[field]) {\n      changedFields.push(field);\n    }\n  }\n  verificationStatus = changedFields.length > 0 ? 'changes_detected' : 'verified_unchanged';\n}\n\n// Check sources\nconst sourceSuccess = (mergedData.source_metadata && mergedData.source_metadata.source_success) || {};\nlet successCount = 0;\nfor (const key of Object.keys(sourceSuccess)) {\n  if (sourceSuccess[key] === true) successCount++;\n}\nif (successCount === 0) {\n  verificationStatus = 'verification_failed';\n}\n\n// Build scan_result\nlet scanResult = null;\nif (mode === 'maintenance_scan') {\n  scanResult = {\n    scan_status: verificationStatus,\n    changed_fields: changedFields,\n    change_count: changedFields.length,\n    new_field_hashes: currentHashes,\n    existing_field_hashes: existingHashes,\n    scanned_at: new Date().toISOString()\n  };\n}\n\nconsole.log('Hashes computed for: ' + name);\nconsole.log('Mode: ' + mode + ', Status: ' + verificationStatus);\n\nreturn [{\n  json: {\n    ...mergedData,\n    source_verification: {\n      status: verificationStatus,\n      changes_detected: changedFields.length > 0,\n      changed_fields: changedFields,\n      change_count: changedFields.length\n    },\n    field_hashes: currentHashes,\n    scan_result: scanResult,\n    hash_metadata: {\n      computed_at: new Date().toISOString(),\n      algorithm: 'djb2',\n      field_count: Object.keys(currentHashes).length\n    }\n  }\n}];"
+      },
+      "id": "e976ed74-19af-4fb7-bbd3-a7e1c671cebc",
+      "name": "Compute Field Hashes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2736,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Supabase Payload - Definition Card compliant\nconst thinObject = $('Compute Field Hashes').first().json;\n\n// Compute checksum from field hashes (combine all hash values)\nconst fieldHashes = thinObject.field_hashes || {};\nconst hashValues = Object.values(fieldHashes);\nlet checksum = '';\n\nif (hashValues.length > 0) {\n  // Simple hash combination\n  checksum = hashValues.join('-');\n} else {\n  // Fallback: use timestamp-based checksum\n  checksum = 'chk_' + Date.now().toString(16);\n}\n\nconst name = thinObject.name || 'unknown';\n\nconst supabasePayload = [{\n  asset_id: 'thin:researcher:' + name.toLowerCase().replace(/ /g, '_'),\n  checksum: checksum,\n  version: 1,\n  job_id: 'acq_' + Date.now(),\n  status: 'raw'\n}];\n\nreturn [{\n  json: {\n    supabase_payload: supabasePayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4176,
+        224
+      ],
+      "id": "0a10ccf3-ab97-43f8-8e87-c7edb6b5dcad",
+      "name": "Prepare PostgreSQL Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/thin_object_records?on_conflict=asset_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates, return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4384,
+        224
+      ],
+      "id": "fb638ecd-8b61-4d8e-b6dd-f2cafdfd4fba",
+      "name": "Store in Supabase(Postgre)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "949d91c7-1e79-4fcf-86ab-a314d8f31752",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1728,
+        560
+      ],
+      "id": "e5283151-a5ef-40ba-98de-97ba04a79a29",
+      "name": "GOVERN-1 Webhook Trigger",
+      "webhookId": "949d91c7-1e79-4fcf-86ab-a314d8f31752"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "maintenance_scan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    },
+                    "id": "a9cd5b81-25c3-44fd-a284-384266fdfa5e"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "06f9692e-33f8-41ce-866d-6cb651f95841",
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "maintenance_scan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -1280,
+        368
+      ],
+      "id": "49b29182-8242-40a4-be38-86f262f3e0a5",
+      "name": "Route by Mode"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Maintenance Scan\n// Purpose: Format GOVERN-1 webhook input for source fetching\n// Input: Data from GOVERN-1 webhook (inside body property)\n// Output: Formatted for parallel source fetches + hash comparison\n// ============================================================\n\nconst webhookData = $input.first().json;\n\n// Extract the body - this is where the actual data lives\nconst input = webhookData.body || webhookData;\n\n// Validate required fields\nif (!input.asset_id) {\n  throw new Error(`Missing required field: asset_id. Received keys: ${Object.keys(input).join(', ')}`);\n}\n\nif (!input.name) {\n  throw new Error(`Missing required field: name. Received keys: ${Object.keys(input).join(', ')}`);\n}\n\n// Extract researcher identifiers from GOVERN-1 payload\nconst assetId = input.asset_id;\nconst researcherName = input.name;\nconst orcidId = input.orcid || null;\nconst institution = input.institution || null;\nconst scholarId = input.scholar_id || null;\nconst email = input.email || null;\n\n// Extract existing field hashes for change comparison\nconst existingFieldHashes = input.existing_field_hashes || {};\n\n// Log scan initiation\nconsole.log(`🔍 Maintenance scan initiated for: ${researcherName} (${assetId})`);\nconsole.log(`📊 Existing hashes to compare: ${Object.keys(existingFieldHashes).length} fields`);\n\nreturn [{\n  json: {\n    // ============================================================\n    // Researcher identifiers (passed to source fetch nodes)\n    // ============================================================\n    asset_id: assetId,\n    researcher_name: researcherName,\n    orcid_id: orcidId,\n    institution: institution,\n    scholar_id: scholarId,\n    email: email,\n    \n    // ============================================================\n    // Mode flag - tells downstream nodes this is a maintenance scan\n    // ============================================================\n    mode: 'maintenance_scan',\n    \n    // ============================================================\n    // Existing hashes for comparison after source fetch\n    // Structure: { field_name: hash_value, ... }\n    // ============================================================\n    existing_field_hashes: existingFieldHashes,\n    \n    // ============================================================\n    // Control flags\n    // ============================================================\n    skip_status_update: true,\n    skip_neo4j_storage: true,\n    skip_qdrant_storage: true,\n    skip_supabase_storage: true,\n    return_scan_result: true,\n    \n    // ============================================================\n    // Scan metadata\n    // ============================================================\n    scan_initiated_at: new Date().toISOString(),\n    scan_source: 'GOVERN-1'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1520,
+        560
+      ],
+      "id": "6bcd6c68-3244-4192-a2bf-504c4b5c1a1b",
+      "name": "Prepare Maintenance Scan"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "maintenance_scan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    },
+                    "id": "a9cd5b81-25c3-44fd-a284-384266fdfa5e"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b8c959b9-877c-4c06-8d8e-2c40a2c5e24c",
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "maintenance_scan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        2432,
+        400
+      ],
+      "id": "6b22d4af-273b-434b-bb4b-01900fbb2001",
+      "name": "Route Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Format Scan Result\n// Purpose: Format the scan result to return to GOVERN-1 webhook\n// Input: Merged data with scan_result from maintenance scan\n// Output: Structured response for GOVERN-1\n// ============================================================\n\nconst merged = $input.first().json;\n\n// Validate this is a maintenance scan result\nif (merged.mode !== 'maintenance_scan') {\n  throw new Error('Format Scan Result called but mode is not maintenance_scan');\n}\n\nif (!merged.scan_result) {\n  throw new Error('Missing scan_result in merged data');\n}\n\nconst scanResult = merged.scan_result;\n\n// Build response for GOVERN-1\nconst response = {\n  // Core identification\n  asset_id: merged.asset_id,\n  name: merged.name,\n  orcid: merged.orcid,\n  institution: merged.institution,\n  \n  // Scan outcome\n  scan_status: scanResult.scan_status,\n  changed_fields: scanResult.changed_fields,\n  change_count: scanResult.change_count,\n  \n  // Hash data for future comparisons\n  new_field_hashes: scanResult.new_field_hashes,\n  previous_field_hashes: scanResult.existing_field_hashes,\n  \n  // Change details (for severity calculation in GOVERN-2)\n  change_details: scanResult.change_details,\n  \n  // Metrics snapshot (for GOVERN-2 severity calculation)\n  metrics_snapshot: {\n    h_index: merged.metrics?.h_index || 0,\n    total_citations: merged.metrics?.total_citations || 0,\n    publication_count: merged.metrics?.publication_count || 0,\n    collaborator_count: merged.metrics?.collaborator_count || 0,\n    patent_count: merged.metrics?.patent_count || 0\n  },\n  \n  // Fresh data (only if changes detected - for GOVERN-3)\n  fresh_data: merged.fresh_data || null,\n  \n  // Data quality\n  data_completeness: merged.data_completeness,\n  data_quality_flags: merged.data_quality_flags,\n  \n  // Source metadata\n  sources_scraped: merged.source_metadata?.sources_scraped || [],\n  source_success: merged.source_metadata?.source_success || {},\n  \n  // Timing\n  scan_initiated_at: scanResult.scan_initiated_at,\n  scanned_at: scanResult.scanned_at,\n  scan_duration_ms: scanResult.scan_duration_ms,\n  \n  // Response metadata\n  response_type: 'maintenance_scan_result',\n  workflow: 'OBJECT-1',\n  workflow_version: 'v3.1_GOVERN'\n};\n\nconsole.log(`📤 Returning scan result to GOVERN-1`);\nconsole.log(`   Status: ${response.scan_status}`);\nconsole.log(`   Changes: ${response.change_count} fields`);\n\nreturn [{\n  json: response\n}];"
+      },
+      "id": "3f460630-5e70-4c52-8644-4045f7ea07a2",
+      "name": "Format Scan Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2928,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3136,
+        656
+      ],
+      "id": "fe6fa653-96f1-4729-8d78-723ef3953756",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Format Maintenance Data\n// Purpose: Format maintenance scan data for source fetching\n// This node is ONLY used in the maintenance scan path\n// ============================================================\n\nconst input = $input.first().json;\n\n// Pass through the data formatted for source nodes\n// The field names match what the source fetch nodes expect\nreturn [{\n  json: {\n    // Fields that source nodes need\n    researcher_name: input.researcher_name,\n    orcid_id: input.orcid_id,\n    institution: input.institution,\n    scholar_id: input.scholar_id,\n    email: input.email,\n    \n    // Maintenance scan context (passed through to Merge)\n    asset_id: input.asset_id,\n    mode: 'maintenance_scan',\n    existing_field_hashes: input.existing_field_hashes || {},\n    \n    // Control flags (passed through to Merge and storage nodes)\n    skip_status_update: true,\n    skip_neo4j_storage: true,\n    skip_qdrant_storage: true,\n    skip_supabase_storage: true,\n    return_scan_result: true,\n    scan_initiated_at: input.scan_initiated_at,\n    scan_source: input.scan_source\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        560
+      ],
+      "id": "4366fea1-9314-4840-8935-d02e27788c59",
+      "name": "Format Maintenance Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch Colin Barrow ResearcherSeed for OBJECT-1\nconst cypherPayload = {\n  statement: `\n    MATCH (seed:ResearcherSeed)\n    WHERE toLower(seed.name) CONTAINS 'barrow'\n    RETURN seed.name AS researcher_name,\n           seed.orcid_id AS orcid_id,\n           seed.scholar_id AS scholar_id,\n           seed.institution AS institution,\n           seed.institution_domain AS institution_domain,\n           seed.department AS department,\n           seed.web_profile_url AS web_profile_url\n    LIMIT 1\n  `,\n  parameters: {}\n};\nreturn [{\n  json: {\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1264,
+        -384
+      ],
+      "id": "8d9f640b-9a4e-400e-842d-bce2cf1e734f",
+      "name": "Prepare Fetch Seeds Query (Colin)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hardcode Colin Barrow for testing - bypass ResearcherSeed lookup\nreturn [{\n  json: {\n    researcher_name: 'Colin Barrow',\n    orcid_id: '0000-0002-2153-7267',\n    scholar_id: null,\n    institution: 'Deakin University',\n    institution_domain: 'deakin.edu.au',\n    department: 'School of Life and Environmental Sciences',\n    web_profile_url: 'https://www.deakin.edu.au/about-deakin/people/colin-barrow'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1072,
+        -384
+      ],
+      "id": "17d4e851-9b76-4ee5-b04c-c6fb167f40c3",
+      "name": "Colin Barrow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://134.199.152.159:8001/scrape",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.web_profile_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a77f0464-af25-4e74-8234-450270e92f6a",
+      "name": "Crawl4AI: Scrape Researchers Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        880,
+        -32
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4224,
+        448
+      ],
+      "id": "91363ffe-6ee9-460a-989b-004c6d7eeae9",
+      "name": "Update to insufficient_data",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# Data Sources\n\n## Note: Fetches researcher data from 5 sources: ORCID, Scopus, Google Scholar, Patents, and university profile.",
+        "height": 1344,
+        "width": 3568,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1856,
+        -144
+      ],
+      "typeVersion": 1,
+      "id": "130e0aef-de8d-4322-b78b-ca6823f7fb8a",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "#  Merge & Process\n\n## Note: Combines all sources, computes field hashes for change detection, and creates unified researcher profile.",
+        "height": 1360,
+        "width": 1616,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1824,
+        -144
+      ],
+      "typeVersion": 1,
+      "id": "da055074-b19c-491b-9ee7-a022c899143f",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log Insufficient Data - Update ResearcherSeed status to insufficient_data\nconst researcher = $input.first().json;\nconst thinObject = researcher.thin_object || researcher;\n\n// Get researcher name to match the seed\nconst researcherName = thinObject.name || 'Unknown';\nconst sourcesFound = (thinObject.source_metadata?.sources_scraped || []).length;\nconst completeness = thinObject.data_completeness || 0;\n\n// Build reason string\nconst reason = `Sources: ${sourcesFound}/2 required, Completeness: ${completeness}%/40% required`;\n\n// Build Neo4j query to update ResearcherSeed\nconst cypherPayload = {\n  statement: `\n    MATCH (seed:ResearcherSeed)\n    WHERE seed.name = $name OR toLower(seed.name) = toLower($name)\n    SET seed.status = 'insufficient_data',\n        seed.insufficient_reason = $reason,\n        seed.data_completeness = $data_completeness,\n        seed.sources_found = $sources_found,\n        seed.data_quality_flags = $data_quality_flags,\n        seed.failed_at = datetime(),\n        seed.source_success = $source_success\n    RETURN seed.name AS name, \n           seed.status AS status,\n           seed.insufficient_reason AS reason\n  `,\n  parameters: {\n    name: researcherName,\n    reason: reason,\n    data_completeness: completeness,\n    sources_found: sourcesFound,\n    data_quality_flags: thinObject.data_quality_flags || [],\n    source_success: JSON.stringify(thinObject.source_metadata?.source_success || {})\n  }\n};\n\nconsole.log(`⚠️ Insufficient data for: ${researcherName}`);\nconsole.log(`   Reason: ${reason}`);\n\nreturn [{\n  json: cypherPayload\n}];"
+      },
+      "id": "256056ef-01e8-42b4-9dd7-837e1c85473a",
+      "name": "Log Insufficient Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3968,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# Storage & Logging\n\n## Note: Saves to Supabase, logs success or marks as insufficient_data if sources failed.",
+        "height": 1296,
+        "width": 1440
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        3488,
+        -128
+      ],
+      "typeVersion": 1,
+      "id": "b5bea6c6-3d9d-4b21-9c0c-6e986a484f44",
+      "name": "Sticky Note2"
+    }
+  ],
+  "pinData": {
+    "GOVERN-1 Webhook Trigger": [
+      {
+        "json": {
+          "headers": {
+            "host": "mbcrc.app.n8n.cloud",
+            "user-agent": "axios/1.12.0",
+            "content-length": "360",
+            "accept": "application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1; subreqs=1",
+            "cf-connecting-ip": "20.218.238.113",
+            "cf-ew-via": "15",
+            "cf-ipcountry": "DE",
+            "cf-ray": "9b21729ae1cfdb0b-FRA",
+            "cf-visitor": "{\"scheme\":\"https\"}",
+            "cf-worker": "n8n.cloud",
+            "content-type": "application/json",
+            "x-forwarded-for": "20.218.238.113, 172.71.148.171",
+            "x-forwarded-host": "mbcrc.app.n8n.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "traefik-prod-users-gwc-42-bd54959cf-2qqc4",
+            "x-is-trusted": "yes",
+            "x-real-ip": "20.218.238.113"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "mode": "maintenance_scan",
+            "asset_id": "fat:researcher:abishek_santhakumar",
+            "name": "ABISHEK SANTHAKUMAR",
+            "orcid": "0000-0003-1836-5035",
+            "institution": "Deakin University",
+            "email": null,
+            "scholar_id": null,
+            "existing_field_hashes": {},
+            "scan_context": {
+              "triggered_by": "GOVERN-1",
+              "last_scanned_at": "2025-12-20T14:58:40.722Z",
+              "scan_interval": 30,
+              "source_freshness_score": 1
+            }
+          },
+          "webhookUrl": "https://mbcrc.app.n8n.cloud/webhook/object1-maintenance-scan",
+          "executionMode": "production"
+        }
+      }
+    ],
+    "Manual Trigger - Input Researcher Data": [
+      {
+        "json": {
+          "researcher_name": "Colin Barrow",
+          "department": "School of Life & Env Sciences",
+          "institution_name": "Deakin University",
+          "institution_domain": "deakin.edu.au",
+          "orcid_id": "0000-0002-2153-7267",
+          "scholar_id": "ol6Y8nUAAAAJ&hl"
+        }
+      }
+    ],
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-12-21T20:00:23.006+11:00",
+          "Readable date": "December 21st 2025, 8:00:23 pm",
+          "Readable time": "8:00:23 pm",
+          "Day of week": "Sunday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "21",
+          "Hour": "20",
+          "Minute": "00",
+          "Second": "23",
+          "Timezone": "Australia/Melbourne (UTC+11:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Manual Trigger - Input Researcher Data": {
+      "main": [
+        []
+      ]
+    },
+    "Source 1: Search Deakin Profile": {
+      "main": [
+        [
+          {
+            "node": "Extract Deakin Profile URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Deakin Profile URL": {
+      "main": [
+        []
+      ]
+    },
+    "Search ORCID by Name": {
+      "main": [
+        [
+          {
+            "node": "Extract ORCID ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract ORCID ID": {
+      "main": [
+        [
+          {
+            "node": "Source 2: Fetch ORCID Full Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source 2: Fetch ORCID Full Record": {
+      "main": [
+        [
+          {
+            "node": "Parse ORCID Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse ORCID Data": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Search Scopus by ORCID": {
+      "main": [
+        [
+          {
+            "node": "Parse Scopus Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Scopus Data": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Source 4: Fetch Google Scholar Profile": {
+      "main": [
+        [
+          {
+            "node": "Parse Google Scholar Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Google Scholar Data": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Source 5: Search Google Patents": {
+      "main": [
+        [
+          {
+            "node": "Parse Patent Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Patent Data": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Merge All 5 Sources": {
+      "main": [
+        [
+          {
+            "node": "Route Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Acquisition Summary": {
+      "main": [
+        [
+          {
+            "node": "Quality Gate: Check Data Completeness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Gate: Check Data Completeness": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Insufficient Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Merge All 5 Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Neo4j - Create Standard Node": {
+      "main": [
+        [
+          {
+            "node": "Prepare PostgreSQL Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Parameters": {
+      "main": [
+        [
+          {
+            "node": "Neo4j - Create Standard Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Crawl4AI Output": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Seeds Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Seeds HTTP node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update status 'acquiring'": {
+      "main": [
+        [
+          {
+            "node": "Update to Aquiring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Seeds HTTP node": {
+      "main": [
+        [
+          {
+            "node": "Transform Neo4j Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Neo4j Response": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update to Aquiring": {
+      "main": [
+        [
+          {
+            "node": "Format Researcher Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Update status 'acquiring'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Researcher Data": {
+      "main": [
+        [
+          {
+            "node": "Search ORCID by Name",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Scopus by ORCID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Source 4: Fetch Google Scholar Profile",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Source 5: Search Google Patents",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Crawl4AI: Scrape Researchers Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Route by Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Success": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Field Hashes": {
+      "main": [
+        [
+          {
+            "node": "Generate Acquisition Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PostgreSQL Payload": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase(Postgre)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase(Postgre)": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GOVERN-1 Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Maintenance Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Mode": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Seeds Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Prepare Maintenance Scan": {
+      "main": [
+        [
+          {
+            "node": "Route by Mode",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Maintenance Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Merge": {
+      "main": [
+        [
+          {
+            "node": "Compute Field Hashes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Scan Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Scan Result": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Maintenance Data": {
+      "main": [
+        [
+          {
+            "node": "Search ORCID by Name",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Search Scopus by ORCID",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Source 4: Fetch Google Scholar Profile",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Source 5: Search Google Patents",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Crawl4AI: Scrape Researchers Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Seeds Query (Colin)": {
+      "main": [
+        []
+      ]
+    },
+    "Colin Barrow": {
+      "main": [
+        []
+      ]
+    },
+    "Crawl4AI: Scrape Researchers Profile": {
+      "main": [
+        [
+          {
+            "node": "Parse Crawl4AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update to insufficient_data": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Insufficient Data": {
+      "main": [
+        [
+          {
+            "node": "Update to insufficient_data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "4ea2ff26-d194-43dc-95b4-d038dc09fc34",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "qu5TOr7tPeP9pu4p",
+  "tags": [
+    {
+      "updatedAt": "2025-11-19T16:16:22.409Z",
+      "createdAt": "2025-11-19T16:16:22.409Z",
+      "id": "M2HE4sAVj28MumnE",
+      "name": "Gen 2"
+    },
+    {
+      "updatedAt": "2025-12-20T15:31:43.586Z",
+      "createdAt": "2025-12-20T15:31:43.586Z",
+      "id": "V0dxUl9wqFhzYH4e",
+      "name": "Governance"
+    },
+    {
+      "updatedAt": "2025-11-19T16:16:22.383Z",
+      "createdAt": "2025-11-19T16:16:22.383Z",
+      "id": "fwnhwF7AOAkcks72",
+      "name": "Data Acquisition"
+    }
+  ]
+}

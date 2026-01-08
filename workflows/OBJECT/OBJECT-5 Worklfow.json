@@ -16,7 +16,7 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [
-        -224,
+        -480,
         0
       ]
     },
@@ -48,7 +48,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        192,
+        -64,
         0
       ],
       "id": "d668bdff-7e2a-458f-a99b-d5a9a9c1be32",
@@ -62,8 +62,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        432,
-        -16
+        -528,
+        416
       ],
       "id": "bf4e8a84-695e-41e4-8852-ca53b8234435",
       "name": "Prepare Neo4j Activation Query"
@@ -76,8 +76,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -192,
-        304
+        -96,
+        416
       ],
       "id": "dee1b695-fc5e-4b06-a95b-b225ca0e7b7e",
       "name": "Prepare Qdrant Point Lookup"
@@ -90,8 +90,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        304,
-        304
+        400,
+        416
       ],
       "id": "6fbba977-6caa-44d0-86d1-3cef7774bc52",
       "name": "Prepare Qdrant Status Update"
@@ -119,8 +119,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        528,
-        304
+        624,
+        416
       ],
       "id": "b7c63304-e1d9-41b7-b6ae-9bbd48056e2d",
       "name": "Update Qdrant Status",
@@ -139,8 +139,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        768,
-        304
+        -544,
+        896
       ],
       "id": "085cb31c-24d8-4bb4-9faf-fe63d73ffe70",
       "name": "Prepare Supabase Sync Update"
@@ -191,7 +191,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -16,
+        -272,
         0
       ],
       "id": "c1400576-8f3a-4b12-99cd-b3f5b062cd5d",
@@ -232,8 +232,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        48,
-        304
+        144,
+        416
       ],
       "credentials": {
         "openRouterApi": {
@@ -284,8 +284,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -208,
-        528
+        -272,
+        896
       ],
       "id": "cd46ecdd-1290-44b5-a23b-9cca11bcb1d6",
       "name": "Update Queue Synced Status",
@@ -308,8 +308,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        48,
-        528
+        -16,
+        896
       ],
       "id": "6f39f144-7792-432c-99ec-77e530d90aa4",
       "name": "Final Output"
@@ -337,8 +337,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        672,
-        -16
+        -288,
+        416
       ],
       "id": "97206a21-4a73-41b5-9cd0-488bae607a67",
       "name": "Activate FATObject (Neo4j)",
@@ -348,6 +348,66 @@
           "name": "Neo4j Gen 2"
         }
       }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        176,
+        0
+      ],
+      "id": "7edfa086-6ea5-4467-a942-abca06e6d76d",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "content": "# Fetch Approved Items\n\n## Note: Polls validation_queue for auto_approved or curator_approved items that haven't been synced yet.",
+        "height": 416,
+        "width": 912,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -576,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "a274a2ef-e6f5-46a1-9452-06cb9da53e8c",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# Activate in Neo4j & Qdrant\n\n## Note: Sets FATObject status to \"active\" in Neo4j, validates CLASSIFIED_AS relationships, then updates Qdrant payload.",
+        "height": 464,
+        "width": 1536,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -576,
+        224
+      ],
+      "typeVersion": 1,
+      "id": "eda2e6df-08e9-4239-9366-d72b623b294e",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "# Mark as Synced\n\n## Note: Updates validation_queue entry with synced=true so it won't be processed again.",
+        "height": 384,
+        "width": 992
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -592,
+        704
+      ],
+      "typeVersion": 1,
+      "id": "bd404b28-d1fe-4455-8851-8dd0504467ef",
+      "name": "Sticky Note2"
     }
   ],
   "pinData": {
@@ -385,7 +445,7 @@
       "main": [
         [
           {
-            "node": "Prepare Neo4j Activation Query",
+            "node": "Loop Over Items",
             "type": "main",
             "index": 0
           }
@@ -490,13 +550,36 @@
           }
         ]
       ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepare Neo4j Activation Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Output": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "54bd234f-7c2f-4228-b57c-d3af68fc42fa",
+  "versionId": "489774f2-8738-4dbb-8d63-f2745d9697f2",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

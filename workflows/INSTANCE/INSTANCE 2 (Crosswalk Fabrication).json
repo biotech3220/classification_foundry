@@ -2,17 +2,6 @@
   "name": "INSTANCE 2 (Crosswalk Fabrication)",
   "nodes": [
     {
-      "parameters": {},
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [
-        -464,
-        -368
-      ],
-      "id": "7e4063bc-18b1-49b8-a76a-66ee5494356b",
-      "name": "When clicking ‘Execute workflow’"
-    },
-    {
       "parameters": {
         "jsCode": "return [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR)\n        WHERE s.status = 'fabricated'\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          level: s.level,\n          dense_view: s.dense_view,\n          disambiguation: s.disambiguation\n        } as standard_data\n        ORDER BY s.code\n      `,\n      parameters: {}\n    }\n  }\n}];"
       },
@@ -128,8 +117,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -448,
-        176
+        1632,
+        -32
       ],
       "id": "1c0f6cf8-9698-4ee8-b60a-4edbb0c6dd05",
       "name": "Split Standard A Into Items"
@@ -142,8 +131,8 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        0,
-        176
+        -560,
+        624
       ],
       "id": "fb087dbc-f183-49a6-a92f-908dd345f291",
       "name": "Loop In Batches"
@@ -155,8 +144,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        288,
-        192
+        -256,
+        640
       ],
       "id": "eaa24952-d1b9-41e7-9de1-549417292b9e",
       "name": "Prepare Qdrant Search"
@@ -192,8 +181,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        528,
-        192
+        -16,
+        640
       ],
       "credentials": {
         "openRouterApi": {
@@ -213,8 +202,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        768,
-        192
+        224,
+        640
       ],
       "id": "ec1c8186-9452-49ec-a031-ab9d23650cb8",
       "name": "Prepare Search Standard B"
@@ -247,8 +236,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1152,
-        192
+        592,
+        640
       ],
       "id": "62d52430-a06d-42bc-aab3-1a1eff0df769",
       "name": "Filter Skip Items"
@@ -284,8 +273,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        1376,
-        176
+        848,
+        624
       ],
       "credentials": {
         "openRouterApi": {
@@ -305,56 +294,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1600,
-        176
+        1072,
+        624
       ],
       "id": "61a304b8-499d-43b9-a09f-e9c23cd952d2",
       "name": "Parse Candidates"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc_for_2020/points/scroll",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "qdrantRestApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"limit\": 5,\n  \"with_payload\": true,\n  \"with_vectors\": false\n}",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "json"
-            }
-          }
-        }
-      },
-      "id": "cb67799f-6301-4c17-9bca-9d2e16b9fe5f",
-      "name": "Fetch Source Vector1",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        1392,
-        -256
-      ],
-      "credentials": {
-        "openRouterApi": {
-          "id": "1srwGILgkvMmHRRn",
-          "name": "OpenRouter account"
-        },
-        "qdrantRestApi": {
-          "id": "5kvIJD32UkQxRAis",
-          "name": "Qdrant account"
-        }
-      }
     },
     {
       "parameters": {
@@ -365,8 +309,8 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        -144,
-        432
+        -288,
+        1200
       ],
       "id": "64cada07-b6a6-47af-a84d-7b68809ee21f",
       "name": "Basic LLM Chain"
@@ -381,8 +325,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        -144,
-        592
+        -288,
+        1440
       ],
       "id": "0a0f7fdc-e478-46a9-9cff-93303f790b1b",
       "name": "OpenRouter Chat Model",
@@ -400,8 +344,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -432,
-        432
+        -576,
+        1200
       ],
       "id": "c208a2eb-a5fd-42b3-818e-ce68f86c078f",
       "name": "Prepare LLM Validation Prompts"
@@ -413,8 +357,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        240,
-        432
+        96,
+        1200
       ],
       "id": "d4ce0761-6340-4211-947b-166207a91d27",
       "name": "Parse LLM Response"
@@ -426,8 +370,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        496,
-        432
+        352,
+        1200
       ],
       "id": "b5af5536-ef4c-4fbc-b7b3-d45abb504e28",
       "name": "Pass 3: Confidence Scoring"
@@ -439,8 +383,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        768,
-        432
+        -480,
+        2000
       ],
       "id": "0b87178b-5dd1-4dff-ac73-3d55eb6d9845",
       "name": "Prepare Neo4j Crosswalk Write"
@@ -468,8 +412,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        992,
-        432
+        -256,
+        2000
       ],
       "id": "99b50432-5f95-410f-9bcc-ad5c4d0a8bfd",
       "name": "Create MAPS_TO Relationships",
@@ -487,8 +431,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1280,
-        432
+        32,
+        2000
       ],
       "id": "41b68c0b-68ff-411a-a462-46e6bf01ee1d",
       "name": "Prepare Reverse Mappings"
@@ -516,8 +460,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1504,
-        432
+        272,
+        2000
       ],
       "id": "17654d1e-0a7c-4f94-92b1-89f9177429e6",
       "name": "Create Reverse MAPS_TO",
@@ -535,8 +479,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -464,
-        800
+        592,
+        2000
       ],
       "id": "d103310b-4612-4ef7-837c-17fdb96029ef",
       "name": "Prepare PostgreSQL Metadata"
@@ -570,8 +514,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        320,
-        800
+        1376,
+        2000
       ],
       "id": "0e54c0b9-bd6d-4218-9f4b-6ed2ad6d4f13",
       "name": "Store Crosswalk Metadata",
@@ -593,8 +537,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        640,
-        800
+        1696,
+        2000
       ],
       "id": "3a72c018-0500-4948-9599-462a0644ac31",
       "name": "Generate Summary"
@@ -606,8 +550,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1520,
-        -48
+        1920,
+        144
       ],
       "id": "c96c6184-2810-47b8-8735-ce0b546a8992",
       "name": "Collect Unmapped Codes"
@@ -641,8 +585,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1696,
-        -48
+        2096,
+        144
       ],
       "id": "9fb575b1-0d68-4cb1-849f-81ebfa624e89",
       "name": "Store Unmapped Codes",
@@ -680,8 +624,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -224,
-        800
+        832,
+        2000
       ],
       "id": "95d4f8f3-72e2-4cac-a2cf-d75d26f0a166",
       "name": "Fetch Forward Count",
@@ -699,8 +643,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        48,
-        800
+        1104,
+        2000
       ],
       "id": "1eee3cde-c882-4053-85f4-5a9f003c8b49",
       "name": "Prepare Supabase Payload"
@@ -755,58 +699,13 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_oecd_fos_2007/points/scroll",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "qdrantRestApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"limit\": 5,\n  \"with_payload\": true,\n  \"with_vectors\": false\n}",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "json"
-            }
-          }
-        }
-      },
-      "id": "70522bc1-1795-42d7-afac-81b685298a8f",
-      "name": "Fetch Source Vector2",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.1,
-      "position": [
-        1376,
-        992
-      ],
-      "credentials": {
-        "openRouterApi": {
-          "id": "1srwGILgkvMmHRRn",
-          "name": "OpenRouter account"
-        },
-        "qdrantRestApi": {
-          "id": "5kvIJD32UkQxRAis",
-          "name": "Qdrant account"
-        }
-      }
-    },
-    {
-      "parameters": {
         "jsCode": "const httpResponse = $input.first().json;\nconst previousData = $('Prepare Fetch Processed Codes').first().json;\n\n// Parse Neo4j response\nconst resultWrapper = Array.isArray(httpResponse) ? httpResponse[0] : httpResponse;\n\n// Initialize sets\nconst completeCodes = new Set();\nconst incompleteCodes = new Set();\n\n// Parse response - handle the nested structure\nif (resultWrapper?.data?.values && resultWrapper.data.values.length > 0) {\n  const row = resultWrapper.data.values[0];\n  \n  // First element: complete_codes array\n  if (row[0] && Array.isArray(row[0])) {\n    row[0].forEach(code => completeCodes.add(String(code)));\n  }\n  \n  // Second element: incomplete_codes array\n  if (row[1] && Array.isArray(row[1])) {\n    row[1].forEach(code => {\n      if (code !== null) incompleteCodes.add(String(code));\n    });\n  }\n}\n\nconsole.log(`✅ Complete (both directions): ${completeCodes.size} codes`);\nconsole.log(`⚠️ Incomplete (forward only): ${incompleteCodes.size} codes`);\n\n// Filter: Skip complete, but KEEP incomplete for re-processing\nconst remainingStandardA = previousData.standard_a.filter(\n  std => !completeCodes.has(String(std.code))\n);\n\n// Flag incomplete codes for logging\nconst incompleteToReprocess = remainingStandardA.filter(\n  std => incompleteCodes.has(String(std.code))\n);\n\nif (incompleteToReprocess.length > 0) {\n  console.log(`🔄 Will reprocess ${incompleteToReprocess.length} incomplete codes:`);\n  incompleteToReprocess.slice(0, 10).forEach(std => {\n    console.log(`   - ${std.code}: ${std.name}`);\n  });\n  if (incompleteToReprocess.length > 10) {\n    console.log(`   ... and ${incompleteToReprocess.length - 10} more`);\n  }\n}\n\nconsole.log(`📋 Total to process: ${remainingStandardA.length} of ${previousData.standard_a_count}`);\n\nreturn [{\n  json: {\n    standard_a: remainingStandardA,\n    standard_b: previousData.standard_b,\n    standard_a_count: remainingStandardA.length,\n    standard_b_count: previousData.standard_b_count,\n    checkpoint_status: {\n      complete_count: completeCodes.size,\n      incomplete_count: incompleteCodes.size,\n      remaining_count: remainingStandardA.length,\n      original_count: previousData.standard_a_count,\n      progress_percent: Math.round((completeCodes.size / previousData.standard_a_count) * 100)\n    }\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -672,
-        176
+        1408,
+        -32
       ],
       "id": "88ecedac-0ef2-41f0-86f8-0ad09f3b6fe2",
       "name": "Prepare Fetch Standard A Query2"
@@ -830,18 +729,72 @@
         -512,
         -32
       ]
+    },
+    {
+      "parameters": {
+        "content": "# Fetch Both Standards\n\n## Note: Fetches ANZSRC (Standard A) and OECD (Standard B) codes from Neo4j.",
+        "height": 624,
+        "width": 2512,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -640,
+        -240
+      ],
+      "typeVersion": 1,
+      "id": "b4b979ea-0828-457b-a12e-b047a48c0a5c",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# Vector Search\n\n## Note: Fetches source vectors from Qdrant, searches Standard B collection for top 5 candidate matches.",
+        "height": 592,
+        "width": 2528,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -640,
+        432
+      ],
+      "typeVersion": 1,
+      "id": "57de0ff4-e9e4-4be2-9726-e73e0840adf0",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "#  LLM Validation\n\n##  Note: LLM validates each candidate mapping, assigns match type (exact/broad/narrow/related) and confidence score.",
+        "height": 528,
+        "width": 2528,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -640,
+        1056
+      ],
+      "typeVersion": 1,
+      "id": "1084759e-599c-449d-ab6a-546b6884096d",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "# Write Crosswalk\n\n## Note: Creates MAPS_TO relationships (forward + reverse) in Neo4j, stores metadata in Supabase.",
+        "height": 624,
+        "width": 2528
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -624,
+        1616
+      ],
+      "typeVersion": 1,
+      "id": "526454da-a82b-4854-ac7c-9a2c4fd08639",
+      "name": "Sticky Note3"
     }
   ],
   "pinData": {
-    "When clicking ‘Execute workflow’": [
-      {
-        "json": {
-          "crosswalk_id": "anzsrc_for_2020_to_oecd_fos_2007",
-          "standard_a_taxonomy": "anzsrc_for_2020",
-          "standard_b_taxonomy": "oecd_fos_2007"
-        }
-      }
-    ],
     "Schedule Trigger": [
       {
         "json": {
@@ -861,11 +814,6 @@
     ]
   },
   "connections": {
-    "When clicking ‘Execute workflow’": {
-      "main": [
-        []
-      ]
-    },
     "Prepare Fetch Standard A Query": {
       "main": [
         [
@@ -1226,7 +1174,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "6408ca0f-c5ae-4863-b570-95c89441bd6b",
+  "versionId": "a725a8c9-61b0-4eb4-83fb-f1cd8a954393",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"

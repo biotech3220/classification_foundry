@@ -582,8 +582,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -2000,
-        1376
+        -2288,
+        1856
       ],
       "id": "e947694f-40dc-4bc7-b5ed-10aed76701ad",
       "name": "Store in Neo4j",
@@ -601,8 +601,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2240,
-        1376
+        -2528,
+        1856
       ],
       "id": "5322bbfd-96c9-4802-868b-9ebb9d6d69c2",
       "name": "Prepare Neo4j Cypher"
@@ -630,8 +630,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1984,
-        1568
+        -2272,
+        2048
       ],
       "id": "bf2d5d93-1987-4b78-a7e9-ebb6a9dc5161",
       "name": "Qdrant - Store Embedding",
@@ -649,8 +649,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1984,
-        1776
+        -2272,
+        2256
       ],
       "id": "1d5113dc-89db-4e7e-90a1-8bd9f6a36344",
       "name": "Prepare PostgreSQL Batch"
@@ -662,8 +662,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1152,
-        1520
+        -1440,
+        2000
       ],
       "id": "7b364c4e-3e9e-428f-ad7e-c202f4aab336",
       "name": "Generate Storage Summary"
@@ -675,8 +675,8 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3.2,
       "position": [
-        -1360,
-        1504
+        -1648,
+        1984
       ],
       "id": "3550c501-0243-4379-96e5-816ab3de727b",
       "name": "Merge"
@@ -710,8 +710,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1680,
-        1776
+        -1968,
+        2256
       ],
       "id": "30edada5-92b3-45c8-af12-fe47591c3be5",
       "name": "Store in Supabase(Postgre)",
@@ -753,8 +753,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -960,
-        1520
+        -1248,
+        2000
       ],
       "id": "4ee766c5-6d06-470d-b2b8-6dfb18ad2994",
       "name": "Check for Errors"
@@ -775,8 +775,8 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        -672,
-        1424
+        -960,
+        1904
       ],
       "id": "c679db6a-b6c8-4e4a-ad3d-05340ecfbe87",
       "name": "Send Error Notification",
@@ -804,8 +804,8 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.3,
       "position": [
-        -672,
-        1680
+        -960,
+        2160
       ],
       "id": "c3d44f6a-c029-4286-8554-3fbfd9482e58",
       "name": "Send Success Notification",
@@ -1043,7 +1043,8 @@
       "parameters": {
         "content": "## Use This to find missing unprocessed FoR codes in Qdrant\n**Double click** to edit me. [Guide](https://docs.n8n.io/workflows/components/sticky-notes/)",
         "height": 576,
-        "width": 1920
+        "width": 1920,
+        "color": 3
       },
       "type": "n8n-nodes-base.stickyNote",
       "position": [
@@ -1061,24 +1062,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1664,
-        -240
+        592,
+        624
       ],
       "id": "2086e755-25bc-4c04-ad84-0b48b00a411c",
       "name": "Prepare Neo4j Query for Standards(specific codes)"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Task 0.1: Prepare Neo4j queries for baseline check\n\nreturn [\n  {\n    json: {\n      test_name: \"Task 0.1a - Count Standards\",\n      neo4j_payload: {\n        statement: \"MATCH (s:Standard:FoR) RETURN count(s) as total_standards, collect(DISTINCT s.status) as statuses\"\n      }\n    }\n  }\n];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -2432,
-        2496
-      ],
-      "id": "42c5b029-c335-4472-b384-a7b491574fae",
-      "name": "Prepare: Count Standards Query"
     },
     {
       "parameters": {
@@ -1103,8 +1091,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -2224,
-        2496
+        -2352,
+        2768
       ],
       "id": "020b74c6-0f6a-4fdc-901e-bcf810da57df",
       "name": "Execute: Count Standards",
@@ -1122,8 +1110,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2000,
-        2496
+        -2128,
+        2768
       ],
       "id": "5ebd63f4-66a5-4fec-9b5a-42c2cd2a65e2",
       "name": "Parse: Count Result"
@@ -1135,8 +1123,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1776,
-        2496
+        -1904,
+        2768
       ],
       "id": "a19eb31d-2591-4ec4-912e-1cfb915c4adc",
       "name": "Prepare: Problem Codes Query"
@@ -1164,8 +1152,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1552,
-        2496
+        -1680,
+        2768
       ],
       "id": "cd102e9d-2ef7-433d-8ec5-dd34c491885f",
       "name": "Execute: Problem Codes",
@@ -1183,8 +1171,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1344,
-        2496
+        -1472,
+        2768
       ],
       "id": "5438da29-47f7-47b3-9333-d88d34e785f1",
       "name": "Parse: Problem Codes Result"
@@ -1196,8 +1184,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1120,
-        2496
+        -1248,
+        2768
       ],
       "id": "138ed8e3-d6ce-4da1-aed4-8b38dab6828b",
       "name": "Prepare: Embedding Audit Query"
@@ -1225,8 +1213,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -896,
-        2496
+        -1024,
+        2768
       ],
       "id": "f50bf2cd-a0b4-475b-bbca-61a0bdc5b37c",
       "name": "Execute: Embedding Audit",
@@ -1244,8 +1232,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -672,
-        2496
+        -800,
+        2768
       ],
       "id": "5f0f31cb-9e40-476b-b664-0247cc97c157",
       "name": "Parse: Embedding Audit Result"
@@ -1257,11 +1245,71 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -448,
-        2496
+        -576,
+        2768
       ],
       "id": "53ef7b9a-f172-46a2-b992-a3f442a5b964",
       "name": "Compile Diagnostic Summary"
+    },
+    {
+      "parameters": {
+        "content": "# Main Pipeline:\n\n# Note: Fetches \"thin\" standards → builds hierarchy → AI adds details → packages into ICF → creates number fingerprint for search.",
+        "height": 1776,
+        "width": 2672,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2560,
+        -208
+      ],
+      "typeVersion": 1,
+      "id": "8f693aff-ee9b-4fa7-b8af-7312851c491e",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "# Storage\n\n# Note: Saves to Neo4j (connections), Qdrant (similarity search), and Supabase (logs).",
+        "height": 832,
+        "width": 2224,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2560,
+        1648
+      ],
+      "typeVersion": 1,
+      "id": "5db1cb4f-6006-4ab5-99d9-ffff3898ff30",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "# Maintenance\n\n# Note: Sync check finds missing items in Qdrant. Diagnostics tests system health.",
+        "height": 528,
+        "width": 2304
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2592,
+        2576
+      ],
+      "typeVersion": 1,
+      "id": "3f2e5a9f-23f2-4281-80bb-d02f680ad21e",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Task 0.1: Prepare Neo4j queries for baseline check\n\nreturn [\n  {\n    json: {\n      test_name: \"Task 0.1a - Count Standards\",\n      neo4j_payload: {\n        statement: \"MATCH (s:Standard:FoR) RETURN count(s) as total_standards, collect(DISTINCT s.status) as statuses\"\n      }\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2560,
+        2768
+      ],
+      "id": "42c5b029-c335-4472-b384-a7b491574fae",
+      "name": "Prepare: Count Standards Query"
     }
   ],
   "pinData": {
@@ -1817,17 +1865,6 @@
         []
       ]
     },
-    "Prepare: Count Standards Query": {
-      "main": [
-        [
-          {
-            "node": "Execute: Count Standards",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Execute: Count Standards": {
       "main": [
         [
@@ -1915,13 +1952,24 @@
           }
         ]
       ]
+    },
+    "Prepare: Count Standards Query": {
+      "main": [
+        [
+          {
+            "node": "Execute: Count Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "ed528e1b-241b-4058-b49f-01936c692aca",
+  "versionId": "f81220eb-e495-4e4e-a33f-aa34fc505b1e",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"

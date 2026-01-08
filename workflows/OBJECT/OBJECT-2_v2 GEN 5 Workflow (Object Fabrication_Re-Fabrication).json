@@ -3,25 +3,6 @@
   "nodes": [
     {
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "minutes"
-            }
-          ]
-        }
-      },
-      "id": "40c2b5c0-11ee-4a84-8662-296127e77763",
-      "name": "Schedule Trigger",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.1,
-      "position": [
-        32,
-        1616
-      ]
-    },
-    {
-      "parameters": {
         "httpMethod": "POST",
         "path": "object-2-fabricate",
         "responseMode": "responseNode",
@@ -117,13 +98,13 @@
     },
     {
       "parameters": {
-        "jsCode": "// Prepare Fetch ThinObject - Refabrication Mode\n// Fetches specific ThinObject by asset_id for re-fabrication\n\nconst executionContext = $input.first().json;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject {asset_id: $thin_asset_id})\n        WHERE thin.object_type = $object_type\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        LIMIT 1\n      `,\n      parameters: {\n        thin_asset_id: executionContext.thin_asset_id,\n        object_type: \"researcher\"\n      }\n    }\n  }\n}];"
+        "jsCode": "// Prepare Fetch ThinObject - Refabrication Mode\n// FIXED: Now includes direct fields from OBJECT-1 v3.x\n\nconst executionContext = $input.first().json;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject {asset_id: $thin_asset_id})\n        WHERE thin.object_type = $object_type\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          \n          // NEW: Direct fields from OBJECT-1 v3.x\n          biography: thin.biography,\n          research_interests: thin.research_interests,\n          current_projects: thin.current_projects,\n          expertise_keywords: thin.expertise_keywords,\n          collaborators: thin.collaborators,\n          keywords: thin.keywords,\n          publications: thin.publications,\n          patents: thin.patents,\n          affiliations: thin.affiliations,\n          grants: thin.grants,\n          metrics: thin.metrics,\n          data_quality_flags: thin.data_quality_flags,\n          data_completeness: thin.data_completeness,\n          \n          // Legacy JSON fields (backward compatibility)\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        LIMIT 1\n      `,\n      parameters: {\n        thin_asset_id: executionContext.thin_asset_id,\n        object_type: \"researcher\"\n      }\n    }\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         1200,
-        144
+        208
       ],
       "id": "cc7e736a-6534-4575-af2d-1628deccfba7",
       "name": "Prepare Fetch ThinObject (Refab)"
@@ -152,7 +133,7 @@
       "typeVersion": 4.2,
       "position": [
         1440,
-        144
+        208
       ],
       "id": "b6269d67-9808-4470-a5a8-3da9b096f2e7",
       "name": "Fetch ThinObject (Refab)",
@@ -171,7 +152,7 @@
       "typeVersion": 2,
       "position": [
         1680,
-        144
+        208
       ],
       "id": "bea837ed-6279-4f20-9110-e370f1c87576",
       "name": "Prepare Set Status (Refab)"
@@ -200,7 +181,7 @@
       "typeVersion": 4.2,
       "position": [
         1920,
-        144
+        208
       ],
       "id": "b2732ff3-6363-4ede-8e90-9a89250cbac6",
       "name": "Set Status: Refabricating",
@@ -232,7 +213,7 @@
       "typeVersion": 2,
       "position": [
         2160,
-        144
+        208
       ],
       "id": "73a9fd3a-aebf-46c0-94c5-ca7f42406396",
       "name": "Split ThinObjects (Refab)"
@@ -244,8 +225,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1616,
-        848
+        1728,
+        1360
       ],
       "id": "57acb24f-284b-4216-8d03-5ef5a3382791",
       "name": "Check Mode for Response"
@@ -289,8 +270,8 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
       "position": [
-        1888,
-        848
+        2000,
+        1360
       ]
     },
     {
@@ -304,8 +285,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        2176,
-        736
+        2288,
+        1248
       ]
     },
     {
@@ -315,27 +296,8 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        2128,
-        960
-      ]
-    },
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "minutes"
-            }
-          ]
-        }
-      },
-      "id": "b59c6417-cd5f-4a57-bd9d-814bc5c18189",
-      "name": "Schedule Trigger1",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.1,
-      "position": [
-        480,
-        -176
+        2240,
+        1472
       ]
     },
     {
@@ -349,8 +311,8 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        592,
-        656
+        640,
+        864
       ],
       "id": "7596f7ee-c179-4ead-8fb7-523c45268b68",
       "name": "OpenRouter Chat Model",
@@ -363,28 +325,28 @@
     },
     {
       "parameters": {
-        "functionCode": "// Prepare LLM Prompt - Definition Card v3.2 Compliant\n// MODIFIED: Uses enrichment prompt from researcher_instance_spec_v2_2.md Section 10\n// MODIFIED: Outputs raw_evidence + enriched_context structure for OBJECT-3\n\nconst unifiedObject = $input.first().json;\nconst executionContext = unifiedObject.execution_context;\n\nconst name = unifiedObject.name;\nconst institution = unifiedObject.institution || 'Unknown';\n\n// Format metrics\nconst metrics = unifiedObject.metrics || {};\nconst hIndex = metrics.h_index || 0;\nconst totalCitations = metrics.total_citations || 0;\nconst publicationCount = metrics.publication_count || 0;\nconst patentCount = metrics.patent_count || 0;\n\n// ===== NEW: Format publications WITH abstracts (top 15) =====\nconst publications = unifiedObject.publications || [];\nconst publicationsForPrompt = publications\n  .slice(0, 15)\n  .map(pub => ({\n    title: pub.title || '',\n    abstract: (pub.abstract || '').substring(0, 200),\n    keywords: pub.keywords || [],\n    year: pub.year || null,\n    citations: pub.citations || 0\n  }));\n\n// ===== NEW: Format grants =====\nconst grants = unifiedObject.grants || [];\nconst grantsForPrompt = grants.map(grant => ({\n  title: grant.title || '',\n  funder: grant.funder || '',\n  amount: grant.amount || null,\n  dates: grant.dates || ''\n}));\n\n// ===== NEW: Get biography (complete, not summarised) =====\nconst biography = unifiedObject.biography || '';\n\n// ===== NEW: Get research_interests (separate from keywords) =====\nconst researchInterests = unifiedObject.research_interests || [];\n\n// Format keywords (for additional context)\nconst keywords = (unifiedObject.keywords || []).slice(0, 20);\nconst keywordsText = keywords.length > 0 ? keywords.join(', ') : 'None available';\n\n// Format patents\nconst patents = unifiedObject.patents || [];\nconst patentsForPrompt = patents.slice(0, 10).map(pat => ({\n  title: pat.title || '',\n  year: pat.year || null\n}));\n\n// ===== NEW: Complete prompt per researcher_instance_spec_v2_2.md Section 10 =====\nconst prompt = `You are enriching a researcher profile for a capability intelligence system.\n\nINPUT DATA:\n- Name: ${name}\n- Institution: ${institution}\n- H-index: ${hIndex}\n- Total Citations: ${totalCitations}\n- Publication Count: ${publicationCount}\n- Patent Count: ${patentCount}\n\nPublications (Top 15 with abstracts):\n${JSON.stringify(publicationsForPrompt, null, 2)}\n\nBio:\n${biography || 'Not available'}\n\nGrants:\n${JSON.stringify(grantsForPrompt, null, 2)}\n\nResearch Interests (from source):\n${JSON.stringify(researchInterests)}\n\nPatents:\n${JSON.stringify(patentsForPrompt, null, 2)}\n\nAdditional Keywords:\n${keywordsText}\n\nTASK: Extract and structure researcher capabilities.\n\nProvide:\n\n1. **Career Stage** (critical for classification depth):\n   - early-career: < 5 years post-PhD, < 20 publications, h-index < 10\n   - mid-career: 5-15 years post-PhD, 20-80 publications, h-index 10-25\n   - senior: > 15 years post-PhD OR > 80 publications OR h-index > 25\n   - emeritus: retired but still active in research\n\n2. **Research Domains** (3-5 high-level fields):\n   - e.g., \"Marine Biotechnology\", \"Enzyme Engineering\", \"Food Science\"\n\n3. **Core Methodologies** (5-10 specific techniques):\n   - e.g., \"Lipase immobilisation\", \"Supercritical CO2 extraction\", \"HPLC analysis\"\n\n4. **Research Themes** (3-5 recurring topics across publications):\n   - e.g., \"Omega-3 enrichment\", \"Sustainable bioprocessing\", \"Functional foods\"\n\n5. **Equipment Expertise** (if identifiable from publications/grants):\n   - e.g., \"Mass spectrometry\", \"Bioreactors\", \"NMR spectroscopy\"\n\n6. **Collaboration Indicators**:\n   - Industry partnerships (if mentioned in grants/bio)\n   - International scope (if evident)\n\n7. **Achievement Indicators**:\n   - Research impact level: Emerging / Established / Leading\n   - Collaboration breadth: Local / National / International\n   - Funding track record: Minimal / Moderate / Extensive\n\nOUTPUT FORMAT: JSON with TWO required sections - raw_evidence (preserved from input) and enriched_context (your analysis).\n\n{\n  \"raw_evidence\": {\n    \"publications\": [\n      {\"title\": \"Publication title\", \"abstract\": \"First 200 chars of abstract...\", \"keywords\": [\"keyword1\", \"keyword2\"]}\n    ],\n    \"grants\": [\n      {\"title\": \"Grant title\", \"funder\": \"Funder name\", \"amount\": 500000, \"dates\": \"2022-2025\"}\n    ],\n    \"biography\": \"Complete biography text - preserve exactly as provided, DO NOT summarise\",\n    \"research_interests\": [\"Interest 1\", \"Interest 2\"]\n  },\n  \"enriched_context\": {\n    \"career_stage\": \"early-career | mid-career | senior | emeritus\",\n    \"career_stage_evidence\": \"Brief explanation of career stage assessment\",\n    \"research_domains\": [\"Domain 1\", \"Domain 2\", \"Domain 3\"],\n    \"methodologies\": [\"Method 1\", \"Method 2\", \"Method 3\"],\n    \"themes\": [\"Theme 1\", \"Theme 2\", \"Theme 3\"],\n    \"keywords\": [\"Extracted keyword 1\", \"Extracted keyword 2\"]\n  },\n  \"equipment_expertise\": [\"Equipment 1\", \"Equipment 2\"],\n  \"collaboration_indicators\": {\n    \"industry_partners\": [\"Company 1\"],\n    \"international_scope\": \"Yes/No with brief note\"\n  },\n  \"achievement_indicators\": {\n    \"research_impact\": \"Established\",\n    \"collaboration_breadth\": \"International\",\n    \"funding_track_record\": \"Extensive\"\n  }\n}\n\nCRITICAL RULES:\n1. The raw_evidence section MUST preserve input data exactly - copy publications, grants, biography, research_interests from the input. DO NOT summarise the biography.\n2. Include top 10-15 publications with titles, abstracts (first 200 chars), and keywords in raw_evidence.\n3. Include ALL grants with full details in raw_evidence.\n4. Preserve the complete biography text in raw_evidence.\n5. The enriched_context section contains YOUR analysis and extracted insights.\n6. Respond ONLY with valid JSON. Do not include any text outside the JSON structure.\n7. Start your response with { and end with }.`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    object_id: unifiedObject.object_id,\n    unified_data: unifiedObject,\n    execution_context: executionContext\n  }\n}];"
+        "functionCode": "// Prepare LLM Prompt - Definition Card v3.2 Compliant\n// MODIFIED: Uses enrichment prompt from researcher_instance_spec_v2_2.md Section 10\n// MODIFIED: Outputs raw_evidence + enriched_context structure for OBJECT-3\n\nconst unifiedObject = $input.first().json;\nconst executionContext = unifiedObject.execution_context;\n\nconst name = unifiedObject.name;\nconst institution = unifiedObject.institution || 'Unknown';\n\n// Format metrics\nconst metrics = unifiedObject.metrics || {};\nconst hIndex = metrics.h_index || 0;\nconst totalCitations = metrics.total_citations || 0;\nconst publicationCount = metrics.publication_count || 0;\nconst patentCount = metrics.patent_count || 0;\n\n// ===== NEW: Format publications WITH abstracts (top 15) =====\nconst publications = unifiedObject.publications || [];\nconst publicationsForPrompt = publications\n  .slice(0, 15)\n  .map(pub => ({\n    title: pub.title || '',\n    abstract: (pub.abstract || '').substring(0, 200),\n    keywords: pub.keywords || [],\n    year: pub.year || null,\n    citations: pub.citations || 0\n  }));\n\n// ===== NEW: Format grants =====\nconst grants = unifiedObject.grants || [];\nconst grantsForPrompt = grants.map(grant => ({\n  title: grant.title || '',\n  funder: grant.funder || '',\n  amount: grant.amount || null,\n  dates: grant.dates || ''\n}));\n\n// ===== NEW: Get biography (complete, not summarised) =====\nconst biography = unifiedObject.biography || '';\n\n// ===== NEW: Get research_interests (separate from keywords) =====\nconst researchInterests = unifiedObject.research_interests || [];\n\n// Parse keywords if stored as JSON string\nlet rawKeywords = unifiedObject.keywords || [];\nif (typeof rawKeywords === 'string') {\n  try {\n    rawKeywords = JSON.parse(rawKeywords);\n  } catch (e) {\n    rawKeywords = [];\n  }\n}\nconst keywords = rawKeywords.slice(0, 20);\nconst keywordsText = keywords.length > 0 ? keywords.join(', ') : 'None available';\n\n// Format patents\nconst patents = unifiedObject.patents || [];\nconst patentsForPrompt = patents.slice(0, 10).map(pat => ({\n  title: pat.title || '',\n  year: pat.year || null\n}));\n\n// ===== NEW: Complete prompt per researcher_instance_spec_v2_2.md Section 10 =====\nconst prompt = `You are enriching a researcher profile for a capability intelligence system.\n\nINPUT DATA:\n- Name: ${name}\n- Institution: ${institution}\n- H-index: ${hIndex}\n- Total Citations: ${totalCitations}\n- Publication Count: ${publicationCount}\n- Patent Count: ${patentCount}\n\nPublications (Top 15 with abstracts):\n${JSON.stringify(publicationsForPrompt, null, 2)}\n\nBio:\n${biography || 'Not available'}\n\nGrants:\n${JSON.stringify(grantsForPrompt, null, 2)}\n\nResearch Interests (from source):\n${JSON.stringify(researchInterests)}\n\nPatents:\n${JSON.stringify(patentsForPrompt, null, 2)}\n\nAdditional Keywords:\n${keywordsText}\n\nTASK: Extract and structure researcher capabilities.\n\nProvide:\n\n1. **Career Stage** (critical for classification depth):\n   - early-career: < 5 years post-PhD, < 20 publications, h-index < 10\n   - mid-career: 5-15 years post-PhD, 20-80 publications, h-index 10-25\n   - senior: > 15 years post-PhD OR > 80 publications OR h-index > 25\n   - emeritus: retired but still active in research\n\n2. **Research Domains** (3-5 high-level fields):\n   - e.g., \"Marine Biotechnology\", \"Enzyme Engineering\", \"Food Science\"\n\n3. **Core Methodologies** (5-10 specific techniques):\n   - e.g., \"Lipase immobilisation\", \"Supercritical CO2 extraction\", \"HPLC analysis\"\n\n4. **Research Themes** (3-5 recurring topics across publications):\n   - e.g., \"Omega-3 enrichment\", \"Sustainable bioprocessing\", \"Functional foods\"\n\n5. **Equipment Expertise** (if identifiable from publications/grants):\n   - e.g., \"Mass spectrometry\", \"Bioreactors\", \"NMR spectroscopy\"\n\n6. **Collaboration Indicators**:\n   - Industry partnerships (if mentioned in grants/bio)\n   - International scope (if evident)\n\n7. **Achievement Indicators**:\n   - Research impact level: Emerging / Established / Leading\n   - Collaboration breadth: Local / National / International\n   - Funding track record: Minimal / Moderate / Extensive\n\nOUTPUT FORMAT: JSON with TWO required sections - raw_evidence (preserved from input) and enriched_context (your analysis).\n\n{\n  \"raw_evidence\": {\n    \"publications\": [\n      {\"title\": \"Publication title\", \"abstract\": \"First 200 chars of abstract...\", \"keywords\": [\"keyword1\", \"keyword2\"]}\n    ],\n    \"grants\": [\n      {\"title\": \"Grant title\", \"funder\": \"Funder name\", \"amount\": 500000, \"dates\": \"2022-2025\"}\n    ],\n    \"biography\": \"Complete biography text - preserve exactly as provided, DO NOT summarise\",\n    \"research_interests\": [\"Interest 1\", \"Interest 2\"]\n  },\n  \"enriched_context\": {\n    \"career_stage\": \"early-career | mid-career | senior | emeritus\",\n    \"career_stage_evidence\": \"Brief explanation of career stage assessment\",\n    \"research_domains\": [\"Domain 1\", \"Domain 2\", \"Domain 3\"],\n    \"methodologies\": [\"Method 1\", \"Method 2\", \"Method 3\"],\n    \"themes\": [\"Theme 1\", \"Theme 2\", \"Theme 3\"],\n    \"keywords\": [\"Extracted keyword 1\", \"Extracted keyword 2\"]\n  },\n  \"equipment_expertise\": [\"Equipment 1\", \"Equipment 2\"],\n  \"collaboration_indicators\": {\n    \"industry_partners\": [\"Company 1\"],\n    \"international_scope\": \"Yes/No with brief note\"\n  },\n  \"achievement_indicators\": {\n    \"research_impact\": \"Established\",\n    \"collaboration_breadth\": \"International\",\n    \"funding_track_record\": \"Extensive\"\n  }\n}\n\nCRITICAL RULES:\n1. The raw_evidence section MUST preserve input data exactly - copy publications, grants, biography, research_interests from the input. DO NOT summarise the biography.\n2. Include top 10-15 publications with titles, abstracts (first 200 chars), and keywords in raw_evidence.\n3. Include ALL grants with full details in raw_evidence.\n4. Preserve the complete biography text in raw_evidence.\n5. The enriched_context section contains YOUR analysis and extracted insights.\n6. Respond ONLY with valid JSON. Do not include any text outside the JSON structure.\n7. Start your response with { and end with }.`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    object_id: unifiedObject.object_id,\n    unified_data: unifiedObject,\n    execution_context: executionContext\n  }\n}];"
       },
       "id": "046fcd0c-1ced-4f9d-aada-1d104554aef1",
       "name": "Prepare LLM Prompt",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
       "position": [
-        352,
-        448
+        448,
+        656
       ]
     },
     {
       "parameters": {
-        "functionCode": "// Parse LLM Response - Definition Card v3.2 Compliant\n// MODIFIED: Parses new raw_evidence + enriched_context structure\n// MODIFIED: Falls back gracefully for old format or parse errors\n// MODIFIED: More robust JSON cleaning for LLM output\n\n// Get LLM response from direct input\nconst llmResponse = $input.first().json.text;\n\n// Get unified_data and execution_context via node reference\nconst preparedData = $('Prepare LLM Prompt').first().json;\nconst unifiedObject = preparedData.unified_data;\nconst objectId = preparedData.object_id;\nconst executionContext = preparedData.execution_context;\n\n// Clean and parse - remove markdown code blocks if present\nlet cleanedResponse = llmResponse\n  .replace(/```json\\s*/g, '')\n  .replace(/```\\s*/g, '')\n  .trim();\n\n// Sometimes LLM adds text before/after JSON - try to extract JSON object\nconst jsonMatch = cleanedResponse.match(/\\{[\\s\\S]*\\}/);\nif (jsonMatch) {\n  cleanedResponse = jsonMatch[0];\n}\n\n// ===== Fix common LLM JSON errors =====\ncleanedResponse = cleanedResponse\n  .replace(/,\\s*\\]/g, ']')       // Remove trailing comma before ]\n  .replace(/,\\s*\\}/g, '}')       // Remove trailing comma before }\n  .replace(/\\n/g, ' ')           // Replace newlines with spaces\n  .replace(/\\r/g, '')            // Remove carriage returns\n  .replace(/\\t/g, ' ')           // Replace tabs with spaces\n  .replace(/\\s+/g, ' ');         // Collapse multiple spaces\n\nlet enrichmentData;\nlet parseError = null;\n\ntry {\n  enrichmentData = JSON.parse(cleanedResponse);\n} catch (e) {\n  parseError = e.message;\n  \n  // Second attempt - even more aggressive cleaning\n  try {\n    let aggressiveCleaned = cleanedResponse\n      .replace(/[\\x00-\\x1F\\x7F]/g, '')  // Remove control characters\n      .replace(/\\\\n/g, ' ')              // Replace escaped newlines\n      .replace(/\\\\t/g, ' ')              // Replace escaped tabs\n      .replace(/\\\\/g, '\\\\\\\\');           // Escape backslashes\n    \n    enrichmentData = JSON.parse(aggressiveCleaned);\n    parseError = null;\n    console.log('JSON parse succeeded on second attempt');\n  } catch (e2) {\n    parseError = `First: ${e.message}; Second: ${e2.message}`;\n    enrichmentData = null;\n  }\n}\n\n// ===== Validate and normalize to required structure =====\nfunction normalizeEnrichmentData(parsed, unified, error) {\n  \n  // If parse failed completely, build from unified data\n  if (!parsed) {\n    return {\n      raw_evidence: {\n        publications: (unified.publications || []).slice(0, 15).map(p => ({\n          title: p.title || '',\n          abstract: (p.abstract || '').substring(0, 500),\n          keywords: p.keywords || []\n        })),\n        grants: (unified.grants || []).map(g => ({\n          title: g.title || '',\n          funder: g.funder || '',\n          amount: g.amount || null,\n          dates: g.dates || ''\n        })),\n        biography: unified.biography || '',\n        research_interests: unified.research_interests || []\n      },\n      enriched_context: {\n        career_stage: 'unknown',\n        career_stage_evidence: `LLM parse error: ${error}`,\n        research_domains: [],\n        methodologies: [],\n        themes: [],\n        keywords: []\n      },\n      equipment_expertise: [],\n      collaboration_indicators: {\n        industry_partners: [],\n        international_scope: 'Unknown'\n      },\n      achievement_indicators: {\n        research_impact: 'Unknown',\n        collaboration_breadth: 'Unknown',\n        funding_track_record: 'Unknown'\n      },\n      enrichment_error: error\n    };\n  }\n  \n  // Check if LLM returned NEW format (has raw_evidence and enriched_context)\n  const hasNewFormat = parsed.raw_evidence && parsed.enriched_context;\n  \n  if (hasNewFormat) {\n    // ===== NEW FORMAT: Validate and fill gaps =====\n    return {\n      raw_evidence: {\n        publications: (parsed.raw_evidence.publications || []).slice(0, 15).map(p => ({\n          title: p.title || '',\n          abstract: (p.abstract || '').substring(0, 500),\n          keywords: p.keywords || []\n        })),\n        grants: parsed.raw_evidence.grants || unified.grants || [],\n        biography: parsed.raw_evidence.biography || unified.biography || '',\n        research_interests: parsed.raw_evidence.research_interests || unified.research_interests || []\n      },\n      enriched_context: {\n        career_stage: parsed.enriched_context.career_stage || 'unknown',\n        career_stage_evidence: parsed.enriched_context.career_stage_evidence || '',\n        research_domains: parsed.enriched_context.research_domains || [],\n        methodologies: parsed.enriched_context.methodologies || [],\n        themes: parsed.enriched_context.themes || parsed.enriched_context.research_themes || [],\n        keywords: parsed.enriched_context.keywords || []\n      },\n      equipment_expertise: parsed.equipment_expertise || [],\n      collaboration_indicators: parsed.collaboration_indicators || {\n        industry_partners: [],\n        international_scope: 'Unknown'\n      },\n      achievement_indicators: parsed.achievement_indicators || {\n        research_impact: 'Unknown',\n        collaboration_breadth: 'Unknown',\n        funding_track_record: 'Unknown'\n      }\n    };\n  } else {\n    // ===== OLD FORMAT: Reshape to new structure =====\n    return {\n      raw_evidence: {\n        publications: (unified.publications || []).slice(0, 15).map(p => ({\n          title: p.title || '',\n          abstract: (p.abstract || '').substring(0, 500),\n          keywords: p.keywords || []\n        })),\n        grants: (unified.grants || []).map(g => ({\n          title: g.title || '',\n          funder: g.funder || '',\n          amount: g.amount || null,\n          dates: g.dates || ''\n        })),\n        biography: unified.biography || '',\n        research_interests: unified.research_interests || []\n      },\n      enriched_context: {\n        career_stage: parsed.career_stage || 'unknown',\n        career_stage_evidence: parsed.career_stage_evidence || '',\n        research_domains: parsed.research_domains || [],\n        methodologies: parsed.methodologies || [],\n        themes: parsed.research_themes || parsed.themes || [],\n        keywords: parsed.keywords || []\n      },\n      equipment_expertise: parsed.equipment_expertise || [],\n      collaboration_indicators: parsed.collaboration_indicators || {\n        industry_partners: [],\n        international_scope: 'Unknown'\n      },\n      achievement_indicators: parsed.achievement_indicators || {\n        research_impact: (parsed.achievement_indicators || {}).research_impact || 'Unknown',\n        collaboration_breadth: (parsed.achievement_indicators || {}).collaboration_breadth || 'Unknown',\n        funding_track_record: (parsed.achievement_indicators || {}).funding_track_record || 'Unknown'\n      },\n      _reshaped_from_old_format: true\n    };\n  }\n}\n\n// Normalize the enrichment data\nconst normalizedEnrichment = normalizeEnrichmentData(enrichmentData, unifiedObject, parseError);\n\n// Validate raw_evidence completeness\nconst rawEvidence = normalizedEnrichment.raw_evidence;\nconst validationFlags = [];\n\nif (!rawEvidence.publications || rawEvidence.publications.length === 0) {\n  validationFlags.push('missing_publications_in_raw_evidence');\n}\nif (!rawEvidence.grants || rawEvidence.grants.length === 0) {\n  validationFlags.push('missing_grants_in_raw_evidence');\n}\nif (!rawEvidence.biography) {\n  validationFlags.push('missing_biography_in_raw_evidence');\n}\nif (!rawEvidence.research_interests || rawEvidence.research_interests.length === 0) {\n  validationFlags.push('missing_research_interests_in_raw_evidence');\n}\n\nnormalizedEnrichment._validation_flags = validationFlags;\n\n// Build final enriched object\nconst enrichedObject = {\n  ...unifiedObject,\n  object_id: objectId,\n  enrichment: normalizedEnrichment,\n  enriched_at: new Date().toISOString(),\n  execution_context: executionContext\n};\n\nconsole.log(`Parse LLM complete: career_stage=${normalizedEnrichment.enriched_context.career_stage}, domains=${normalizedEnrichment.enriched_context.research_domains.length}`);\n\nreturn [{ json: enrichedObject }];"
+        "functionCode": "// Parse LLM Response - FIXED VERSION\n// CRITICAL FIX: raw_evidence is now built directly from unified_data, NOT from LLM output\n// This ensures year, citations, and other metadata are preserved exactly\n// LLM is only trusted for enriched_context (analysis/insights)\n\n// Get LLM response from direct input\nconst llmResponse = $input.first().json.text;\n\n// Get unified_data and execution_context via node reference\nconst preparedData = $('Prepare LLM Prompt').first().json;\nconst unifiedObject = preparedData.unified_data;\nconst objectId = preparedData.object_id;\nconst executionContext = preparedData.execution_context;\n\n// Clean and parse - remove markdown code blocks if present\nlet cleanedResponse = llmResponse\n  .replace(/```json\\s*/g, '')\n  .replace(/```\\s*/g, '')\n  .trim();\n\n// Sometimes LLM adds text before/after JSON - try to extract JSON object\nconst jsonMatch = cleanedResponse.match(/\\{[\\s\\S]*\\}/);\nif (jsonMatch) {\n  cleanedResponse = jsonMatch[0];\n}\n\n// ===== Fix common LLM JSON errors =====\ncleanedResponse = cleanedResponse\n  .replace(/,\\s*\\]/g, ']')       // Remove trailing comma before ]\n  .replace(/,\\s*\\}/g, '}')       // Remove trailing comma before }\n  .replace(/\\n/g, ' ')           // Replace newlines with spaces\n  .replace(/\\r/g, '')            // Remove carriage returns\n  .replace(/\\t/g, ' ')           // Replace tabs with spaces\n  .replace(/\\s+/g, ' ');         // Collapse multiple spaces\n\nlet enrichmentData;\nlet parseError = null;\n\ntry {\n  enrichmentData = JSON.parse(cleanedResponse);\n} catch (e) {\n  parseError = e.message;\n  \n  // Second attempt - even more aggressive cleaning\n  try {\n    let aggressiveCleaned = cleanedResponse\n      .replace(/[\\x00-\\x1F\\x7F]/g, '')  // Remove control characters\n      .replace(/\\\\n/g, ' ')              // Replace escaped newlines\n      .replace(/\\\\t/g, ' ')              // Replace escaped tabs\n      .replace(/\\\\/g, '\\\\\\\\');           // Escape backslashes\n    \n    enrichmentData = JSON.parse(aggressiveCleaned);\n    parseError = null;\n    console.log('JSON parse succeeded on second attempt');\n  } catch (e2) {\n    parseError = `First: ${e.message}; Second: ${e2.message}`;\n    enrichmentData = null;\n  }\n}\n\n// ===== CRITICAL: Build raw_evidence DIRECTLY from unified data =====\n// This ensures year, citations, authors, and all other metadata are preserved\n// We NEVER trust the LLM to copy data accurately\n\nfunction buildRawEvidenceFromUnified(unified) {\n  return {\n    // Publications: preserve ALL fields including year and citations\n    publications: (unified.publications || []).slice(0, 15).map(p => ({\n      title: p.title || '',\n      abstract: (p.abstract || '').substring(0, 500),\n      keywords: p.keywords || [],\n      year: p.year || null,                    // CRITICAL: preserve year\n      citations: p.citations || 0,              // CRITICAL: preserve citations\n      authors: p.authors || [],                 // preserve authors\n      doi: p.doi || null,                       // preserve DOI\n      venue: p.venue || p.publication_venue || null,\n      source: p.source || null\n    })),\n    \n    // Grants: preserve all fields\n    grants: (unified.grants || []).map(g => ({\n      title: g.title || '',\n      funder: g.funder || '',\n      amount: g.amount || null,\n      dates: g.dates || '',\n      status: g.status || null\n    })),\n    \n    // Biography: preserve complete text\n    biography: unified.biography || '',\n    \n    // Research interests: preserve complete list\n    research_interests: unified.research_interests || []\n  };\n}\n\n// ===== Extract enriched_context from LLM (this is what LLM is good at) =====\nfunction extractEnrichedContextFromLLM(parsed, error) {\n  if (!parsed) {\n    return {\n      career_stage: 'unknown',\n      career_stage_evidence: `LLM parse error: ${error}`,\n      research_domains: [],\n      methodologies: [],\n      themes: [],\n      keywords: []\n    };\n  }\n  \n  // Check if LLM returned new format with enriched_context\n  if (parsed.enriched_context) {\n    return {\n      career_stage: parsed.enriched_context.career_stage || 'unknown',\n      career_stage_evidence: parsed.enriched_context.career_stage_evidence || '',\n      research_domains: parsed.enriched_context.research_domains || [],\n      methodologies: parsed.enriched_context.methodologies || [],\n      themes: parsed.enriched_context.themes || parsed.enriched_context.research_themes || [],\n      keywords: parsed.enriched_context.keywords || []\n    };\n  }\n  \n  // Old format - fields at top level\n  return {\n    career_stage: parsed.career_stage || 'unknown',\n    career_stage_evidence: parsed.career_stage_evidence || '',\n    research_domains: parsed.research_domains || [],\n    methodologies: parsed.methodologies || [],\n    themes: parsed.research_themes || parsed.themes || [],\n    keywords: parsed.keywords || []\n  };\n}\n\n// ===== Extract other LLM insights =====\nfunction extractOtherInsights(parsed) {\n  if (!parsed) {\n    return {\n      equipment_expertise: [],\n      collaboration_indicators: {\n        industry_partners: [],\n        international_scope: 'Unknown'\n      },\n      achievement_indicators: {\n        research_impact: 'Unknown',\n        collaboration_breadth: 'Unknown',\n        funding_track_record: 'Unknown'\n      }\n    };\n  }\n  \n  return {\n    equipment_expertise: parsed.equipment_expertise || [],\n    collaboration_indicators: parsed.collaboration_indicators || {\n      industry_partners: [],\n      international_scope: 'Unknown'\n    },\n    achievement_indicators: parsed.achievement_indicators || {\n      research_impact: 'Unknown',\n      collaboration_breadth: 'Unknown',\n      funding_track_record: 'Unknown'\n    }\n  };\n}\n\n// ===== Build final normalized enrichment =====\nconst rawEvidence = buildRawEvidenceFromUnified(unifiedObject);\nconst enrichedContext = extractEnrichedContextFromLLM(enrichmentData, parseError);\nconst otherInsights = extractOtherInsights(enrichmentData);\n\nconst normalizedEnrichment = {\n  raw_evidence: rawEvidence,\n  enriched_context: enrichedContext,\n  ...otherInsights\n};\n\n// ===== Validation flags =====\nconst validationFlags = [];\n\nif (!rawEvidence.publications || rawEvidence.publications.length === 0) {\n  validationFlags.push('missing_publications_in_raw_evidence');\n}\nif (!rawEvidence.grants || rawEvidence.grants.length === 0) {\n  validationFlags.push('missing_grants_in_raw_evidence');\n}\nif (!rawEvidence.biography) {\n  validationFlags.push('missing_biography_in_raw_evidence');\n}\nif (!rawEvidence.research_interests || rawEvidence.research_interests.length === 0) {\n  validationFlags.push('missing_research_interests_in_raw_evidence');\n}\n\n// Check if year/citations are actually present\nconst pubsWithYear = rawEvidence.publications.filter(p => p.year !== null).length;\nconst pubsWithCitations = rawEvidence.publications.filter(p => p.citations > 0).length;\nif (pubsWithYear === 0 && rawEvidence.publications.length > 0) {\n  validationFlags.push('no_publication_years');\n}\nif (pubsWithCitations === 0 && rawEvidence.publications.length > 0) {\n  validationFlags.push('no_publication_citations');\n}\n\nnormalizedEnrichment._validation_flags = validationFlags;\nnormalizedEnrichment._raw_evidence_source = 'unified_data';  // Track that we built this ourselves\n\nif (parseError) {\n  normalizedEnrichment._llm_parse_error = parseError;\n}\n\n// Build final enriched object\nconst enrichedObject = {\n  ...unifiedObject,\n  object_id: objectId,\n  enrichment: normalizedEnrichment,\n  enriched_at: new Date().toISOString(),\n  execution_context: executionContext\n};\n\nconsole.log(`Parse LLM complete: career_stage=${normalizedEnrichment.enriched_context.career_stage}`);\nconsole.log(`  Publications: ${rawEvidence.publications.length}, with year: ${pubsWithYear}, with citations: ${pubsWithCitations}`);\nconsole.log(`  Sample: ${rawEvidence.publications[0]?.title?.substring(0, 50)}... year=${rawEvidence.publications[0]?.year}, citations=${rawEvidence.publications[0]?.citations}`);\n\nreturn [{ json: enrichedObject }];"
       },
       "id": "0f160440-afcf-45e4-aa1d-7b5a1972449b",
       "name": "Parse LLM Response",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
       "position": [
-        880,
-        448
+        976,
+        656
       ]
     },
     {
@@ -485,15 +447,15 @@
     },
     {
       "parameters": {
-        "functionCode": "// Pass 1: Structural Unification\n// Merges data from multiple sources and creates unified researcher profile\n// UPDATED: Uses direct fields from OBJECT-1 v3.x with JSON fallback\n\n// ============================================================\n// SECTION 1: Get input data\n// ============================================================\n\nconst thinObject = $input.first().json;\nconst executionContext = thinObject.execution_context;\n\n// ============================================================\n// SECTION 2: Helper functions\n// ============================================================\n\n// Parse JSON strings safely\nconst parseIfString = (value, defaultVal) => {\n  if (!value) return defaultVal;\n  if (typeof value === 'string') {\n    try { return JSON.parse(value); } catch (e) { return defaultVal; }\n  }\n  return value;\n};\n\n// Title similarity for deduplication\nfunction titleSimilarity(title1, title2) {\n  if (!title1 || !title2) return 0;\n  const words1 = new Set(title1.toLowerCase().split(/\\s+/).filter(w => w.length > 2));\n  const words2 = new Set(title2.toLowerCase().split(/\\s+/).filter(w => w.length > 2));\n  if (words1.size === 0 || words2.size === 0) return 0;\n  const intersection = new Set([...words1].filter(x => words2.has(x)));\n  const union = new Set([...words1, ...words2]);\n  return intersection.size / union.size;\n}\n\n// ============================================================\n// SECTION 3: Extract direct fields (OBJECT-1 v3.x format)\n// ============================================================\n\nconst biography = thinObject.biography || '';\nconst research_interests = thinObject.research_interests || [];\nconst current_projects = thinObject.current_projects || [];\nconst expertise_keywords = thinObject.expertise_keywords || [];\nconst directCollaborators = thinObject.collaborators || [];\nconst directKeywords = thinObject.keywords || [];\nconst directPublications = parseIfString(thinObject.publications, []);\nconst directPatents = parseIfString(thinObject.patents, []);\nconst directAffiliations = parseIfString(thinObject.affiliations, []);\nconst directGrants = parseIfString(thinObject.grants, []);\nconst directMetrics = parseIfString(thinObject.metrics, {});\n\n// ============================================================\n// SECTION 4: Extract legacy JSON fields (backward compatibility)\n// ============================================================\n\nconst orcidData = parseIfString(thinObject.orcid_data, {});\nconst scopusData = parseIfString(thinObject.scopus_data, {});\nconst scholarData = parseIfString(thinObject.scholar_data, {});\nconst universityData = parseIfString(thinObject.university_data, {});\nconst patentsData = parseIfString(thinObject.patents_data, {});\n\n// Source metadata for provenance\nconst sourceMetadata = parseIfString(thinObject.source_metadata, {\n  sources_scraped: [],\n  scrape_timestamps: {},\n  field_hashes: {}\n});\n\n// ============================================================\n// SECTION 5: Build unified object\n// ============================================================\n\nconst unified = {\n  object_id: thinObject.object_id,\n  name: thinObject.name,\n  orcid: thinObject.orcid || null,\n  email: thinObject.email || null,\n  institution: thinObject.institution || null,\n  \n  // Raw evidence fields (CRITICAL for OBJECT-3 classification)\n  biography: biography || universityData.biography || '',\n  research_interests: research_interests.length > 0 ? research_interests : (universityData.research_interests || []),\n  current_projects: current_projects.length > 0 ? current_projects : (universityData.current_projects || []),\n  expertise_keywords: expertise_keywords.length > 0 ? expertise_keywords : [],\n  grants: directGrants.length > 0 ? directGrants : [],\n  \n  // Collections (populated below)\n  publications: [],\n  collaborators: [],\n  keywords: [],\n  affiliations: [],\n  patents: [],\n  \n  // Metrics (populated below)\n  metrics: {},\n  \n  // Quality flags\n  data_quality_flags: thinObject.data_quality_flags || [],\n  data_completeness: thinObject.data_completeness || 0,\n  source_metadata: sourceMetadata,\n  execution_context: executionContext\n};\n\n// ============================================================\n// SECTION 6: Merge publications\n// ============================================================\n\nif (directPublications.length > 0) {\n  // Use direct publications from OBJECT-1\n  unified.publications = directPublications;\n} else {\n  // Legacy: merge from orcid, scopus, scholar JSON fields\n  const publicationsMap = new Map();\n  \n  // Add Scopus publications\n  (scopusData.publications || []).forEach(pub => {\n    const doi = pub.doi;\n    const key = doi || `scopus_${(pub.title || '').toLowerCase().substring(0, 50)}`;\n    if (pub.title && !publicationsMap.has(key)) {\n      publicationsMap.set(key, {\n        title: pub.title,\n        doi: doi,\n        year: pub.year,\n        citations: pub.citations || 0,\n        authors: pub.authors || [],\n        abstract: pub.abstract || '',\n        keywords: pub.keywords || [],\n        source: 'scopus'\n      });\n    }\n  });\n  \n  // Add ORCID publications\n  (orcidData.publications || []).forEach(pub => {\n    const doi = pub.doi;\n    const key = doi || `orcid_${(pub.title || '').toLowerCase().substring(0, 50)}`;\n    \n    if (doi && publicationsMap.has(doi)) {\n      // Merge with existing - update citations if higher\n      const existing = publicationsMap.get(doi);\n      existing.citations = Math.max(existing.citations || 0, pub.citations || 0);\n    } else if (!publicationsMap.has(key)) {\n      // Check for title duplicates\n      let isDuplicate = false;\n      for (const [existingKey, existingPub] of publicationsMap.entries()) {\n        if (titleSimilarity(pub.title, existingPub.title) > 0.85) {\n          isDuplicate = true;\n          break;\n        }\n      }\n      \n      if (!isDuplicate && pub.title) {\n        publicationsMap.set(key, {\n          title: pub.title,\n          doi: doi,\n          year: pub.year,\n          citations: pub.citations || 0,\n          type: pub.type,\n          source: 'orcid'\n        });\n      }\n    }\n  });\n  \n  // Add Scholar publications\n  (scholarData.publications || scholarData.articles || []).forEach(pub => {\n    const title = pub.title || '';\n    const doi = pub.doi;\n    \n    if (doi && publicationsMap.has(doi)) {\n      // Merge citations (Scholar often has higher counts)\n      const existing = publicationsMap.get(doi);\n      existing.citations = Math.max(existing.citations || 0, pub.citations || pub.cited_by || 0);\n    } else {\n      // Check for title duplicates\n      let isDuplicate = false;\n      for (const [existingKey, existingPub] of publicationsMap.entries()) {\n        if (titleSimilarity(title, existingPub.title) > 0.85) {\n          isDuplicate = true;\n          existingPub.citations = Math.max(existingPub.citations || 0, pub.citations || pub.cited_by || 0);\n          break;\n        }\n      }\n      \n      if (!isDuplicate && title) {\n        const key = doi || `scholar_${title.toLowerCase().substring(0, 50)}`;\n        publicationsMap.set(key, {\n          title: title,\n          doi: doi,\n          year: pub.year,\n          citations: pub.citations || pub.cited_by || 0,\n          source: 'scholar'\n        });\n      }\n    }\n  });\n  \n  unified.publications = Array.from(publicationsMap.values());\n}\n\n// ============================================================\n// SECTION 7: Merge collaborators\n// ============================================================\n\nif (directCollaborators.length > 0) {\n  unified.collaborators = directCollaborators;\n} else {\n  const collaboratorsSet = new Set();\n  const researcherNameLower = (thinObject.name || '').toLowerCase();\n  \n  // From publications\n  unified.publications.forEach(pub => {\n    (pub.authors || []).forEach(author => {\n      const authorName = (typeof author === 'string' ? author : author.name || '').trim();\n      if (authorName && authorName.toLowerCase() !== researcherNameLower) {\n        collaboratorsSet.add(authorName);\n      }\n    });\n  });\n  \n  // From Scholar co-authors\n  (scholarData.co_authors || []).forEach(coauthor => {\n    const name = (typeof coauthor === 'string' ? coauthor : coauthor.name || '').trim();\n    if (name && name.toLowerCase() !== researcherNameLower) {\n      collaboratorsSet.add(name);\n    }\n  });\n  \n  unified.collaborators = Array.from(collaboratorsSet);\n}\n\n// ============================================================\n// SECTION 8: Merge keywords\n// ============================================================\n\nif (directKeywords.length > 0) {\n  unified.keywords = directKeywords;\n} else {\n  const keywordsSet = new Set();\n  \n  // From university/Deakin data\n  (universityData.research_interests || []).forEach(kw => {\n    if (kw) keywordsSet.add(kw.toLowerCase().trim());\n  });\n  \n  // From ORCID\n  (orcidData.keywords || []).forEach(kw => {\n    if (kw) keywordsSet.add(kw.toLowerCase().trim());\n  });\n  \n  // From Scholar interests\n  (scholarData.interests || []).forEach(kw => {\n    if (kw) keywordsSet.add(kw.toLowerCase().trim());\n  });\n  \n  // From Scopus subject areas\n  (scopusData.subject_areas || []).forEach(area => {\n    const areaName = area.area || area;\n    if (areaName) keywordsSet.add(areaName.toLowerCase().trim());\n  });\n  \n  // From publication keywords\n  unified.publications.forEach(pub => {\n    (pub.keywords || []).forEach(kw => {\n      if (kw) keywordsSet.add(kw.toLowerCase().trim());\n    });\n  });\n  \n  unified.keywords = Array.from(keywordsSet);\n}\n\n// ============================================================\n// SECTION 9: Merge affiliations\n// ============================================================\n\nif (directAffiliations.length > 0) {\n  unified.affiliations = directAffiliations;\n} else {\n  const affiliations = [];\n  \n  // From ORCID employment\n  (orcidData.employment || []).forEach(emp => {\n    const orgName = typeof emp.organization === 'string' \n      ? emp.organization \n      : emp.organization?.name;\n    \n    if (orgName) {\n      affiliations.push({\n        institution: orgName,\n        department: emp.department || null,\n        role: emp.role || emp['role-title'] || null,\n        start_date: emp.start_year || emp.start_date || null,\n        end_date: emp.end_year || emp.end_date || null,\n        current: !emp.end_year && !emp.end_date,\n        source: 'orcid'\n      });\n    }\n  });\n  \n  // From university data\n  if (universityData.department || universityData.position) {\n    affiliations.push({\n      institution: thinObject.institution || 'Unknown',\n      department: universityData.department || null,\n      position: universityData.position || null,\n      current: true,\n      source: 'university'\n    });\n  }\n  \n  // Add current institution if not already present\n  if (thinObject.institution) {\n    const alreadyHasCurrent = affiliations.some(a => \n      a.institution === thinObject.institution && a.current\n    );\n    if (!alreadyHasCurrent) {\n      affiliations.push({\n        institution: thinObject.institution,\n        current: true,\n        source: 'current'\n      });\n    }\n  }\n  \n  unified.affiliations = affiliations;\n}\n\n// ============================================================\n// SECTION 10: Merge patents\n// ============================================================\n\nif (directPatents.length > 0) {\n  unified.patents = directPatents;\n} else {\n  unified.patents = patentsData.patents || [];\n}\n\n// ============================================================\n// SECTION 11: Calculate metrics\n// ============================================================\n\nif (Object.keys(directMetrics).length > 0 && directMetrics.h_index) {\n  unified.metrics = directMetrics;\n} else {\n  unified.metrics = {\n    h_index: Math.max(\n      scopusData.h_index || 0,\n      scholarData.h_index || scholarData.cited_by?.h_index || 0,\n      directMetrics.h_index || 0\n    ),\n    total_citations: Math.max(\n      scopusData.citation_count || scopusData.citations || scopusData.cited_by_count || 0,\n      scholarData.citations || scholarData.cited_by?.all || 0,\n      directMetrics.total_citations || 0\n    ),\n    publication_count: Math.max(\n      scopusData.document_count || 0,\n      unified.publications.length,\n      directMetrics.publication_count || 0\n    ),\n    collaborator_count: unified.collaborators.length,\n    patent_count: directMetrics.patent_count || patentsData.patent_count || unified.patents.length || 0,\n    grant_count: unified.grants.length,\n    research_interest_count: unified.research_interests.length,\n    current_project_count: unified.current_projects.length\n  };\n}\n\n// ============================================================\n// SECTION 12: Data quality flags\n// ============================================================\n\nif (unified.data_quality_flags.length === 0) {\n  if (!unified.orcid) unified.data_quality_flags.push('missing_orcid');\n  if (unified.publications.length === 0 && unified.metrics.publication_count === 0) {\n    unified.data_quality_flags.push('no_publications');\n  }\n  if (unified.affiliations.length === 0) unified.data_quality_flags.push('no_affiliations');\n  if (unified.grants.length === 0) unified.data_quality_flags.push('no_grants');\n  if (!unified.biography) unified.data_quality_flags.push('no_biography');\n}\n\n// ============================================================\n// SECTION 13: Calculate completeness score\n// ============================================================\n\nif (!unified.data_completeness || unified.data_completeness === 0) {\n  let completeness = 0;\n  if (unified.orcid) completeness += 15;\n  if (unified.biography) completeness += 15;\n  if (unified.publications.length > 0 || unified.metrics.publication_count > 0) completeness += 20;\n  if (unified.affiliations.length > 0) completeness += 15;\n  if (unified.metrics.h_index > 0) completeness += 15;\n  if (unified.keywords.length > 0) completeness += 10;\n  if (unified.collaborators.length > 0) completeness += 5;\n  if (unified.research_interests.length > 0) completeness += 5;\n  unified.data_completeness = completeness;\n}\n\n// ============================================================\n// SECTION 14: Return unified object\n// ============================================================\n\nconsole.log(`Pass 1 complete for: ${unified.name}`);\nconsole.log(`  Publications: ${unified.publications.length}, Metrics.pub_count: ${unified.metrics.publication_count}`);\nconsole.log(`  Biography: ${unified.biography ? unified.biography.length + ' chars' : 'NONE'}`);\nconsole.log(`  Research interests: ${unified.research_interests.length}`);\nconsole.log(`  Keywords: ${unified.keywords.length}`);\n\nreturn [{ json: unified }];"
+        "functionCode": "// Pass 1: Structural Unification - FIXED VERSION\n// Merges data from multiple sources and creates unified researcher profile\n// FIX: Uses pre-merged thin.publications (with year/citations) instead of source-specific data\n// MODIFIED: Preserves execution_context through pipeline\n\nconst thinObject = $input.first().json;\nconst executionContext = thinObject.execution_context;\n\nfunction titleSimilarity(title1, title2) {\n  const words1 = new Set(title1.toLowerCase().split(/\\s+/));\n  const words2 = new Set(title2.toLowerCase().split(/\\s+/));\n  \n  if (words1.size === 0 || words2.size === 0) return 0.0;\n  \n  const intersection = new Set([...words1].filter(x => words2.has(x)));\n  const union = new Set([...words1, ...words2]);\n  \n  return intersection.size / union.size;\n}\n\n// Parse JSON fields safely\nfunction safeParseJSON(str, fallback = {}) {\n  if (!str) return fallback;\n  if (typeof str === 'object') return str;\n  try {\n    return JSON.parse(str);\n  } catch (e) {\n    return fallback;\n  }\n}\n\n// Parse source-specific data (for fallback and additional fields)\nconst orcidData = safeParseJSON(thinObject.orcid_data, {});\nconst scopusData = safeParseJSON(thinObject.scopus_data, {});\nconst scholarData = safeParseJSON(thinObject.scholar_data, {});\nconst universityData = safeParseJSON(thinObject.university_data, {});\nconst patentsData = safeParseJSON(thinObject.patents_data, {});\nconst sourceMetadata = safeParseJSON(thinObject.source_metadata, {\n  sources_scraped: [],\n  scrape_timestamps: {},\n  field_hashes: {}\n});\n\n// ============================================================\n// FIX: Parse pre-merged publications from ThinObject FIRST\n// These come from OBJECT-1's Merge node and have complete data\n// ============================================================\nlet preMergedPublications = [];\ntry {\n  const pubData = thinObject.publications;\n  if (typeof pubData === 'string') {\n    preMergedPublications = JSON.parse(pubData);\n  } else if (Array.isArray(pubData)) {\n    preMergedPublications = pubData;\n  }\n} catch (e) {\n  console.log('Could not parse thin.publications, will use source-specific data');\n}\n\n// Also get pre-merged collaborators, keywords, affiliations from ThinObject\nlet preMergedCollaborators = [];\ntry {\n  const collabData = thinObject.collaborators;\n  if (typeof collabData === 'string') {\n    preMergedCollaborators = JSON.parse(collabData);\n  } else if (Array.isArray(collabData)) {\n    preMergedCollaborators = collabData;\n  }\n} catch (e) {}\n\nlet preMergedKeywords = [];\ntry {\n  const kwData = thinObject.keywords;\n  if (typeof kwData === 'string') {\n    preMergedKeywords = JSON.parse(kwData);\n  } else if (Array.isArray(kwData)) {\n    preMergedKeywords = kwData;\n  }\n} catch (e) {}\n\nlet preMergedAffiliations = [];\ntry {\n  const affData = thinObject.affiliations;\n  if (typeof affData === 'string') {\n    preMergedAffiliations = JSON.parse(affData);\n  } else if (Array.isArray(affData)) {\n    preMergedAffiliations = affData;\n  }\n} catch (e) {}\n\nlet preMergedMetrics = {};\ntry {\n  const metData = thinObject.metrics;\n  if (typeof metData === 'string') {\n    preMergedMetrics = JSON.parse(metData);\n  } else if (typeof metData === 'object' && metData !== null) {\n    preMergedMetrics = metData;\n  }\n} catch (e) {}\n\n// Initialize unified object\nconst unified = {\n  object_id: thinObject.object_id || thinObject.asset_id,\n  name: thinObject.name,\n  orcid: thinObject.orcid || null,\n  email: thinObject.email || null,\n  institution: thinObject.institution || null,\n  publications: [],\n  collaborators: [],\n  keywords: [],\n  affiliations: [],\n  patents: [],\n  grants: [],\n  biography: thinObject.biography || universityData.biography || '',\n  research_interests: thinObject.research_interests || universityData.research_interests || [],\n  current_projects: thinObject.current_projects || universityData.current_projects || [],\n  expertise_keywords: thinObject.expertise_keywords || universityData.expertise_keywords || [],\n  metrics: {},\n  data_quality_flags: [],\n  source_metadata: sourceMetadata,\n  execution_context: executionContext\n};\n\n// ============================================================\n// PUBLICATIONS: Use pre-merged data if available (HAS YEAR/CITATIONS)\n// ============================================================\nif (preMergedPublications.length > 0) {\n  console.log(`Using ${preMergedPublications.length} pre-merged publications from ThinObject`);\n  unified.publications = preMergedPublications.map(pub => ({\n    title: pub.title,\n    doi: pub.doi || null,\n    year: pub.year || null,\n    citations: pub.citations || 0,\n    authors: pub.authors || [],\n    abstract: pub.abstract || '',\n    keywords: pub.keywords || [],\n    publication_venue: pub.publication_venue || pub.publication || '',\n    source: pub.source || 'merged'\n  }));\n} else {\n  // FALLBACK: Merge from source-specific data (old behavior)\n  console.log('No pre-merged publications, falling back to source-specific merge');\n  const publicationsMap = new Map();\n  \n  // Add Scopus publications\n  (scopusData.publications || []).forEach(pub => {\n    const doi = pub.doi;\n    if (doi) {\n      publicationsMap.set(doi, {\n        title: pub.title,\n        doi: doi,\n        year: pub.year,\n        citations: pub.citations || 0,\n        authors: pub.authors || [],\n        abstract: pub.abstract,\n        keywords: pub.keywords || [],\n        source: 'scopus'\n      });\n    }\n  });\n  \n  // Add Scholar publications (deduplicate by title similarity)\n  (scholarData.publications || []).forEach(pub => {\n    const title = (pub.title || '').toLowerCase();\n    const doi = pub.doi;\n    \n    if (doi && publicationsMap.has(doi)) {\n      const existing = publicationsMap.get(doi);\n      existing.citations = Math.max(existing.citations || 0, pub.citations || 0);\n    } else {\n      let duplicateFound = false;\n      for (const [existingDoi, existingPub] of publicationsMap.entries()) {\n        const existingTitle = (existingPub.title || '').toLowerCase();\n        if (titleSimilarity(title, existingTitle) > 0.85) {\n          duplicateFound = true;\n          break;\n        }\n      }\n      \n      if (!duplicateFound && pub.title) {\n        const pubId = doi || `scholar_${title.substring(0, 50)}`;\n        publicationsMap.set(pubId, {\n          title: pub.title,\n          doi: doi,\n          year: pub.year,\n          citations: pub.citations || 0,\n          source: 'scholar'\n        });\n      }\n    }\n  });\n  \n  unified.publications = Array.from(publicationsMap.values());\n}\n\n// ============================================================\n// COLLABORATORS: Use pre-merged if available\n// ============================================================\nif (preMergedCollaborators.length > 0) {\n  console.log(`Using ${preMergedCollaborators.length} pre-merged collaborators`);\n  unified.collaborators = preMergedCollaborators;\n} else {\n  // Extract from publications and scholar data\n  const allCoauthors = new Set();\n  unified.publications.forEach(pub => {\n    let authorsList = [];\n    if (Array.isArray(pub.authors)) {\n      authorsList = pub.authors;\n    } else if (typeof pub.authors === 'string' && pub.authors) {\n      authorsList = pub.authors.split(',').map(a => a.trim());\n    }\n    \n    authorsList.forEach(author => {\n      const authorName = (typeof author === 'string' ? author : author.name || '').trim();\n      if (authorName && authorName.toLowerCase() !== thinObject.name.toLowerCase()) {\n        allCoauthors.add(authorName);\n      }\n    });\n  });\n  \n  (scholarData.co_authors || []).forEach(coauthor => {\n    const name = coauthor.name || coauthor || '';\n    if (name && name.toLowerCase() !== thinObject.name.toLowerCase()) {\n      allCoauthors.add(name);\n    }\n  });\n  \n  unified.collaborators = Array.from(allCoauthors);\n}\n\n// ============================================================\n// KEYWORDS: Use pre-merged if available, otherwise merge from sources\n// ============================================================\nif (preMergedKeywords.length > 0) {\n  console.log(`Using ${preMergedKeywords.length} pre-merged keywords`);\n  unified.keywords = preMergedKeywords;\n} else {\n  const allKeywords = new Set();\n  \n  (universityData.research_interests || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  (orcidData.keywords || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  (scholarData.interests || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  (scopusData.keywords || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  unified.publications.forEach(pub => {\n    (pub.keywords || []).forEach(kw => {\n      if (kw) allKeywords.add(kw.toLowerCase().trim());\n    });\n  });\n  \n  unified.keywords = Array.from(allKeywords);\n}\n\n// ============================================================\n// AFFILIATIONS: Use pre-merged if available\n// ============================================================\nif (preMergedAffiliations.length > 0) {\n  console.log(`Using ${preMergedAffiliations.length} pre-merged affiliations`);\n  unified.affiliations = preMergedAffiliations;\n} else {\n  const affiliations = [];\n  \n  (orcidData.employment || []).forEach(emp => {\n    const orgName = typeof emp.organization === 'string' \n      ? emp.organization \n      : emp.organization?.name;\n    \n    if (orgName) {\n      affiliations.push({\n        institution: orgName,\n        department: emp.department || null,\n        role: emp.role || null,\n        start_date: emp.start_year || emp.start_date || null,\n        end_date: emp.end_year || emp.end_date || null,\n        source: 'orcid'\n      });\n    }\n  });\n  \n  if (universityData.department || universityData.position) {\n    affiliations.push({\n      institution: thinObject.institution,\n      department: universityData.department || null,\n      position: universityData.position || null,\n      source: 'university'\n    });\n  }\n  \n  if (thinObject.institution) {\n    const alreadyHasCurrent = affiliations.some(a => \n      a.institution === thinObject.institution && a.source === 'current'\n    );\n    if (!alreadyHasCurrent) {\n      affiliations.push({\n        institution: thinObject.institution,\n        current: true,\n        source: 'current'\n      });\n    }\n  }\n  \n  unified.affiliations = affiliations;\n}\n\n// ============================================================\n// PATENTS: Use pre-merged if available\n// ============================================================\nlet preMergedPatents = [];\ntry {\n  const patData = thinObject.patents;\n  if (typeof patData === 'string') {\n    preMergedPatents = JSON.parse(patData);\n  } else if (Array.isArray(patData)) {\n    preMergedPatents = patData;\n  }\n} catch (e) {}\n\nunified.patents = preMergedPatents.length > 0 ? preMergedPatents : (patentsData.patents || []);\n\n// ============================================================\n// GRANTS: Use pre-merged if available\n// ============================================================\nlet preMergedGrants = [];\ntry {\n  const grantData = thinObject.grants;\n  if (typeof grantData === 'string') {\n    preMergedGrants = JSON.parse(grantData);\n  } else if (Array.isArray(grantData)) {\n    preMergedGrants = grantData;\n  }\n} catch (e) {}\n\nunified.grants = preMergedGrants;\n\n// ============================================================\n// METRICS: Use pre-merged if available, otherwise calculate\n// ============================================================\nif (preMergedMetrics && Object.keys(preMergedMetrics).length > 0) {\n  console.log('Using pre-merged metrics from ThinObject');\n  unified.metrics = {\n    h_index: preMergedMetrics.h_index || 0,\n    total_citations: preMergedMetrics.total_citations || 0,\n    publication_count: preMergedMetrics.publication_count || unified.publications.length,\n    collaborator_count: preMergedMetrics.collaborator_count || unified.collaborators.length,\n    patent_count: preMergedMetrics.patent_count || unified.patents.length,\n    grant_count: preMergedMetrics.grant_count || unified.grants.length\n  };\n} else {\n  unified.metrics = {\n    h_index: scopusData.h_index || scholarData.h_index || 0,\n    total_citations: Math.max(scopusData.citations || 0, scholarData.citations || 0),\n    publication_count: scopusData.document_count || unified.publications.length || 0,\n    collaborator_count: unified.collaborators.length,\n    patent_count: patentsData.patent_count || unified.patents.length || 0,\n    grant_count: unified.grants.length\n  };\n}\n\n// ============================================================\n// DATA QUALITY FLAGS\n// ============================================================\nif (!unified.orcid) unified.data_quality_flags.push('missing_orcid');\nif (unified.metrics.publication_count === 0) unified.data_quality_flags.push('no_publications');\nif (unified.affiliations.length === 0) unified.data_quality_flags.push('no_affiliations');\nif (unified.grants.length === 0) unified.data_quality_flags.push('no_grants');\nif (!unified.biography) unified.data_quality_flags.push('no_biography');\nif (unified.research_interests.length === 0) unified.data_quality_flags.push('no_research_interests');\n\n// ============================================================\n// COMPLETENESS SCORE\n// ============================================================\nlet completeness = 0;\nif (unified.orcid) completeness += 15;\nif (unified.metrics.publication_count > 0) completeness += 20;\nif (unified.affiliations.length > 0) completeness += 15;\nif (unified.metrics.h_index > 0) completeness += 10;\nif (unified.keywords.length > 0) completeness += 5;\nif (unified.collaborators.length > 0) completeness += 5;\nif (unified.biography) completeness += 10;\nif (unified.research_interests.length > 0) completeness += 10;\nif (unified.grants.length > 0) completeness += 5;\nif (unified.current_projects.length > 0) completeness += 5;\n\nunified.data_completeness = completeness;\n\n// ============================================================\n// LOGGING\n// ============================================================\nconsole.log(`✅ Unified ${unified.name}`);\nconsole.log(`📚 Publications: ${unified.publications.length} (with year/citations preserved)`);\nconsole.log(`👥 Collaborators: ${unified.collaborators.length}`);\nconsole.log(`🏷️ Keywords: ${unified.keywords.length}`);\nconsole.log(`📊 H-index: ${unified.metrics.h_index}, Citations: ${unified.metrics.total_citations}`);\n\nreturn [{ json: unified }];"
       },
       "id": "c6e8d2de-59cb-4270-bc6b-da2b502e0e40",
       "name": "Pass 1: Unification",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
       "position": [
-        2672,
-        -16
+        224,
+        656
       ]
     },
     {
@@ -505,8 +467,8 @@
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
       "position": [
-        1120,
-        448
+        1216,
+        656
       ]
     },
     {
@@ -518,8 +480,8 @@
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
       "position": [
-        1360,
-        448
+        1456,
+        656
       ]
     },
     {
@@ -558,8 +520,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        1600,
-        448
+        1696,
+        656
       ],
       "credentials": {
         "openRouterApi": {
@@ -577,19 +539,19 @@
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
       "position": [
-        1840,
-        448
+        1936,
+        656
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Prepare Store Neo4j - Full version with APOC relationship creation\n// UPDATED: Idempotent storage for both normal and refabrication modes\n\nconst fatObject = $input.first().json;\nconst executionContext = fatObject.execution_context || {};\nconst isRefabrication = executionContext.mode === 'refabrication';\n\nlet statement;\nlet parameters;\n\nif (isRefabrication) {\n  // REFABRICATION MODE: MERGE on asset_id + version (idempotent - safe for retries)\n  statement = `\n    // Step 1: Create or update FATObject version (idempotent)\n    MERGE (fat:FATObject {asset_id: $asset_id, version: $version})\n    SET fat.name = $name,\n        fat.orcid = $orcid,\n        fat.institution = $institution,\n        fat.status = 'fabricated',\n        fat.fabricated_at = timestamp(),\n        fat.dense_view = $dense_view,\n        fat.data_completeness = $data_completeness,\n        fat.previous_version = $previous_version,\n        fat.refabrication_reason = $refabrication_reason,\n        fat.source_queue_entry_id = $source_queue_entry_id\n    \n    // Step 2: Link to ThinObject and update its status\n    WITH fat\n    MATCH (thin:ThinObject {asset_id: $thin_object_id})\n    MERGE (fat)-[:FABRICATED_FROM]->(thin)\n    SET thin.status = 'refabricated',\n        thin.refabricated_at = timestamp(),\n        thin.latest_version = $version\n    \n    // Step 3: Create relationships to other entities (idempotent)\n    WITH fat\n    UNWIND $relationships AS rel\n    WITH fat, rel, split(rel.target, ':') AS parts\n    WITH fat, rel, parts[0] AS targetLabel, rel.target AS targetId\n    \n    // Create or merge target node dynamically\n    CALL apoc.merge.node([targetLabel], {id: targetId}) YIELD node AS targetNode\n    \n    // Create or merge relationship dynamically (idempotent)\n    CALL apoc.merge.relationship(fat, rel.type, {}, rel.properties, targetNode) YIELD rel AS mergedRel\n    \n    RETURN count(mergedRel) AS relationships_created, fat.asset_id AS created_asset_id, fat.version AS created_version\n  `;\n  \n  parameters = {\n    asset_id: fatObject.asset_id,\n    version: fatObject.version,\n    thin_object_id: fatObject.provenance.fabricated_from,\n    name: fatObject.views.dense.name,\n    orcid: fatObject.views.dense.orcid || null,\n    institution: fatObject.views.dense.institution || null,\n    dense_view: JSON.stringify(fatObject.views.dense),\n    data_completeness: fatObject.views.dense.data_completeness,\n    previous_version: fatObject.provenance.previous_version,\n    refabrication_reason: fatObject.provenance.refabrication_reason,\n    source_queue_entry_id: fatObject.provenance.source_queue_entry_id,\n    relationships: fatObject.views.graph.relationships\n  };\n} else {\n  // NORMAL MODE: Merge on asset_id (original behavior)\n  statement = `\n    // Step 1: Create or update FATObject node\n    MERGE (fat:FATObject {asset_id: $asset_id})\n    SET fat.name = $name,\n        fat.orcid = $orcid,\n        fat.institution = $institution,\n        fat.status = 'fabricated',\n        fat.fabricated_at = timestamp(),\n        fat.dense_view = $dense_view,\n        fat.data_completeness = $data_completeness,\n        fat.version = $version\n    \n    // Step 2: Link to ThinObject and update its status\n    WITH fat\n    MATCH (thin:ThinObject {asset_id: $thin_object_id})\n    MERGE (fat)-[:FABRICATED_FROM]->(thin)\n    SET thin.status = 'fabricated',\n        thin.fabricated_at = timestamp()\n    \n    // Step 3: Create relationships to other entities\n    WITH fat\n    UNWIND $relationships AS rel\n    WITH fat, rel, split(rel.target, ':') AS parts\n    WITH fat, rel, parts[0] AS targetLabel, rel.target AS targetId\n    \n    // Create or merge target node dynamically\n    CALL apoc.merge.node([targetLabel], {id: targetId}) YIELD node AS targetNode\n    \n    // Create relationship dynamically\n    CALL apoc.create.relationship(fat, rel.type, rel.properties, targetNode) YIELD rel AS createdRel\n    \n    RETURN count(createdRel) AS relationships_created\n  `;\n  \n  parameters = {\n    asset_id: fatObject.asset_id,\n    thin_object_id: fatObject.provenance.fabricated_from,\n    name: fatObject.views.dense.name,\n    orcid: fatObject.views.dense.orcid || null,\n    institution: fatObject.views.dense.institution || null,\n    dense_view: JSON.stringify(fatObject.views.dense),\n    data_completeness: fatObject.views.dense.data_completeness,\n    version: fatObject.version,\n    relationships: fatObject.views.graph.relationships\n  };\n}\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: statement,\n      parameters: parameters\n    },\n    fat_object: fatObject,\n    execution_context: executionContext\n  }\n}];"
+        "jsCode": "// Prepare Store Neo4j - FIXED: Stores enrichment, icf, views\nconst fatObject = $input.first().json;\nconst executionContext = fatObject.execution_context || {};\n\nconst statement = `\n  // Create or update FATObject\n  MERGE (fat:FATObject {asset_id: $asset_id})\n  SET fat.name = $name,\n      fat.orcid = $orcid,\n      fat.institution = $institution,\n      fat.status = 'fabricated',\n      fat.fabricated_at = timestamp(),\n      fat.version = $version,\n      fat.data_completeness = $data_completeness,\n      \n      // FIXED: Store enrichment and views\n      fat.enrichment = $enrichment,\n      fat.icf = $icf,\n      fat.views = $views,\n      fat.dense_view = $dense_view,\n      fat.embedding_view = $embedding_view,\n      fat.graph_view = $graph_view,\n      fat.provenance = $provenance\n  \n  // Link to ThinObject\n  WITH fat\n  MATCH (thin:ThinObject {asset_id: $thin_object_id})\n  MERGE (fat)-[:FABRICATED_FROM]->(thin)\n  SET thin.status = 'fabricated',\n      thin.fabricated_at = timestamp()\n  \n  RETURN fat.asset_id AS created_asset_id\n`;\n\nconst parameters = {\n  asset_id: fatObject.asset_id,\n  thin_object_id: fatObject.provenance.fabricated_from,\n  name: fatObject.views.dense.name,\n  orcid: fatObject.views.dense.orcid || null,\n  institution: fatObject.views.dense.institution || null,\n  version: fatObject.version,\n  data_completeness: fatObject.views.dense.data_completeness,\n  \n  // FIXED: Include all data\n  enrichment: JSON.stringify(fatObject.views.dense.enriched_context || {}),\n  icf: JSON.stringify(fatObject.views || {}),\n  views: JSON.stringify(fatObject.views || {}),\n  dense_view: JSON.stringify(fatObject.views.dense),\n  embedding_view: JSON.stringify({\n    text: fatObject.views.embedding.text,\n    token_count: fatObject.views.embedding.token_count\n  }),\n  graph_view: JSON.stringify(fatObject.views.graph),\n  provenance: JSON.stringify(fatObject.provenance)\n};\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: statement,\n      parameters: parameters\n    },\n    fat_object: fatObject,\n    execution_context: executionContext\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2080,
-        448
+        224,
+        1360
       ],
       "id": "438971de-9df0-423f-ad1b-2cc6cdf637a0",
       "name": "Prepare Store Neo4j"
@@ -617,8 +579,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        304,
-        848
+        416,
+        1360
       ],
       "id": "0a37e2a9-cbfd-4c9e-ac46-cc19f5638b6a",
       "name": "Store in Neo4j",
@@ -636,8 +598,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        544,
-        848
+        656,
+        1360
       ],
       "id": "122c35a1-5334-4c87-8aba-9dbfe566f4b8",
       "name": "Prepare Qdrant Payload"
@@ -665,8 +627,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        784,
-        848
+        896,
+        1360
       ],
       "id": "288f9fbd-d3ad-40d2-a75b-3bc35e0886b1",
       "name": "Store in Qdrant",
@@ -684,8 +646,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1024,
-        848
+        1136,
+        1360
       ],
       "id": "c7147eb2-475d-4969-864c-7fbc5887d49e",
       "name": "Prepare PostgreSQL Payload"
@@ -719,8 +681,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1264,
-        848
+        1376,
+        1360
       ],
       "id": "51b29f08-dbcf-4751-9ce3-cdf83722e714",
       "name": "Store in Supabase(Postgre)",
@@ -742,15 +704,15 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1312,
-        -640
+        880,
+        -1264
       ],
       "id": "8b8bc18e-a90b-49a7-86b2-b1d0d7831462",
       "name": "Prepare Fetch ThinObjects (colin)"
     },
     {
       "parameters": {
-        "jsCode": "// Prepare Fetch ThinObjects - Normal Mode\n// Fetches raw ThinObjects ready for initial fabrication\n// UPDATED: Now fetches direct fields stored by OBJECT-1 v3.x\n\nconst executionContext = $input.first().json;\nconst batchSize = 5;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject)\n        WHERE thin.status = $status\n          AND thin.object_type = $object_type\n          AND NOT EXISTS((thin)<-[:FABRICATED_FROM]-(:FATObject))\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          \n          // NEW: Direct fields from OBJECT-1 v3.x\n          biography: thin.biography,\n          research_interests: thin.research_interests,\n          current_projects: thin.current_projects,\n          expertise_keywords: thin.expertise_keywords,\n          collaborators: thin.collaborators,\n          keywords: thin.keywords,\n          publications: thin.publications,\n          patents: thin.patents,\n          affiliations: thin.affiliations,\n          grants: thin.grants,\n          metrics: thin.metrics,\n          data_quality_flags: thin.data_quality_flags,\n          data_completeness: thin.data_completeness,\n          field_hashes: thin.field_hashes,\n          \n          // Legacy JSON fields (backward compatibility)\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        ORDER BY thin.created_at ASC\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"raw\",\n        object_type: \"researcher\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+        "jsCode": "// Prepare Fetch ThinObjects - Normal Mode\n// Fetches raw ThinObjects ready for initial fabrication\n// UPDATED: Now fetches direct fields stored by OBJECT-1 v3.x\n\nconst executionContext = $input.first().json;\nconst batchSize = 30;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject)\n        WHERE thin.status = $status\n          AND thin.object_type = $object_type\n          AND NOT EXISTS((thin)<-[:FABRICATED_FROM]-(:FATObject))\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          \n          // NEW: Direct fields from OBJECT-1 v3.x\n          biography: thin.biography,\n          research_interests: thin.research_interests,\n          current_projects: thin.current_projects,\n          expertise_keywords: thin.expertise_keywords,\n          collaborators: thin.collaborators,\n          keywords: thin.keywords,\n          publications: thin.publications,\n          patents: thin.patents,\n          affiliations: thin.affiliations,\n          grants: thin.grants,\n          metrics: thin.metrics,\n          data_quality_flags: thin.data_quality_flags,\n          data_completeness: thin.data_completeness,\n          field_hashes: thin.field_hashes,\n          \n          // Legacy JSON fields (backward compatibility)\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        ORDER BY thin.created_at ASC\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"raw\",\n        object_type: \"researcher\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -777,55 +739,82 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.7,
       "position": [
-        592,
-        448
+        640,
+        656
       ],
       "id": "effd54ed-af5d-4375-978a-f23c8a6eeed2",
       "name": "Pass 2: LLM Enrichment"
-    }
-  ],
-  "pinData": {
-    "Schedule Trigger": [
-      {
-        "json": {
-          "timestamp": "2025-12-24T08:30:32.003+11:00",
-          "Readable date": "December 24th 2025, 8:30:32 am",
-          "Readable time": "8:30:32 am",
-          "Day of week": "Wednesday",
-          "Year": "2025",
-          "Month": "December",
-          "Day of month": "24",
-          "Hour": "08",
-          "Minute": "30",
-          "Second": "32",
-          "Timezone": "Australia/Melbourne (UTC+11:00)"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
         }
-      }
-    ],
-    "Schedule Trigger1": [
-      {
-        "json": {
-          "timestamp": "2025-12-24T08:30:07.676+11:00",
-          "Readable date": "December 24th 2025, 8:30:07 am",
-          "Readable time": "8:30:07 am",
-          "Day of week": "Wednesday",
-          "Year": "2025",
-          "Month": "December",
-          "Day of month": "24",
-          "Hour": "08",
-          "Minute": "30",
-          "Second": "07",
-          "Timezone": "Australia/Melbourne (UTC+11:00)"
-        }
-      }
-    ]
-  },
-  "connections": {
-    "Schedule Trigger": {
-      "main": [
-        []
+      },
+      "id": "b59c6417-cd5f-4a57-bd9d-814bc5c18189",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        -176
       ]
     },
+    {
+      "parameters": {
+        "content": "# Fetch & Route\n\n## Note: Routes between normal fabrication (scheduled) and refabrication (webhook triggered), then fetches ThinObjects from Neo4j.",
+        "height": 720,
+        "width": 2816,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        16,
+        -336
+      ],
+      "typeVersion": 1,
+      "id": "2d3ee27f-456b-4c33-a873-bfb89b803afe",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# Multi-Pass Processing \n\n## Note: Pass 1 unifies data → Pass 2 LLM enriches → Pass 3 builds relationships → Pass 4 generates ICF → creates embedding.",
+        "height": 656,
+        "width": 2816,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        32,
+        416
+      ],
+      "typeVersion": 1,
+      "id": "aebc8d9b-0569-433a-a933-d54264efbef4",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "# Storage\n\n## Note: Saves FatObject to Neo4j (graph), Qdrant (vectors), and Supabase (metadata).",
+        "height": 752,
+        "width": 2832
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        32,
+        1120
+      ],
+      "typeVersion": 1,
+      "id": "e5cb668b-fc76-472b-b8dd-4ca369bb3545",
+      "name": "Sticky Note2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
     "Webhook Trigger (Refab)": {
       "main": [
         [
@@ -966,17 +955,6 @@
         [
           {
             "node": "Loop Through Objects",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Schedule Trigger1": {
-      "main": [
-        [
-          {
-            "node": "Merge Inputs",
             "type": "main",
             "index": 0
           }
@@ -1208,13 +1186,24 @@
           }
         ]
       ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Merge Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "0d27de81-7e0e-4058-952f-b705aff30618",
+  "versionId": "53a5e4bb-c305-4ac5-af83-a70db31c4359",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
