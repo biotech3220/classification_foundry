@@ -96,7 +96,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue?on_conflict=asset_id",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
         "sendHeaders": true,
@@ -108,7 +108,7 @@
             },
             {
               "name": "Prefer",
-              "value": "return=representation"
+              "value": "return=representation,resolution=merge-duplicates"
             }
           ]
         },
@@ -164,7 +164,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Node: Prepare Fetch Classified FATObjects\n// PURPOSE: Query Neo4j for FATObjects with status='classified'\n// Gen 4: Enhanced to fetch CRE assessment data\n\nconst inputData = $input.first().json;\n\n// Use provided asset_id, or fetch all classified if none specified\nconst specificAssetId = inputData.asset_id || null;\n\nlet cypherPayload;\n\nif (specificAssetId) {\n  // Fetch specific researcher with CRE assessment data\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject {asset_id: $asset_id, status: 'classified'})\n      OPTIONAL MATCH (fat)-[r:CLASSIFIED_AS]->(std:Standard)\n      WITH fat, collect({\n        code: std.code,\n        name: std.name,\n        taxonomy: std.taxonomy,\n        confidence: r.confidence,\n        justification: r.justification,\n        evidence: r.evidence,\n        cf1_validated: r.cf1_validated,\n        cre_assessment: r.cre_assessment\n      }) AS classifications\n      RETURN \n        fat.asset_id AS asset_id,\n        fat.name AS name,\n        fat.orcid AS orcid,\n        fat.institution AS institution,\n        fat.status AS status,\n        fat.final_confidence AS final_confidence,\n        fat.classified_at AS classified_at,\n        fat.classified_by AS classified_by,\n        fat.cre_assessment AS cre_assessment,\n        classifications\n    `,\n    parameters: {\n      asset_id: specificAssetId\n    }\n  };\n} else {\n  // Fetch ALL classified FATObjects with CRE data\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject {status: 'classified'})\n      OPTIONAL MATCH (fat)-[r:CLASSIFIED_AS]->(std:Standard)\n      WITH fat, collect({\n        code: std.code,\n        name: std.name,\n        taxonomy: std.taxonomy,\n        confidence: r.confidence,\n        justification: r.justification,\n        evidence: r.evidence,\n        cf1_validated: r.cf1_validated,\n        cre_assessment: r.cre_assessment\n      }) AS classifications\n      RETURN \n        fat.asset_id AS asset_id,\n        fat.name AS name,\n        fat.orcid AS orcid,\n        fat.institution AS institution,\n        fat.status AS status,\n        fat.final_confidence AS final_confidence,\n        fat.classified_at AS classified_at,\n        fat.classified_by AS classified_by,\n        fat.cre_assessment AS cre_assessment,\n        classifications\n      ORDER BY fat.classified_at DESC\n    `,\n    parameters: {}\n  };\n}\n\nreturn [{\n  json: {\n    requested_asset_id: specificAssetId,\n    fetch_mode: specificAssetId ? 'single' : 'all',\n    neo4j_payload: cypherPayload\n  }\n}];"
+        "jsCode": "// Node: Prepare Fetch Classified FATObjects\n// PURPOSE: Query Neo4j for FATObjects with status='classified'\n// Gen 4: Enhanced to fetch CRE assessment data\n// v3.9.0: FIXED field names to match OBJECT-2 schema\n// ============================================================\n// SCHEMA MAPPING (OBJECT-2 → This Query):\n//   fat.display_name → name\n//   fat.orcid_id → orcid\n//   fat.classification_timestamp → classified_at\n//   fat.assessment_flags → assessment_flags (JSON)\n//   Institution via AFFILIATED_WITH relationship\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// Use provided asset_id, or fetch all classified if none specified\nconst specificAssetId = inputData.asset_id || null;\n\nlet cypherPayload;\n\nif (specificAssetId) {\n  // Fetch specific researcher with CRE assessment data\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject:Researcher {asset_id: $asset_id, status: 'classified'})\n      \n      // Get institution via relationship\n      OPTIONAL MATCH (fat)-[:AFFILIATED_WITH]->(org:Organisation)\n      \n      // Get classifications\n      OPTIONAL MATCH (fat)-[r:CLASSIFIED_AS]->(std:Standard)\n      \n      WITH fat, org, collect({\n        code: std.code,\n        name: std.name,\n        taxonomy: labels(std)[1],\n        confidence: r.confidence,\n        justification: r.justification,\n        evidence: r.evidence,\n        cf1_validated: r.cf1_validated,\n        cre_assessment: r.cre_assessment,\n        rank: r.rank,\n        is_primary: r.is_primary\n      }) AS classifications\n      \n      RETURN \n        fat.asset_id AS asset_id,\n        fat.display_name AS name,\n        fat.orcid_id AS orcid,\n        org.display_name AS institution,\n        fat.status AS status,\n        fat.final_confidence AS final_confidence,\n        fat.classification_timestamp AS classified_at,\n        fat.classification_started_at AS classification_started_at,\n        fat.classified_by AS classified_by,\n        fat.assessment_flags AS assessment_flags,\n        fat.dense_text AS dense_text,\n        fat.provenance AS provenance,\n        fat.version AS version,\n        classifications\n    `,\n    parameters: {\n      asset_id: specificAssetId\n    }\n  };\n  console.log(`🎯 TARGETED MODE: Fetching ${specificAssetId}`);\n} else {\n  // Fetch ALL classified FATObjects with CRE data\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject:Researcher {status: 'classified'})\n      \n      // Get institution via relationship\n      OPTIONAL MATCH (fat)-[:AFFILIATED_WITH]->(org:Organisation)\n      \n      // Get classifications\n      OPTIONAL MATCH (fat)-[r:CLASSIFIED_AS]->(std:Standard)\n      \n      WITH fat, org, collect({\n        code: std.code,\n        name: std.name,\n        taxonomy: labels(std)[1],\n        confidence: r.confidence,\n        justification: r.justification,\n        evidence: r.evidence,\n        cf1_validated: r.cf1_validated,\n        cre_assessment: r.cre_assessment,\n        rank: r.rank,\n        is_primary: r.is_primary\n      }) AS classifications\n      \n      RETURN \n        fat.asset_id AS asset_id,\n        fat.display_name AS name,\n        fat.orcid_id AS orcid,\n        org.display_name AS institution,\n        fat.status AS status,\n        fat.final_confidence AS final_confidence,\n        fat.classification_timestamp AS classified_at,\n        fat.classification_started_at AS classification_started_at,\n        fat.classified_by AS classified_by,\n        fat.assessment_flags AS assessment_flags,\n        fat.dense_text AS dense_text,\n        fat.provenance AS provenance,\n        fat.version AS version,\n        classifications\n      ORDER BY fat.classification_timestamp DESC\n    `,\n    parameters: {}\n  };\n  console.log(`📋 BATCH MODE: Fetching ALL classified researchers`);\n}\n\nreturn [{\n  json: {\n    requested_asset_id: specificAssetId,\n    fetch_mode: specificAssetId ? 'single' : 'all',\n    neo4j_payload: cypherPayload\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -618,11 +618,11 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "40908a0e-bca9-4b4b-b820-498d61e68543",
+  "versionId": "0b2bf87b-b9ec-4ed7-83ef-e7de256c84f4",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

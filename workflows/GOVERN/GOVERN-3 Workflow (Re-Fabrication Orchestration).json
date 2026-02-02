@@ -590,8 +590,8 @@
         "rule": {
           "interval": [
             {
-              "field": "seconds",
-              "secondsInterval": 60
+              "field": "months",
+              "monthsInterval": 30
             }
           ]
         }
@@ -1012,7 +1012,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "26d7d5fd-7c75-41f0-91e4-e4c55c0b2edf",
+  "versionId": "0ac4f42f-be55-4c3c-987a-26137c4a99d3",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

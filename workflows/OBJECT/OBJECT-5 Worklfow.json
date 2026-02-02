@@ -90,7 +90,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        400,
+        576,
         416
       ],
       "id": "6fbba977-6caa-44d0-86d1-3cef7774bc52",
@@ -99,7 +99,7 @@
     {
       "parameters": {
         "method": "PUT",
-        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/payload",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researcher_v1/points/payload",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "qdrantRestApi",
         "sendHeaders": true,
@@ -119,7 +119,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        624,
+        800,
         416
       ],
       "id": "b7c63304-e1d9-41b7-b6ae-9bbd48056e2d",
@@ -134,7 +134,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// OBJECT-5: Prepare Supabase update\n\nconst inputData = $('Prepare Qdrant Status Update').item.json;\n\nif (inputData.error) {\n  return {\n    queue_entry_id: inputData.queue_entry_id,\n    asset_id: inputData.asset_id,\n    error: true,\n    error_message: inputData.error_message,\n    skipped: true\n  };\n}\n\nconst supabaseUpdate = {\n  synced: true,\n  synced_at: new Date().toISOString()\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: inputData.neo4j_success,\n  new_status: inputData.new_status,\n  relationships_validated: inputData.relationships_validated,\n  qdrant_point_id: inputData.qdrant_point_id,\n  supabase_update: supabaseUpdate,\n  error: false\n};"
+        "jsCode": "// OBJECT-5: Prepare Supabase update (Normal Path)\n\nconst inputData = $('Prepare Qdrant Status Update').item.json;\n\nif (inputData.error) {\n  return {\n    queue_entry_id: inputData.queue_entry_id,\n    asset_id: inputData.asset_id,\n    error: true,\n    error_message: inputData.error_message,\n    skipped: true\n  };\n}\n\nconst supabaseUpdate = {\n  synced: true,\n  synced_at: new Date().toISOString()\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: inputData.neo4j_success,\n  new_status: inputData.new_status,\n  relationships_validated: inputData.relationships_validated,\n  qdrant_point_id: inputData.qdrant_point_id,\n  supabase_update: supabaseUpdate,\n  error: false\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -171,7 +171,7 @@
             },
             {
               "name": "limit",
-              "value": "50"
+              "value": "200"
             }
           ]
         },
@@ -210,7 +210,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points/scroll",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researcher_v1/points/scroll",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "qdrantRestApi",
         "sendHeaders": true,
@@ -232,7 +232,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        144,
+        320,
         416
       ],
       "credentials": {
@@ -303,7 +303,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// OBJECT-5: Final Output Summary\n\nconst inputData = $('Prepare Supabase Sync Update').item.json;\n\nif (inputData.error || inputData.skipped) {\n  return {\n    asset_id: inputData.asset_id,\n    queue_entry_id: inputData.queue_entry_id,\n    status: \"failed\",\n    error: true,\n    error_message: inputData.error_message || \"Skipped due to upstream error\",\n    metadata: {\n      workflow: \"OBJECT-5\",\n      version: \"Gen2_v3.5\",\n      completed_at: new Date().toISOString()\n    }\n  };\n}\n\nconst supabaseRecord = Array.isArray($json) ? $json[0] : $json;\n\nreturn {\n  asset_id: inputData.asset_id,\n  previous_status: \"classified\",\n  new_status: inputData.new_status,\n  lifecycle_status: \"active\",\n  validation: {\n    queue: inputData.queue,\n    confidence: inputData.confidence,\n    validator_type: inputData.validator_type,\n    curator_id: inputData.curator_id || null,\n    synced: true,\n    synced_at: supabaseRecord?.synced_at || new Date().toISOString()\n  },\n  storage: {\n    neo4j: { status: \"success\", relationships_validated: inputData.relationships_validated },\n    qdrant: { status: \"success\", point_id: inputData.qdrant_point_id },\n    supabase: { status: \"success\", queue_entry_id: inputData.queue_entry_id }\n  },\n  metadata: {\n    workflow: \"OBJECT-5\",\n    workflow_name: \"Human Validation Sync Engine\",\n    version: \"Gen2_v3.5\",\n    completed_at: new Date().toISOString()\n  }\n};"
+        "jsCode": "// OBJECT-5: Final Output Summary\n// v2: Uses $json to support both normal and error paths\n\nconst inputData = $json;\n\nif (inputData.error || inputData.skipped) {\n  return {\n    asset_id: inputData.asset_id,\n    queue_entry_id: inputData.queue_entry_id,\n    status: \"skipped\",\n    error: true,\n    error_message: inputData.error_message || \"Skipped - already active\",\n    metadata: {\n      workflow: \"OBJECT-5\",\n      version: \"Gen2_v3.5\",\n      completed_at: new Date().toISOString()\n    }\n  };\n}\n\nconst supabaseRecord = Array.isArray($json) ? $json[0] : $json;\n\nreturn {\n  asset_id: inputData.asset_id,\n  previous_status: \"classified\",\n  new_status: inputData.new_status || \"active\",\n  lifecycle_status: \"active\",\n  validation: {\n    queue: inputData.queue,\n    confidence: inputData.confidence,\n    validator_type: inputData.validator_type,\n    curator_id: inputData.curator_id || null,\n    synced: true,\n    synced_at: supabaseRecord?.synced_at || new Date().toISOString()\n  },\n  storage: {\n    neo4j: { status: \"success\", relationships_validated: inputData.relationships_validated },\n    qdrant: { status: \"success\", point_id: inputData.qdrant_point_id },\n    supabase: { status: \"success\", queue_entry_id: inputData.queue_entry_id }\n  },\n  metadata: {\n    workflow: \"OBJECT-5\",\n    workflow_name: \"Human Validation Sync Engine\",\n    version: \"Gen2_v3.5\",\n    completed_at: new Date().toISOString()\n  }\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -397,7 +397,7 @@
     {
       "parameters": {
         "content": "# Mark as Synced\n\n## Note: Updates validation_queue entry with synced=true so it won't be processed again.",
-        "height": 384,
+        "height": 560,
         "width": 992
       },
       "type": "n8n-nodes-base.stickyNote",
@@ -408,6 +408,54 @@
       "typeVersion": 1,
       "id": "bd404b28-d1fe-4455-8851-8dd0504467ef",
       "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e664c63-414c-438e-8c63-d2b86b2c1236",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        96,
+        368
+      ],
+      "id": "811d462c-ac83-4e58-8716-29bc5f961cc1",
+      "name": "If Neo4j Activation Failed"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// OBJECT-5: Prepare Supabase update for SKIPPED items\n// This handles the error path where Neo4j activation was skipped\n\nconst inputData = $json;\n\nconst supabaseUpdate = {\n  synced: true,\n  synced_at: new Date().toISOString()\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  error: true,\n  error_message: inputData.error_message || \"Skipped - already active\",\n  skipped: true,\n  supabase_update: supabaseUpdate\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        1088
+      ],
+      "id": "a31d64f0-ddf2-4b36-8110-c0d985171c0c",
+      "name": "Prepare Skipped Supabase Update"
     }
   ],
   "pinData": {
@@ -467,7 +515,7 @@
       "main": [
         [
           {
-            "node": "Fetch Researcher Point (Qdrant)",
+            "node": "If Neo4j Activation Failed",
             "type": "main",
             "index": 0
           }
@@ -573,13 +621,42 @@
           }
         ]
       ]
+    },
+    "If Neo4j Activation Failed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Skipped Supabase Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Researcher Point (Qdrant)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Skipped Supabase Update": {
+      "main": [
+        [
+          {
+            "node": "Update Queue Synced Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "489774f2-8738-4dbb-8d63-f2745d9697f2",
+  "versionId": "8fd0639f-8c2c-49ee-81a3-e6a5e32e8e9e",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

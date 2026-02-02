@@ -4,11 +4,11 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "object-2-fabricate",
+        "path": "acac5210-cc59-4b78-9316-82fc682343ba",
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "09937e90-6068-42c3-be5c-bda1f11b378c",
+      "id": "b981a45e-5ab8-4824-a5f5-36fba9688533",
       "name": "Webhook Trigger (Refab)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -16,13 +16,13 @@
         464,
         32
       ],
-      "webhookId": "object-2-fabricate"
+      "webhookId": "acac5210-cc59-4b78-9316-82fc682343ba"
     },
     {
       "parameters": {
         "jsCode": "// Merge Inputs - Entry point normalization\n// Detects mode from input source and sets execution context\n\nconst inputData = $input.first().json;\n\n// Webhook wraps payload in 'body', Schedule Trigger doesn't\nconst payload = inputData.body || inputData;\n\nlet executionContext;\n\nif (payload.mode === 'refabrication') {\n  // From Webhook - refabrication mode\n  executionContext = {\n    mode: 'refabrication',\n    fat_asset_id: payload.asset_id,\n    thin_asset_id: payload.asset_id.replace(/^fat:/, 'thin:'),\n    new_version: payload.new_version || 'v2.0',\n    previous_version: payload.previous_version || 'v1.0',\n    refabrication_reason: payload.refabrication_reason || 'change_detected',\n    changed_fields: payload.changed_fields || [],\n    source_queue_entry_id: payload.source_queue_entry_id || null,\n    requires_fresh_scrape: payload.requires_fresh_scrape || false\n  };\n} else {\n  // From Schedule Trigger - normal polling mode\n  executionContext = {\n    mode: 'normal',\n    fat_asset_id: null,\n    thin_asset_id: null,\n    new_version: 'v1.0',\n    previous_version: null,\n    refabrication_reason: null,\n    changed_fields: [],\n    source_queue_entry_id: null,\n    requires_fresh_scrape: false\n  };\n}\n\nreturn [{ json: executionContext }];"
       },
-      "id": "77598043-6afe-40a2-8eca-49533a5406f8",
+      "id": "17852d70-c263-4446-9a03-68b6682f4802",
       "name": "Merge Inputs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -87,7 +87,7 @@
         },
         "options": {}
       },
-      "id": "ead9412a-7ded-4c97-8d3f-c12a84c3d756",
+      "id": "a60d8a48-0a52-43d7-986c-042b99a78fec",
       "name": "Route by Mode",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -106,13 +106,13 @@
         1200,
         208
       ],
-      "id": "cc7e736a-6534-4575-af2d-1628deccfba7",
+      "id": "a4b2f9d1-da87-4329-9d02-3dce7ea44ba8",
       "name": "Prepare Fetch ThinObject (Refab)"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendHeaders": true,
@@ -135,7 +135,7 @@
         1440,
         208
       ],
-      "id": "b6269d67-9808-4470-a5a8-3da9b096f2e7",
+      "id": "433358d3-26f2-45c4-83ff-b32ab444995e",
       "name": "Fetch ThinObject (Refab)",
       "credentials": {
         "httpBasicAuth": {
@@ -154,13 +154,13 @@
         1680,
         208
       ],
-      "id": "bea837ed-6279-4f20-9110-e370f1c87576",
+      "id": "566c1901-9789-491d-b166-1da78effaaec",
       "name": "Prepare Set Status (Refab)"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendHeaders": true,
@@ -183,7 +183,7 @@
         1920,
         208
       ],
-      "id": "b2732ff3-6363-4ede-8e90-9a89250cbac6",
+      "id": "8216a5c1-b5f2-4057-8502-f7c924489244",
       "name": "Set Status: Refabricating",
       "credentials": {
         "httpBasicAuth": {
@@ -202,7 +202,7 @@
         2160,
         -160
       ],
-      "id": "32b4fa9b-6fd3-444e-b6c9-4acc6f280437",
+      "id": "c09f8c99-6717-49a7-87d9-2cdd052d9adf",
       "name": "Split ThinObjects"
     },
     {
@@ -215,7 +215,7 @@
         2160,
         208
       ],
-      "id": "73a9fd3a-aebf-46c0-94c5-ca7f42406396",
+      "id": "eace1ea9-3998-4eae-8fc4-ace14b3f17a2",
       "name": "Split ThinObjects (Refab)"
     },
     {
@@ -228,7 +228,7 @@
         1728,
         1360
       ],
-      "id": "57acb24f-284b-4216-8d03-5ef5a3382791",
+      "id": "1b8b14dc-4fba-4950-bb21-72c0c476266a",
       "name": "Check Mode for Response"
     },
     {
@@ -265,7 +265,7 @@
           "fallbackOutput": "extra"
         }
       },
-      "id": "0f7a526c-bf9d-4a75-ad17-f1097a2f7886",
+      "id": "cd82eda1-0424-4735-9a5e-86c21dfcd6cb",
       "name": "Route Completion",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -280,7 +280,7 @@
         "responseBody": "={{ {\n  \"success\": true,\n  \"mode\": \"refabrication\",\n  \"asset_id\": $('Merge Embedding').first().json.asset_id,\n  \"version\": $('Merge Embedding').first().json.version,\n  \"previous_version\": $('Merge Embedding').first().json.provenance.previous_version,\n  \"status\": \"fabricated\",\n  \"fabricated_at\": $('Merge Embedding').first().json.provenance.fabricated_at,\n  \"message\": \"Refabrication completed successfully\"\n} }}",
         "options": {}
       },
-      "id": "24fabc42-9bb9-46dd-ac1e-f459758a8de6",
+      "id": "57be22d6-548a-4433-8336-0cf02e8aa4e9",
       "name": "Respond to Webhook (Refab)",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -291,7 +291,7 @@
     },
     {
       "parameters": {},
-      "id": "3b85234c-a4a0-4738-98ec-471d6c41d154",
+      "id": "0baee818-4d46-4f1c-8d18-874e0f4820a6",
       "name": "Loop Back (Normal)",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
@@ -314,7 +314,7 @@
         640,
         864
       ],
-      "id": "7596f7ee-c179-4ead-8fb7-523c45268b68",
+      "id": "abf04081-1f29-4d6d-ab5e-a94a5f107282",
       "name": "OpenRouter Chat Model",
       "credentials": {
         "openRouterApi": {
@@ -327,7 +327,7 @@
       "parameters": {
         "functionCode": "// Prepare LLM Prompt - Definition Card v3.2 Compliant\n// MODIFIED: Uses enrichment prompt from researcher_instance_spec_v2_2.md Section 10\n// MODIFIED: Outputs raw_evidence + enriched_context structure for OBJECT-3\n\nconst unifiedObject = $input.first().json;\nconst executionContext = unifiedObject.execution_context;\n\nconst name = unifiedObject.name;\nconst institution = unifiedObject.institution || 'Unknown';\n\n// Format metrics\nconst metrics = unifiedObject.metrics || {};\nconst hIndex = metrics.h_index || 0;\nconst totalCitations = metrics.total_citations || 0;\nconst publicationCount = metrics.publication_count || 0;\nconst patentCount = metrics.patent_count || 0;\n\n// ===== NEW: Format publications WITH abstracts (top 15) =====\nconst publications = unifiedObject.publications || [];\nconst publicationsForPrompt = publications\n  .slice(0, 15)\n  .map(pub => ({\n    title: pub.title || '',\n    abstract: (pub.abstract || '').substring(0, 200),\n    keywords: pub.keywords || [],\n    year: pub.year || null,\n    citations: pub.citations || 0\n  }));\n\n// ===== NEW: Format grants =====\nconst grants = unifiedObject.grants || [];\nconst grantsForPrompt = grants.map(grant => ({\n  title: grant.title || '',\n  funder: grant.funder || '',\n  amount: grant.amount || null,\n  dates: grant.dates || ''\n}));\n\n// ===== NEW: Get biography (complete, not summarised) =====\nconst biography = unifiedObject.biography || '';\n\n// ===== NEW: Get research_interests (separate from keywords) =====\nconst researchInterests = unifiedObject.research_interests || [];\n\n// Parse keywords if stored as JSON string\nlet rawKeywords = unifiedObject.keywords || [];\nif (typeof rawKeywords === 'string') {\n  try {\n    rawKeywords = JSON.parse(rawKeywords);\n  } catch (e) {\n    rawKeywords = [];\n  }\n}\nconst keywords = rawKeywords.slice(0, 20);\nconst keywordsText = keywords.length > 0 ? keywords.join(', ') : 'None available';\n\n// Format patents\nconst patents = unifiedObject.patents || [];\nconst patentsForPrompt = patents.slice(0, 10).map(pat => ({\n  title: pat.title || '',\n  year: pat.year || null\n}));\n\n// ===== NEW: Complete prompt per researcher_instance_spec_v2_2.md Section 10 =====\nconst prompt = `You are enriching a researcher profile for a capability intelligence system.\n\nINPUT DATA:\n- Name: ${name}\n- Institution: ${institution}\n- H-index: ${hIndex}\n- Total Citations: ${totalCitations}\n- Publication Count: ${publicationCount}\n- Patent Count: ${patentCount}\n\nPublications (Top 15 with abstracts):\n${JSON.stringify(publicationsForPrompt, null, 2)}\n\nBio:\n${biography || 'Not available'}\n\nGrants:\n${JSON.stringify(grantsForPrompt, null, 2)}\n\nResearch Interests (from source):\n${JSON.stringify(researchInterests)}\n\nPatents:\n${JSON.stringify(patentsForPrompt, null, 2)}\n\nAdditional Keywords:\n${keywordsText}\n\nTASK: Extract and structure researcher capabilities.\n\nProvide:\n\n1. **Career Stage** (critical for classification depth):\n   - early-career: < 5 years post-PhD, < 20 publications, h-index < 10\n   - mid-career: 5-15 years post-PhD, 20-80 publications, h-index 10-25\n   - senior: > 15 years post-PhD OR > 80 publications OR h-index > 25\n   - emeritus: retired but still active in research\n\n2. **Research Domains** (3-5 high-level fields):\n   - e.g., \"Marine Biotechnology\", \"Enzyme Engineering\", \"Food Science\"\n\n3. **Core Methodologies** (5-10 specific techniques):\n   - e.g., \"Lipase immobilisation\", \"Supercritical CO2 extraction\", \"HPLC analysis\"\n\n4. **Research Themes** (3-5 recurring topics across publications):\n   - e.g., \"Omega-3 enrichment\", \"Sustainable bioprocessing\", \"Functional foods\"\n\n5. **Equipment Expertise** (if identifiable from publications/grants):\n   - e.g., \"Mass spectrometry\", \"Bioreactors\", \"NMR spectroscopy\"\n\n6. **Collaboration Indicators**:\n   - Industry partnerships (if mentioned in grants/bio)\n   - International scope (if evident)\n\n7. **Achievement Indicators**:\n   - Research impact level: Emerging / Established / Leading\n   - Collaboration breadth: Local / National / International\n   - Funding track record: Minimal / Moderate / Extensive\n\nOUTPUT FORMAT: JSON with TWO required sections - raw_evidence (preserved from input) and enriched_context (your analysis).\n\n{\n  \"raw_evidence\": {\n    \"publications\": [\n      {\"title\": \"Publication title\", \"abstract\": \"First 200 chars of abstract...\", \"keywords\": [\"keyword1\", \"keyword2\"]}\n    ],\n    \"grants\": [\n      {\"title\": \"Grant title\", \"funder\": \"Funder name\", \"amount\": 500000, \"dates\": \"2022-2025\"}\n    ],\n    \"biography\": \"Complete biography text - preserve exactly as provided, DO NOT summarise\",\n    \"research_interests\": [\"Interest 1\", \"Interest 2\"]\n  },\n  \"enriched_context\": {\n    \"career_stage\": \"early-career | mid-career | senior | emeritus\",\n    \"career_stage_evidence\": \"Brief explanation of career stage assessment\",\n    \"research_domains\": [\"Domain 1\", \"Domain 2\", \"Domain 3\"],\n    \"methodologies\": [\"Method 1\", \"Method 2\", \"Method 3\"],\n    \"themes\": [\"Theme 1\", \"Theme 2\", \"Theme 3\"],\n    \"keywords\": [\"Extracted keyword 1\", \"Extracted keyword 2\"]\n  },\n  \"equipment_expertise\": [\"Equipment 1\", \"Equipment 2\"],\n  \"collaboration_indicators\": {\n    \"industry_partners\": [\"Company 1\"],\n    \"international_scope\": \"Yes/No with brief note\"\n  },\n  \"achievement_indicators\": {\n    \"research_impact\": \"Established\",\n    \"collaboration_breadth\": \"International\",\n    \"funding_track_record\": \"Extensive\"\n  }\n}\n\nCRITICAL RULES:\n1. The raw_evidence section MUST preserve input data exactly - copy publications, grants, biography, research_interests from the input. DO NOT summarise the biography.\n2. Include top 10-15 publications with titles, abstracts (first 200 chars), and keywords in raw_evidence.\n3. Include ALL grants with full details in raw_evidence.\n4. Preserve the complete biography text in raw_evidence.\n5. The enriched_context section contains YOUR analysis and extracted insights.\n6. Respond ONLY with valid JSON. Do not include any text outside the JSON structure.\n7. Start your response with { and end with }.`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    object_id: unifiedObject.object_id,\n    unified_data: unifiedObject,\n    execution_context: executionContext\n  }\n}];"
       },
-      "id": "046fcd0c-1ced-4f9d-aada-1d104554aef1",
+      "id": "ee978d4a-14a7-4bbb-8c1f-359ff239f869",
       "name": "Prepare LLM Prompt",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
@@ -340,7 +340,7 @@
       "parameters": {
         "functionCode": "// Parse LLM Response - FIXED VERSION\n// CRITICAL FIX: raw_evidence is now built directly from unified_data, NOT from LLM output\n// This ensures year, citations, and other metadata are preserved exactly\n// LLM is only trusted for enriched_context (analysis/insights)\n\n// Get LLM response from direct input\nconst llmResponse = $input.first().json.text;\n\n// Get unified_data and execution_context via node reference\nconst preparedData = $('Prepare LLM Prompt').first().json;\nconst unifiedObject = preparedData.unified_data;\nconst objectId = preparedData.object_id;\nconst executionContext = preparedData.execution_context;\n\n// Clean and parse - remove markdown code blocks if present\nlet cleanedResponse = llmResponse\n  .replace(/```json\\s*/g, '')\n  .replace(/```\\s*/g, '')\n  .trim();\n\n// Sometimes LLM adds text before/after JSON - try to extract JSON object\nconst jsonMatch = cleanedResponse.match(/\\{[\\s\\S]*\\}/);\nif (jsonMatch) {\n  cleanedResponse = jsonMatch[0];\n}\n\n// ===== Fix common LLM JSON errors =====\ncleanedResponse = cleanedResponse\n  .replace(/,\\s*\\]/g, ']')       // Remove trailing comma before ]\n  .replace(/,\\s*\\}/g, '}')       // Remove trailing comma before }\n  .replace(/\\n/g, ' ')           // Replace newlines with spaces\n  .replace(/\\r/g, '')            // Remove carriage returns\n  .replace(/\\t/g, ' ')           // Replace tabs with spaces\n  .replace(/\\s+/g, ' ');         // Collapse multiple spaces\n\nlet enrichmentData;\nlet parseError = null;\n\ntry {\n  enrichmentData = JSON.parse(cleanedResponse);\n} catch (e) {\n  parseError = e.message;\n  \n  // Second attempt - even more aggressive cleaning\n  try {\n    let aggressiveCleaned = cleanedResponse\n      .replace(/[\\x00-\\x1F\\x7F]/g, '')  // Remove control characters\n      .replace(/\\\\n/g, ' ')              // Replace escaped newlines\n      .replace(/\\\\t/g, ' ')              // Replace escaped tabs\n      .replace(/\\\\/g, '\\\\\\\\');           // Escape backslashes\n    \n    enrichmentData = JSON.parse(aggressiveCleaned);\n    parseError = null;\n    console.log('JSON parse succeeded on second attempt');\n  } catch (e2) {\n    parseError = `First: ${e.message}; Second: ${e2.message}`;\n    enrichmentData = null;\n  }\n}\n\n// ===== CRITICAL: Build raw_evidence DIRECTLY from unified data =====\n// This ensures year, citations, authors, and all other metadata are preserved\n// We NEVER trust the LLM to copy data accurately\n\nfunction buildRawEvidenceFromUnified(unified) {\n  return {\n    // Publications: preserve ALL fields including year and citations\n    publications: (unified.publications || []).slice(0, 15).map(p => ({\n      title: p.title || '',\n      abstract: (p.abstract || '').substring(0, 500),\n      keywords: p.keywords || [],\n      year: p.year || null,                    // CRITICAL: preserve year\n      citations: p.citations || 0,              // CRITICAL: preserve citations\n      authors: p.authors || [],                 // preserve authors\n      doi: p.doi || null,                       // preserve DOI\n      venue: p.venue || p.publication_venue || null,\n      source: p.source || null\n    })),\n    \n    // Grants: preserve all fields\n    grants: (unified.grants || []).map(g => ({\n      title: g.title || '',\n      funder: g.funder || '',\n      amount: g.amount || null,\n      dates: g.dates || '',\n      status: g.status || null\n    })),\n    \n    // Biography: preserve complete text\n    biography: unified.biography || '',\n    \n    // Research interests: preserve complete list\n    research_interests: unified.research_interests || []\n  };\n}\n\n// ===== Extract enriched_context from LLM (this is what LLM is good at) =====\nfunction extractEnrichedContextFromLLM(parsed, error) {\n  if (!parsed) {\n    return {\n      career_stage: 'unknown',\n      career_stage_evidence: `LLM parse error: ${error}`,\n      research_domains: [],\n      methodologies: [],\n      themes: [],\n      keywords: []\n    };\n  }\n  \n  // Check if LLM returned new format with enriched_context\n  if (parsed.enriched_context) {\n    return {\n      career_stage: parsed.enriched_context.career_stage || 'unknown',\n      career_stage_evidence: parsed.enriched_context.career_stage_evidence || '',\n      research_domains: parsed.enriched_context.research_domains || [],\n      methodologies: parsed.enriched_context.methodologies || [],\n      themes: parsed.enriched_context.themes || parsed.enriched_context.research_themes || [],\n      keywords: parsed.enriched_context.keywords || []\n    };\n  }\n  \n  // Old format - fields at top level\n  return {\n    career_stage: parsed.career_stage || 'unknown',\n    career_stage_evidence: parsed.career_stage_evidence || '',\n    research_domains: parsed.research_domains || [],\n    methodologies: parsed.methodologies || [],\n    themes: parsed.research_themes || parsed.themes || [],\n    keywords: parsed.keywords || []\n  };\n}\n\n// ===== Extract other LLM insights =====\nfunction extractOtherInsights(parsed) {\n  if (!parsed) {\n    return {\n      equipment_expertise: [],\n      collaboration_indicators: {\n        industry_partners: [],\n        international_scope: 'Unknown'\n      },\n      achievement_indicators: {\n        research_impact: 'Unknown',\n        collaboration_breadth: 'Unknown',\n        funding_track_record: 'Unknown'\n      }\n    };\n  }\n  \n  return {\n    equipment_expertise: parsed.equipment_expertise || [],\n    collaboration_indicators: parsed.collaboration_indicators || {\n      industry_partners: [],\n      international_scope: 'Unknown'\n    },\n    achievement_indicators: parsed.achievement_indicators || {\n      research_impact: 'Unknown',\n      collaboration_breadth: 'Unknown',\n      funding_track_record: 'Unknown'\n    }\n  };\n}\n\n// ===== Build final normalized enrichment =====\nconst rawEvidence = buildRawEvidenceFromUnified(unifiedObject);\nconst enrichedContext = extractEnrichedContextFromLLM(enrichmentData, parseError);\nconst otherInsights = extractOtherInsights(enrichmentData);\n\nconst normalizedEnrichment = {\n  raw_evidence: rawEvidence,\n  enriched_context: enrichedContext,\n  ...otherInsights\n};\n\n// ===== Validation flags =====\nconst validationFlags = [];\n\nif (!rawEvidence.publications || rawEvidence.publications.length === 0) {\n  validationFlags.push('missing_publications_in_raw_evidence');\n}\nif (!rawEvidence.grants || rawEvidence.grants.length === 0) {\n  validationFlags.push('missing_grants_in_raw_evidence');\n}\nif (!rawEvidence.biography) {\n  validationFlags.push('missing_biography_in_raw_evidence');\n}\nif (!rawEvidence.research_interests || rawEvidence.research_interests.length === 0) {\n  validationFlags.push('missing_research_interests_in_raw_evidence');\n}\n\n// Check if year/citations are actually present\nconst pubsWithYear = rawEvidence.publications.filter(p => p.year !== null).length;\nconst pubsWithCitations = rawEvidence.publications.filter(p => p.citations > 0).length;\nif (pubsWithYear === 0 && rawEvidence.publications.length > 0) {\n  validationFlags.push('no_publication_years');\n}\nif (pubsWithCitations === 0 && rawEvidence.publications.length > 0) {\n  validationFlags.push('no_publication_citations');\n}\n\nnormalizedEnrichment._validation_flags = validationFlags;\nnormalizedEnrichment._raw_evidence_source = 'unified_data';  // Track that we built this ourselves\n\nif (parseError) {\n  normalizedEnrichment._llm_parse_error = parseError;\n}\n\n// Build final enriched object\nconst enrichedObject = {\n  ...unifiedObject,\n  object_id: objectId,\n  enrichment: normalizedEnrichment,\n  enriched_at: new Date().toISOString(),\n  execution_context: executionContext\n};\n\nconsole.log(`Parse LLM complete: career_stage=${normalizedEnrichment.enriched_context.career_stage}`);\nconsole.log(`  Publications: ${rawEvidence.publications.length}, with year: ${pubsWithYear}, with citations: ${pubsWithCitations}`);\nconsole.log(`  Sample: ${rawEvidence.publications[0]?.title?.substring(0, 50)}... year=${rawEvidence.publications[0]?.year}, citations=${rawEvidence.publications[0]?.citations}`);\n\nreturn [{ json: enrichedObject }];"
       },
-      "id": "0f160440-afcf-45e4-aa1d-7b5a1972449b",
+      "id": "fc5e45ce-a8e8-4bba-8ba4-ed00babcddc2",
       "name": "Parse LLM Response",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
@@ -352,7 +352,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendHeaders": true,
@@ -375,7 +375,7 @@
         1440,
         -160
       ],
-      "id": "087cd9ac-d731-491c-8cdb-f2f74d63a158",
+      "id": "94e47682-86fe-4689-8716-29a4bd97fc49",
       "name": "Fetch ThinObjects",
       "credentials": {
         "httpBasicAuth": {
@@ -394,13 +394,13 @@
         1680,
         -160
       ],
-      "id": "f5b429f5-5897-458f-bc59-312be523aa67",
+      "id": "dcf4aaab-8bf0-48da-8265-4d07c9c7ce19",
       "name": "Prepare Set Status Fabricating"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendHeaders": true,
@@ -423,7 +423,7 @@
         1920,
         -160
       ],
-      "id": "8938a6d6-27f6-4f61-88e3-523d8776b8fb",
+      "id": "9178eea1-4101-43be-85b2-d621d8ed17d6",
       "name": "Set Status: Fabricating",
       "credentials": {
         "httpBasicAuth": {
@@ -436,7 +436,7 @@
       "parameters": {
         "options": {}
       },
-      "id": "bb08ddce-9808-4704-bac9-596ae12d6741",
+      "id": "327be104-a8ab-4396-b971-efcba550923e",
       "name": "Loop Through Objects",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
@@ -449,7 +449,7 @@
       "parameters": {
         "functionCode": "// Pass 1: Structural Unification - FIXED VERSION\n// Merges data from multiple sources and creates unified researcher profile\n// FIX: Uses pre-merged thin.publications (with year/citations) instead of source-specific data\n// MODIFIED: Preserves execution_context through pipeline\n\nconst thinObject = $input.first().json;\nconst executionContext = thinObject.execution_context;\n\nfunction titleSimilarity(title1, title2) {\n  const words1 = new Set(title1.toLowerCase().split(/\\s+/));\n  const words2 = new Set(title2.toLowerCase().split(/\\s+/));\n  \n  if (words1.size === 0 || words2.size === 0) return 0.0;\n  \n  const intersection = new Set([...words1].filter(x => words2.has(x)));\n  const union = new Set([...words1, ...words2]);\n  \n  return intersection.size / union.size;\n}\n\n// Parse JSON fields safely\nfunction safeParseJSON(str, fallback = {}) {\n  if (!str) return fallback;\n  if (typeof str === 'object') return str;\n  try {\n    return JSON.parse(str);\n  } catch (e) {\n    return fallback;\n  }\n}\n\n// Parse source-specific data (for fallback and additional fields)\nconst orcidData = safeParseJSON(thinObject.orcid_data, {});\nconst scopusData = safeParseJSON(thinObject.scopus_data, {});\nconst scholarData = safeParseJSON(thinObject.scholar_data, {});\nconst universityData = safeParseJSON(thinObject.university_data, {});\nconst patentsData = safeParseJSON(thinObject.patents_data, {});\nconst sourceMetadata = safeParseJSON(thinObject.source_metadata, {\n  sources_scraped: [],\n  scrape_timestamps: {},\n  field_hashes: {}\n});\n\n// ============================================================\n// FIX: Parse pre-merged publications from ThinObject FIRST\n// These come from OBJECT-1's Merge node and have complete data\n// ============================================================\nlet preMergedPublications = [];\ntry {\n  const pubData = thinObject.publications;\n  if (typeof pubData === 'string') {\n    preMergedPublications = JSON.parse(pubData);\n  } else if (Array.isArray(pubData)) {\n    preMergedPublications = pubData;\n  }\n} catch (e) {\n  console.log('Could not parse thin.publications, will use source-specific data');\n}\n\n// Also get pre-merged collaborators, keywords, affiliations from ThinObject\nlet preMergedCollaborators = [];\ntry {\n  const collabData = thinObject.collaborators;\n  if (typeof collabData === 'string') {\n    preMergedCollaborators = JSON.parse(collabData);\n  } else if (Array.isArray(collabData)) {\n    preMergedCollaborators = collabData;\n  }\n} catch (e) {}\n\nlet preMergedKeywords = [];\ntry {\n  const kwData = thinObject.keywords;\n  if (typeof kwData === 'string') {\n    preMergedKeywords = JSON.parse(kwData);\n  } else if (Array.isArray(kwData)) {\n    preMergedKeywords = kwData;\n  }\n} catch (e) {}\n\nlet preMergedAffiliations = [];\ntry {\n  const affData = thinObject.affiliations;\n  if (typeof affData === 'string') {\n    preMergedAffiliations = JSON.parse(affData);\n  } else if (Array.isArray(affData)) {\n    preMergedAffiliations = affData;\n  }\n} catch (e) {}\n\nlet preMergedMetrics = {};\ntry {\n  const metData = thinObject.metrics;\n  if (typeof metData === 'string') {\n    preMergedMetrics = JSON.parse(metData);\n  } else if (typeof metData === 'object' && metData !== null) {\n    preMergedMetrics = metData;\n  }\n} catch (e) {}\n\n// Initialize unified object\nconst unified = {\n  object_id: thinObject.object_id || thinObject.asset_id,\n  name: thinObject.name,\n  orcid: thinObject.orcid || null,\n  email: thinObject.email || null,\n  institution: thinObject.institution || null,\n  publications: [],\n  collaborators: [],\n  keywords: [],\n  affiliations: [],\n  patents: [],\n  grants: [],\n  biography: thinObject.biography || universityData.biography || '',\n  research_interests: thinObject.research_interests || universityData.research_interests || [],\n  current_projects: thinObject.current_projects || universityData.current_projects || [],\n  expertise_keywords: thinObject.expertise_keywords || universityData.expertise_keywords || [],\n  metrics: {},\n  data_quality_flags: [],\n  source_metadata: sourceMetadata,\n  execution_context: executionContext\n};\n\n// ============================================================\n// PUBLICATIONS: Use pre-merged data if available (HAS YEAR/CITATIONS)\n// ============================================================\nif (preMergedPublications.length > 0) {\n  console.log(`Using ${preMergedPublications.length} pre-merged publications from ThinObject`);\n  unified.publications = preMergedPublications.map(pub => ({\n    title: pub.title,\n    doi: pub.doi || null,\n    year: pub.year || null,\n    citations: pub.citations || 0,\n    authors: pub.authors || [],\n    abstract: pub.abstract || '',\n    keywords: pub.keywords || [],\n    publication_venue: pub.publication_venue || pub.publication || '',\n    source: pub.source || 'merged'\n  }));\n} else {\n  // FALLBACK: Merge from source-specific data (old behavior)\n  console.log('No pre-merged publications, falling back to source-specific merge');\n  const publicationsMap = new Map();\n  \n  // Add Scopus publications\n  (scopusData.publications || []).forEach(pub => {\n    const doi = pub.doi;\n    if (doi) {\n      publicationsMap.set(doi, {\n        title: pub.title,\n        doi: doi,\n        year: pub.year,\n        citations: pub.citations || 0,\n        authors: pub.authors || [],\n        abstract: pub.abstract,\n        keywords: pub.keywords || [],\n        source: 'scopus'\n      });\n    }\n  });\n  \n  // Add Scholar publications (deduplicate by title similarity)\n  (scholarData.publications || []).forEach(pub => {\n    const title = (pub.title || '').toLowerCase();\n    const doi = pub.doi;\n    \n    if (doi && publicationsMap.has(doi)) {\n      const existing = publicationsMap.get(doi);\n      existing.citations = Math.max(existing.citations || 0, pub.citations || 0);\n    } else {\n      let duplicateFound = false;\n      for (const [existingDoi, existingPub] of publicationsMap.entries()) {\n        const existingTitle = (existingPub.title || '').toLowerCase();\n        if (titleSimilarity(title, existingTitle) > 0.85) {\n          duplicateFound = true;\n          break;\n        }\n      }\n      \n      if (!duplicateFound && pub.title) {\n        const pubId = doi || `scholar_${title.substring(0, 50)}`;\n        publicationsMap.set(pubId, {\n          title: pub.title,\n          doi: doi,\n          year: pub.year,\n          citations: pub.citations || 0,\n          source: 'scholar'\n        });\n      }\n    }\n  });\n  \n  unified.publications = Array.from(publicationsMap.values());\n}\n\n// ============================================================\n// COLLABORATORS: Use pre-merged if available\n// ============================================================\nif (preMergedCollaborators.length > 0) {\n  console.log(`Using ${preMergedCollaborators.length} pre-merged collaborators`);\n  unified.collaborators = preMergedCollaborators;\n} else {\n  // Extract from publications and scholar data\n  const allCoauthors = new Set();\n  unified.publications.forEach(pub => {\n    let authorsList = [];\n    if (Array.isArray(pub.authors)) {\n      authorsList = pub.authors;\n    } else if (typeof pub.authors === 'string' && pub.authors) {\n      authorsList = pub.authors.split(',').map(a => a.trim());\n    }\n    \n    authorsList.forEach(author => {\n      const authorName = (typeof author === 'string' ? author : author.name || '').trim();\n      if (authorName && authorName.toLowerCase() !== thinObject.name.toLowerCase()) {\n        allCoauthors.add(authorName);\n      }\n    });\n  });\n  \n  (scholarData.co_authors || []).forEach(coauthor => {\n    const name = coauthor.name || coauthor || '';\n    if (name && name.toLowerCase() !== thinObject.name.toLowerCase()) {\n      allCoauthors.add(name);\n    }\n  });\n  \n  unified.collaborators = Array.from(allCoauthors);\n}\n\n// ============================================================\n// KEYWORDS: Use pre-merged if available, otherwise merge from sources\n// ============================================================\nif (preMergedKeywords.length > 0) {\n  console.log(`Using ${preMergedKeywords.length} pre-merged keywords`);\n  unified.keywords = preMergedKeywords;\n} else {\n  const allKeywords = new Set();\n  \n  (universityData.research_interests || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  (orcidData.keywords || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  (scholarData.interests || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  (scopusData.keywords || []).forEach(kw => {\n    if (kw) allKeywords.add(kw.toLowerCase().trim());\n  });\n  \n  unified.publications.forEach(pub => {\n    (pub.keywords || []).forEach(kw => {\n      if (kw) allKeywords.add(kw.toLowerCase().trim());\n    });\n  });\n  \n  unified.keywords = Array.from(allKeywords);\n}\n\n// ============================================================\n// AFFILIATIONS: Use pre-merged if available\n// ============================================================\nif (preMergedAffiliations.length > 0) {\n  console.log(`Using ${preMergedAffiliations.length} pre-merged affiliations`);\n  unified.affiliations = preMergedAffiliations;\n} else {\n  const affiliations = [];\n  \n  (orcidData.employment || []).forEach(emp => {\n    const orgName = typeof emp.organization === 'string' \n      ? emp.organization \n      : emp.organization?.name;\n    \n    if (orgName) {\n      affiliations.push({\n        institution: orgName,\n        department: emp.department || null,\n        role: emp.role || null,\n        start_date: emp.start_year || emp.start_date || null,\n        end_date: emp.end_year || emp.end_date || null,\n        source: 'orcid'\n      });\n    }\n  });\n  \n  if (universityData.department || universityData.position) {\n    affiliations.push({\n      institution: thinObject.institution,\n      department: universityData.department || null,\n      position: universityData.position || null,\n      source: 'university'\n    });\n  }\n  \n  if (thinObject.institution) {\n    const alreadyHasCurrent = affiliations.some(a => \n      a.institution === thinObject.institution && a.source === 'current'\n    );\n    if (!alreadyHasCurrent) {\n      affiliations.push({\n        institution: thinObject.institution,\n        current: true,\n        source: 'current'\n      });\n    }\n  }\n  \n  unified.affiliations = affiliations;\n}\n\n// ============================================================\n// PATENTS: Use pre-merged if available\n// ============================================================\nlet preMergedPatents = [];\ntry {\n  const patData = thinObject.patents;\n  if (typeof patData === 'string') {\n    preMergedPatents = JSON.parse(patData);\n  } else if (Array.isArray(patData)) {\n    preMergedPatents = patData;\n  }\n} catch (e) {}\n\nunified.patents = preMergedPatents.length > 0 ? preMergedPatents : (patentsData.patents || []);\n\n// ============================================================\n// GRANTS: Use pre-merged if available\n// ============================================================\nlet preMergedGrants = [];\ntry {\n  const grantData = thinObject.grants;\n  if (typeof grantData === 'string') {\n    preMergedGrants = JSON.parse(grantData);\n  } else if (Array.isArray(grantData)) {\n    preMergedGrants = grantData;\n  }\n} catch (e) {}\n\nunified.grants = preMergedGrants;\n\n// ============================================================\n// METRICS: Use pre-merged if available, otherwise calculate\n// ============================================================\nif (preMergedMetrics && Object.keys(preMergedMetrics).length > 0) {\n  console.log('Using pre-merged metrics from ThinObject');\n  unified.metrics = {\n    h_index: preMergedMetrics.h_index || 0,\n    total_citations: preMergedMetrics.total_citations || 0,\n    publication_count: preMergedMetrics.publication_count || unified.publications.length,\n    collaborator_count: preMergedMetrics.collaborator_count || unified.collaborators.length,\n    patent_count: preMergedMetrics.patent_count || unified.patents.length,\n    grant_count: preMergedMetrics.grant_count || unified.grants.length\n  };\n} else {\n  unified.metrics = {\n    h_index: scopusData.h_index || scholarData.h_index || 0,\n    total_citations: Math.max(scopusData.citations || 0, scholarData.citations || 0),\n    publication_count: scopusData.document_count || unified.publications.length || 0,\n    collaborator_count: unified.collaborators.length,\n    patent_count: patentsData.patent_count || unified.patents.length || 0,\n    grant_count: unified.grants.length\n  };\n}\n\n// ============================================================\n// DATA QUALITY FLAGS\n// ============================================================\nif (!unified.orcid) unified.data_quality_flags.push('missing_orcid');\nif (unified.metrics.publication_count === 0) unified.data_quality_flags.push('no_publications');\nif (unified.affiliations.length === 0) unified.data_quality_flags.push('no_affiliations');\nif (unified.grants.length === 0) unified.data_quality_flags.push('no_grants');\nif (!unified.biography) unified.data_quality_flags.push('no_biography');\nif (unified.research_interests.length === 0) unified.data_quality_flags.push('no_research_interests');\n\n// ============================================================\n// COMPLETENESS SCORE\n// ============================================================\nlet completeness = 0;\nif (unified.orcid) completeness += 15;\nif (unified.metrics.publication_count > 0) completeness += 20;\nif (unified.affiliations.length > 0) completeness += 15;\nif (unified.metrics.h_index > 0) completeness += 10;\nif (unified.keywords.length > 0) completeness += 5;\nif (unified.collaborators.length > 0) completeness += 5;\nif (unified.biography) completeness += 10;\nif (unified.research_interests.length > 0) completeness += 10;\nif (unified.grants.length > 0) completeness += 5;\nif (unified.current_projects.length > 0) completeness += 5;\n\nunified.data_completeness = completeness;\n\n// ============================================================\n// LOGGING\n// ============================================================\nconsole.log(`✅ Unified ${unified.name}`);\nconsole.log(`📚 Publications: ${unified.publications.length} (with year/citations preserved)`);\nconsole.log(`👥 Collaborators: ${unified.collaborators.length}`);\nconsole.log(`🏷️ Keywords: ${unified.keywords.length}`);\nconsole.log(`📊 H-index: ${unified.metrics.h_index}, Citations: ${unified.metrics.total_citations}`);\n\nreturn [{ json: unified }];"
       },
-      "id": "c6e8d2de-59cb-4270-bc6b-da2b502e0e40",
+      "id": "a94915d9-b787-4f5a-9e5e-c0e4d0ac6f44",
       "name": "Pass 1: Unification",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
@@ -462,7 +462,7 @@
       "parameters": {
         "functionCode": "// Pass 3: Build Graph Relationships\n// MODIFIED: Preserves execution_context\n\nconst enrichedObject = $input.first().json;\nconst executionContext = enrichedObject.execution_context;\n\nconst objectId = enrichedObject.object_id;\nconst relationships = [];\n\n// 1. Collaborator relationships\n(enrichedObject.collaborators || []).forEach(collaboratorName => {\n  const slug = collaboratorName.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n  relationships.push({\n    type: 'COLLABORATES_WITH',\n    source: objectId,\n    target: `researcher:${slug}`,\n    properties: {\n      co_author: true,\n      weight: 1\n    }\n  });\n});\n\n// 2. Institutional affiliations\n(enrichedObject.affiliations || []).forEach(affiliation => {\n  const institutionName = affiliation.institution;\n  if (institutionName) {\n    const slug = institutionName.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n    relationships.push({\n      type: 'AFFILIATED_WITH',\n      source: objectId,\n      target: `institution:${slug}`,\n      properties: {\n        role: affiliation.role || affiliation.position || null,\n        department: affiliation.department || null,\n        current: affiliation.current || false,\n        start_date: affiliation.start_date || null,\n        end_date: affiliation.end_date || null\n      }\n    });\n  }\n});\n\n// 3. Research domain connections (from LLM enrichment)\nconst domains = (enrichedObject.enrichment || {}).research_domains || [];\ndomains.forEach(domain => {\n  const slug = domain.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n  relationships.push({\n    type: 'WORKS_IN_DOMAIN',\n    source: objectId,\n    target: `domain:${slug}`,\n    properties: {\n      domain_name: domain\n    }\n  });\n});\n\n// 4. Methodology connections (from LLM enrichment)\nconst methodologies = (enrichedObject.enrichment || {}).methodologies || [];\nmethodologies.forEach(method => {\n  const slug = method.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');\n  relationships.push({\n    type: 'USES_METHODOLOGY',\n    source: objectId,\n    target: `method:${slug}`,\n    properties: {\n      methodology_name: method\n    }\n  });\n});\n\n// Add graph_relationships to enriched object\nconst withRelationships = {\n  ...enrichedObject,\n  graph_relationships: relationships,\n  execution_context: executionContext  // ADDED: Preserve context\n};\n\nreturn [{ json: withRelationships }];"
       },
-      "id": "93453461-4f71-4579-9723-89c28c5cd5ce",
+      "id": "be336b8c-92b9-41ad-8b1d-69c4f08d88f6",
       "name": "Pass 3: Build Relationships",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
@@ -473,9 +473,9 @@
     },
     {
       "parameters": {
-        "functionCode": "// Pass 4: Generate ICF Views - Definition Card v3.2 Compliant\n// MODIFIED: Dense view now includes raw_evidence + enriched_context structure\n// MODIFIED: Required for OBJECT-3 classification grounding\n// Creates Dense View, Embedding View, Graph View + provenance\n\nconst enrichedObject = $input.first().json;\nconst executionContext = enrichedObject.execution_context || {};\n\n// Checksum computation function\nfunction computeChecksum(obj) {\n  const str = JSON.stringify(obj);\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  return 'sha256:' + Math.abs(hash).toString(16).padStart(16, '0');\n}\n\n// Token estimation (1 token ≈ 4 chars for English)\nfunction estimateTokens(text) {\n  return Math.ceil(text.length / 4);\n}\n\n// Transform ID: thin:researcher:colin_barrow → fat:researcher:colin_barrow\nconst thinObjectId = enrichedObject.object_id;\nconst fatObjectId = thinObjectId.replace(/^thin:/, 'fat:');\n\n// ===== NEW: Access nested enrichment structure =====\nconst enrichment = enrichedObject.enrichment || {};\nconst rawEvidence = enrichment.raw_evidence || {};\nconst enrichedContext = enrichment.enriched_context || {};\nconst achievementIndicators = enrichment.achievement_indicators || {};\n\nconst metrics = enrichedObject.metrics || {};\n\n// ====== VERSION HANDLING ======\nconst isRefabrication = executionContext.mode === 'refabrication';\nconst version = executionContext.new_version || 'v1.0';\nconst previousVersion = executionContext.previous_version || null;\nconst refabricationReason = executionContext.refabrication_reason || null;\nconst changedFields = executionContext.changed_fields || [];\nconst sourceQueueEntryId = executionContext.source_queue_entry_id || null;\n\n// ===== NEW: Build raw_evidence for dense_view =====\n// Publications: top 10-15 with abstracts and keywords (CRITICAL for OBJECT-3)\nconst publicationsForDense = (rawEvidence.publications || enrichedObject.publications || [])\n  .slice(0, 15)\n  .map(pub => ({\n    title: pub.title || '',\n    abstract: (pub.abstract || '').substring(0, 500),\n    keywords: pub.keywords || [],\n    year: pub.year || null,\n    citations: pub.citations || 0\n  }));\n\n// Grants: ALL with full details\nconst grantsForDense = (rawEvidence.grants || enrichedObject.grants || [])\n  .map(grant => ({\n    title: grant.title || '',\n    funder: grant.funder || '',\n    amount: grant.amount || null,\n    dates: grant.dates || ''\n  }));\n\n// Biography: complete text (NOT summarised)\nconst biographyForDense = rawEvidence.biography || enrichedObject.biography || '';\n\n// Research interests: original array from source\nconst researchInterestsForDense = rawEvidence.research_interests || enrichedObject.research_interests || [];\n\n// ===== NEW: DENSE VIEW with raw_evidence + enriched_context structure =====\nconst denseView = {\n  object_id: fatObjectId,\n  name: enrichedObject.name,\n  orcid: enrichedObject.orcid || null,\n  institution: enrichedObject.institution || null,\n  \n  // ===== RAW EVIDENCE (CRITICAL FOR OBJECT-3 CLASSIFICATION) =====\n  raw_evidence: {\n    // Top 10-15 publications WITH abstracts and keywords\n    publications: publicationsForDense,\n    \n    // ALL grants with full details\n    grants: grantsForDense,\n    \n    // Complete biography (NOT summarised)\n    biography: biographyForDense,\n    \n    // Original research interests array\n    research_interests: researchInterestsForDense\n  },\n  \n  // ===== ENRICHED CONTEXT (LLM-generated analysis) =====\n  enriched_context: {\n    career_stage: enrichedContext.career_stage || 'unknown',\n    career_stage_evidence: enrichedContext.career_stage_evidence || '',\n    research_domains: enrichedContext.research_domains || [],\n    methodologies: enrichedContext.methodologies || [],\n    themes: enrichedContext.themes || [],\n    keywords: enrichedContext.keywords || []\n  },\n  \n  // ===== ACHIEVEMENT METRICS =====\n  achievement_scale: {\n    h_index: metrics.h_index || 0,\n    total_citations: metrics.total_citations || 0,\n    publication_count: metrics.publication_count || 0,\n    patent_count: metrics.patent_count || 0,\n    grant_count: metrics.grant_count || grantsForDense.length || 0\n  },\n  \n  // Achievement indicators from LLM\n  achievement_indicators: {\n    research_impact: achievementIndicators.research_impact || 'Unknown',\n    collaboration_breadth: achievementIndicators.collaboration_breadth || 'Unknown',\n    funding_track_record: achievementIndicators.funding_track_record || 'Unknown'\n  },\n  \n  // Network\n  collaborator_count: metrics.collaborator_count || 0,\n  \n  // Equipment expertise (if available)\n  equipment_expertise: enrichment.equipment_expertise || [],\n  \n  // Data quality\n  data_completeness: enrichedObject.data_completeness || 0,\n  data_quality_flags: enrichedObject.data_quality_flags || []\n};\n\n// Validate dense view token count (spec: 1200-2000 tokens)\nconst denseTokens = estimateTokens(JSON.stringify(denseView));\nif (denseTokens < 1200) {\n  console.warn(`Dense view tokens (${denseTokens}) below spec minimum 1200`);\n}\nif (denseTokens > 2000) {\n  console.warn(`Dense view tokens (${denseTokens}) above spec maximum 2000`);\n}\n\n// ===== EMBEDDING VIEW (updated to use new structure) =====\nconst embeddingText = `\nResearcher: ${enrichedObject.name}\nInstitution: ${enrichedObject.institution || 'Unknown'}\nCareer Stage: ${enrichedContext.career_stage || 'unknown'}\n\nResearch Domains: ${(enrichedContext.research_domains || []).join(', ')}\n\nCore Methodologies: ${(enrichedContext.methodologies || []).join(', ')}\n\nResearch Themes: ${(enrichedContext.themes || []).join(', ')}\n\nKeywords: ${(enrichedContext.keywords || []).concat(enrichedObject.keywords || []).slice(0, 20).join(', ')}\n\nResearch Interests: ${researchInterestsForDense.join(', ')}\n\nResearch Impact: H-index ${metrics.h_index || 0}, ${metrics.total_citations || 0} citations, ${metrics.publication_count || 0} publications\n\nPatents: ${metrics.patent_count || 0} patents\n\nGrants: ${grantsForDense.length} grants including ${grantsForDense.slice(0, 3).map(g => g.title).join(', ')}\n\nCollaboration: ${achievementIndicators.collaboration_breadth || 'Unknown'} collaboration network with ${metrics.collaborator_count || 0} collaborators\n\nEquipment Expertise: ${(enrichment.equipment_expertise || []).join(', ')}\n`.trim();\n\nconst embeddingTokens = estimateTokens(embeddingText);\nif (embeddingTokens < 300) {\n  console.warn(`Embedding view tokens (${embeddingTokens}) below spec minimum 300`);\n}\nif (embeddingTokens > 800) {\n  console.warn(`Embedding view tokens (${embeddingTokens}) above spec maximum 800`);\n}\n\nconst embeddingView = {\n  text: embeddingText,\n  token_count: embeddingTokens,\n  vector: null  // Will be generated in next node\n};\n\n// === GRAPH VIEW (unchanged) ===\nconst graphView = {\n  relationships: enrichedObject.graph_relationships || []\n};\n\n// === FAT OBJECT (ICF Structure) ===\nconst fatObject = {\n  asset_id: fatObjectId,\n  asset_type: 'object',\n  object_type: 'researcher',\n  version: version,\n  status: 'fabricated',\n  \n  // Three canonical views\n  views: {\n    dense: denseView,\n    embedding: embeddingView,\n    graph: graphView\n  },\n  \n  // Provenance with versioning metadata\n  provenance: {\n    fabricated_from: thinObjectId,\n    fabricated_at: new Date().toISOString(),\n    fabricated_by: isRefabrication ? 'gen2_object_refabrication_v3.2' : 'gen2_object_fabrication_v3.2',\n    enrichment_model: 'gpt-4o-2024-11-20',\n    embedding_model: 'text-embedding-3-large',\n    embedding_dimensions: 768,  // Per Definition Card spec\n    data_sources: enrichedObject.source_metadata?.sources_scraped || ['orcid', 'scopus', 'scholar', 'university', 'patents'],\n    scrape_timestamps: enrichedObject.source_metadata?.scrape_timestamps || {},\n    field_hashes: enrichedObject.source_metadata?.field_hashes || {},\n    checksum: computeChecksum(denseView),\n    \n    // Refabrication metadata\n    is_refabrication: isRefabrication,\n    previous_version: previousVersion,\n    refabrication_reason: refabricationReason,\n    changed_fields: changedFields,\n    source_queue_entry_id: sourceQueueEntryId,\n    \n    // ===== NEW: Token counts for validation =====\n    dense_view_tokens: denseTokens,\n    embedding_view_tokens: embeddingTokens\n  },\n  \n  // Execution context for downstream nodes\n  execution_context: executionContext\n};\n\nreturn [{ json: fatObject }];"
+        "functionCode": "// Pass 4: Generate ICF Views - Definition Card v3.2 Compliant\n// MODIFIED: Dense view now includes raw_evidence + enriched_context structure\n// MODIFIED: Required for OBJECT-3 classification grounding\n// Creates Dense View, Embedding View, Graph View + provenance\n\nconst enrichedObject = $input.first().json;\nconst executionContext = enrichedObject.execution_context || {};\n\n// ===== HELPER FUNCTIONS =====\n\n// Checksum computation function\nfunction computeChecksum(obj) {\n  const str = JSON.stringify(obj);\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  return 'sha256:' + Math.abs(hash).toString(16).padStart(16, '0');\n}\n\n// Token estimation (1 token ≈ 4 chars for English)\nfunction estimateTokens(text) {\n  return Math.ceil(text.length / 4);\n}\n\n// ✅ STEP 2: Extract structured name components\nfunction extractGivenName(fullName) {\n  // Split name and take all but last part\n  const parts = fullName.trim().split(' ');\n  if (parts.length === 1) return fullName;\n  return parts.slice(0, -1).join(' ');\n}\n\nfunction extractFamilyName(fullName) {\n  // Take last part of name\n  const parts = fullName.trim().split(' ');\n  return parts[parts.length - 1];\n}\n\nfunction formatDisplayName(fullName, title = null) {\n  // Add title if present (e.g., \"Professor Colin Barrow\")\n  if (title && !fullName.includes(title)) {\n    return `${title} ${fullName}`;\n  }\n  return fullName;\n}\n\n// ✅ STEP 4: Format dense text from denseView object\nfunction formatDenseText(denseView) {\n  // Convert denseView object to formatted text (1200-2000 tokens)\n  const sections = [];\n  \n  // Header\n  sections.push(`RESEARCHER PROFILE: ${denseView.name}`);\n  sections.push(`Institution: ${denseView.institution || 'Unknown'}`);\n  sections.push(`ORCID: ${denseView.orcid || 'Not available'}`);\n  sections.push('');\n  \n  // Raw Evidence Section\n  sections.push('=== RAW EVIDENCE ===');\n  sections.push('');\n  \n  // Publications\n  sections.push('PUBLICATIONS:');\n  const pubs = denseView.raw_evidence?.publications || [];\n  pubs.slice(0, 10).forEach((pub, i) => {\n    sections.push(`${i+1}. ${pub.title} (${pub.year || 'n.d.'})`);\n    if (pub.abstract) {\n      sections.push(`   Abstract: ${pub.abstract.substring(0, 300)}...`);\n    }\n    if (pub.keywords?.length) {\n      sections.push(`   Keywords: ${pub.keywords.join(', ')}`);\n    }\n    sections.push('');\n  });\n  \n  // Grants\n  sections.push('GRANTS:');\n  const grants = denseView.raw_evidence?.grants || [];\n  grants.forEach((grant, i) => {\n    sections.push(`${i+1}. ${grant.title}`);\n    sections.push(`   Funder: ${grant.funder}, Amount: ${grant.amount || 'N/A'}`);\n    sections.push('');\n  });\n  \n  // Biography\n  if (denseView.raw_evidence?.biography) {\n    sections.push('BIOGRAPHY:');\n    sections.push(denseView.raw_evidence.biography);\n    sections.push('');\n  }\n  \n  // Research Interests\n  const interests = denseView.raw_evidence?.research_interests || [];\n  if (interests.length) {\n    sections.push('RESEARCH INTERESTS:');\n    sections.push(interests.join(', '));\n    sections.push('');\n  }\n  \n  // Enriched Context Section\n  sections.push('=== ENRICHED CONTEXT ===');\n  sections.push('');\n  \n  const enriched = denseView.enriched_context || {};\n  sections.push(`Career Stage: ${enriched.career_stage || 'Unknown'}`);\n  sections.push(`Evidence: ${enriched.career_stage_evidence || ''}`);\n  sections.push('');\n  \n  if (enriched.research_domains?.length) {\n    sections.push(`Research Domains: ${enriched.research_domains.join(', ')}`);\n  }\n  if (enriched.methodologies?.length) {\n    sections.push(`Methodologies: ${enriched.methodologies.join(', ')}`);\n  }\n  if (enriched.themes?.length) {\n    sections.push(`Research Themes: ${enriched.themes.join(', ')}`);\n  }\n  if (enriched.keywords?.length) {\n    sections.push(`Keywords: ${enriched.keywords.join(', ')}`);\n  }\n  sections.push('');\n  \n  // Achievement Metrics\n  sections.push('=== ACHIEVEMENT METRICS ===');\n  const metrics = denseView.achievement_scale || {};\n  sections.push(`H-index: ${metrics.h_index || 0}`);\n  sections.push(`Citations: ${metrics.total_citations || 0}`);\n  sections.push(`Publications: ${metrics.publication_count || 0}`);\n  sections.push(`Patents: ${metrics.patent_count || 0}`);\n  sections.push(`Grants: ${metrics.grant_count || 0}`);\n  \n  return sections.join('\\n');\n}\n\n// ===== DATA EXTRACTION =====\n\n// Transform ID: thin:researcher:colin_barrow → fat:researcher:colin_barrow\nconst thinObjectId = enrichedObject.object_id;\nconst fatObjectId = thinObjectId.replace(/^thin:/, 'fat:');\n\n// Access nested enrichment structure\nconst enrichment = enrichedObject.enrichment || {};\nconst rawEvidence = enrichment.raw_evidence || {};\nconst enrichedContext = enrichment.enriched_context || {};\nconst achievementIndicators = enrichment.achievement_indicators || {};\nconst metrics = enrichedObject.metrics || {};\n\n// ✅ STEP 2: Extract structured name components\nconst fullName = enrichedObject.name || '';\nconst givenName = extractGivenName(fullName);\nconst familyName = extractFamilyName(fullName);\nconst displayName = formatDisplayName(fullName);\n\n// ====== VERSION HANDLING ======\nconst isRefabrication = executionContext.mode === 'refabrication';\nconst version = executionContext.new_version || 'v1.0';\nconst previousVersion = executionContext.previous_version || null;\nconst refabricationReason = executionContext.refabrication_reason || null;\nconst changedFields = executionContext.changed_fields || [];\nconst sourceQueueEntryId = executionContext.source_queue_entry_id || null;\n\n// ===== Build raw_evidence for dense_view =====\n// Publications: top 10-15 with abstracts and keywords (CRITICAL for OBJECT-3)\nconst publicationsForDense = (rawEvidence.publications || enrichedObject.publications || [])\n  .slice(0, 15)\n  .map(pub => ({\n    title: pub.title || '',\n    abstract: (pub.abstract || '').substring(0, 500),\n    keywords: pub.keywords || [],\n    year: pub.year || null,\n    citations: pub.citations || 0\n  }));\n\n// Grants: ALL with full details\nconst grantsForDense = (rawEvidence.grants || enrichedObject.grants || [])\n  .map(grant => ({\n    title: grant.title || '',\n    funder: grant.funder || '',\n    amount: grant.amount || null,\n    dates: grant.dates || ''\n  }));\n\n// Biography: complete text (NOT summarised)\nconst biographyForDense = rawEvidence.biography || enrichedObject.biography || '';\n\n// Research interests: original array from source\nconst researchInterestsForDense = rawEvidence.research_interests || enrichedObject.research_interests || [];\n\n// ===== DENSE VIEW with raw_evidence + enriched_context structure =====\nconst denseView = {\n  object_id: fatObjectId,\n  name: enrichedObject.name,\n  orcid: enrichedObject.orcid || null,\n  institution: enrichedObject.institution || null,\n  \n  // ===== RAW EVIDENCE (CRITICAL FOR OBJECT-3 CLASSIFICATION) =====\n  raw_evidence: {\n    // Top 10-15 publications WITH abstracts and keywords\n    publications: publicationsForDense,\n    \n    // ALL grants with full details\n    grants: grantsForDense,\n    \n    // Complete biography (NOT summarised)\n    biography: biographyForDense,\n    \n    // Original research interests array\n    research_interests: researchInterestsForDense\n  },\n  \n  // ===== ENRICHED CONTEXT (LLM-generated analysis) =====\n  enriched_context: {\n    career_stage: enrichedContext.career_stage || 'unknown',\n    career_stage_evidence: enrichedContext.career_stage_evidence || '',\n    research_domains: enrichedContext.research_domains || [],\n    methodologies: enrichedContext.methodologies || [],\n    themes: enrichedContext.themes || [],\n    keywords: enrichedContext.keywords || []\n  },\n  \n  // ===== ACHIEVEMENT METRICS =====\n  achievement_scale: {\n    h_index: metrics.h_index || 0,\n    total_citations: metrics.total_citations || 0,\n    publication_count: metrics.publication_count || 0,\n    patent_count: metrics.patent_count || 0,\n    grant_count: metrics.grant_count || grantsForDense.length || 0\n  },\n  \n  // Achievement indicators from LLM\n  achievement_indicators: {\n    research_impact: achievementIndicators.research_impact || 'Unknown',\n    collaboration_breadth: achievementIndicators.collaboration_breadth || 'Unknown',\n    funding_track_record: achievementIndicators.funding_track_record || 'Unknown'\n  },\n  \n  // Network\n  collaborator_count: metrics.collaborator_count || 0,\n  \n  // Equipment expertise (if available)\n  equipment_expertise: enrichment.equipment_expertise || [],\n  \n  // Data quality\n  data_completeness: enrichedObject.data_completeness || 0,\n  data_quality_flags: enrichedObject.data_quality_flags || []\n};\n\n// ✅ STEP 4: Generate dense_text from denseView\nconst denseText = formatDenseText(denseView);\n\n// Validate dense view token count (spec: 1200-2000 tokens)\nconst denseTokens = estimateTokens(JSON.stringify(denseView));\nif (denseTokens < 1200) {\n  console.warn(`Dense view tokens (${denseTokens}) below spec minimum 1200`);\n}\nif (denseTokens > 2000) {\n  console.warn(`Dense view tokens (${denseTokens}) above spec maximum 2000`);\n}\n\n// ===== EMBEDDING VIEW (updated to use new structure) =====\nconst embeddingText = `\nResearcher: ${enrichedObject.name}\nInstitution: ${enrichedObject.institution || 'Unknown'}\nCareer Stage: ${enrichedContext.career_stage || 'unknown'}\n\nResearch Domains: ${(enrichedContext.research_domains || []).join(', ')}\n\nCore Methodologies: ${(enrichedContext.methodologies || []).join(', ')}\n\nResearch Themes: ${(enrichedContext.themes || []).join(', ')}\n\nKeywords: ${(enrichedContext.keywords || []).concat(enrichedObject.keywords || []).slice(0, 20).join(', ')}\n\nResearch Interests: ${researchInterestsForDense.join(', ')}\n\nResearch Impact: H-index ${metrics.h_index || 0}, ${metrics.total_citations || 0} citations, ${metrics.publication_count || 0} publications\n\nPatents: ${metrics.patent_count || 0} patents\n\nGrants: ${grantsForDense.length} grants including ${grantsForDense.slice(0, 3).map(g => g.title).join(', ')}\n\nCollaboration: ${achievementIndicators.collaboration_breadth || 'Unknown'} collaboration network with ${metrics.collaborator_count || 0} collaborators\n\nEquipment Expertise: ${(enrichment.equipment_expertise || []).join(', ')}\n`.trim();\n\nconst embeddingTokens = estimateTokens(embeddingText);\nif (embeddingTokens < 300) {\n  console.warn(`Embedding view tokens (${embeddingTokens}) below spec minimum 300`);\n}\nif (embeddingTokens > 800) {\n  console.warn(`Embedding view tokens (${embeddingTokens}) above spec maximum 800`);\n}\n\nconst embeddingView = {\n  text: embeddingText,\n  token_count: embeddingTokens,\n  vector: null  // Will be generated in next node\n};\n\n// === GRAPH VIEW (unchanged) ===\nconst graphView = {\n  relationships: enrichedObject.graph_relationships || []\n};\n\n// === FAT OBJECT (ICF Structure) ===\nconst fatObject = {\n  asset_id: fatObjectId,\n  asset_type: 'researcher',                    // ✅ STEP 1: Fixed from 'object'\n  display_name: displayName,                   // ✅ STEP 2: Added\n  given_name: givenName,                       // ✅ STEP 2: Added\n  family_name: familyName,                     // ✅ STEP 2: Added\n  version: version,\n  dense_text: denseText,                       // ✅ STEP 4: Added\n  creation_mode: isRefabrication ? 'refabrication' : 'initial_ingest',  // ✅ STEP 7: Added\n  \n  // ❌ STEP 17: Removed 'status' property - OBJECT-5 will set it\n  // ❌ STEP 15: Removed 'object_type' property - redundant\n  \n  // Three canonical views\n  views: {\n    dense: denseView,\n    embedding: embeddingView,\n    graph: graphView\n  },\n  \n  // ✅ STEP 12: Provenance with renamed properties\n  provenance: {\n    source_thin_object: thinObjectId,          // ✅ Renamed from fabricated_from\n    enrichment_timestamp: new Date().toISOString(),  // ✅ Renamed from fabricated_at\n    enriched_by: isRefabrication ? 'gen2_object_refabrication_v3.2' : 'gen2_object_fabrication_v3.2',  // ✅ Renamed from fabricated_by\n    enrichment_model: 'gpt-4o-2024-11-20',\n    embedding_model: 'text-embedding-3-large',\n    embedding_dimensions: 3072,  // Per Definition Card spec\n    data_sources: enrichedObject.source_metadata?.sources_scraped || ['orcid', 'scopus', 'scholar', 'university', 'patents'],\n    scrape_timestamps: enrichedObject.source_metadata?.scrape_timestamps || {},\n    field_hashes: enrichedObject.source_metadata?.field_hashes || {},\n    checksum: computeChecksum(denseView),\n    \n    // Refabrication metadata\n    is_refabrication: isRefabrication,\n    previous_version: previousVersion,\n    refabrication_reason: refabricationReason,\n    changed_fields: changedFields,\n    source_queue_entry_id: sourceQueueEntryId,\n    \n    // Token counts for validation\n    dense_view_tokens: denseTokens,\n    embedding_view_tokens: embeddingTokens\n  },\n  \n  // Execution context for downstream nodes\n  execution_context: executionContext\n};\n\nreturn [{ json: fatObject }];"
       },
-      "id": "cbf4ad9e-fa7a-414e-ac15-757372811232",
+      "id": "a52a4bd6-ea26-44e0-a7a5-ad96f547150e",
       "name": "Pass 4: Generate ICF",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
@@ -515,7 +515,7 @@
           }
         }
       },
-      "id": "55c2c13d-27b9-4f86-82e0-3f05f069aca7",
+      "id": "20c93e83-2d1e-4910-8e0d-c9740ddf01ef",
       "name": "Generate Embedding",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
@@ -534,7 +534,7 @@
       "parameters": {
         "functionCode": "// Merge Embedding\n// MODIFIED: Preserves execution_context\n\n// Get FAT object from Pass 4 via node reference\nconst fatObject = $('Pass 4: Generate ICF').first().json;\nconst executionContext = fatObject.execution_context;\n\n// Get embedding response from Generate Embedding (direct input)\nconst embeddingResponse = $input.first().json;\n\n// Extract the embedding vector\nconst embeddingVector = embeddingResponse.data[0].embedding;\n\n// Add embedding to FAT object\nfatObject.views.embedding.vector = embeddingVector;\nfatObject.views.embedding.model = 'text-embedding-3-large';\nfatObject.views.embedding.dimensions = 3072;\n\n// Preserve execution context\nfatObject.execution_context = executionContext;\n\nreturn [{ json: fatObject }];"
       },
-      "id": "4171a452-b06d-45e0-a749-4239dada829e",
+      "id": "dcf3937b-710b-493a-8baf-5cb36b2c1d5a",
       "name": "Merge Embedding",
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
@@ -545,7 +545,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Prepare Store Neo4j - FIXED: Stores enrichment, icf, views\nconst fatObject = $input.first().json;\nconst executionContext = fatObject.execution_context || {};\n\nconst statement = `\n  // Create or update FATObject\n  MERGE (fat:FATObject {asset_id: $asset_id})\n  SET fat.name = $name,\n      fat.orcid = $orcid,\n      fat.institution = $institution,\n      fat.status = 'fabricated',\n      fat.fabricated_at = timestamp(),\n      fat.version = $version,\n      fat.data_completeness = $data_completeness,\n      \n      // FIXED: Store enrichment and views\n      fat.enrichment = $enrichment,\n      fat.icf = $icf,\n      fat.views = $views,\n      fat.dense_view = $dense_view,\n      fat.embedding_view = $embedding_view,\n      fat.graph_view = $graph_view,\n      fat.provenance = $provenance\n  \n  // Link to ThinObject\n  WITH fat\n  MATCH (thin:ThinObject {asset_id: $thin_object_id})\n  MERGE (fat)-[:FABRICATED_FROM]->(thin)\n  SET thin.status = 'fabricated',\n      thin.fabricated_at = timestamp()\n  \n  RETURN fat.asset_id AS created_asset_id\n`;\n\nconst parameters = {\n  asset_id: fatObject.asset_id,\n  thin_object_id: fatObject.provenance.fabricated_from,\n  name: fatObject.views.dense.name,\n  orcid: fatObject.views.dense.orcid || null,\n  institution: fatObject.views.dense.institution || null,\n  version: fatObject.version,\n  data_completeness: fatObject.views.dense.data_completeness,\n  \n  // FIXED: Include all data\n  enrichment: JSON.stringify(fatObject.views.dense.enriched_context || {}),\n  icf: JSON.stringify(fatObject.views || {}),\n  views: JSON.stringify(fatObject.views || {}),\n  dense_view: JSON.stringify(fatObject.views.dense),\n  embedding_view: JSON.stringify({\n    text: fatObject.views.embedding.text,\n    token_count: fatObject.views.embedding.token_count\n  }),\n  graph_view: JSON.stringify(fatObject.views.graph),\n  provenance: JSON.stringify(fatObject.provenance)\n};\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: statement,\n      parameters: parameters\n    },\n    fat_object: fatObject,\n    execution_context: executionContext\n  }\n}];"
+        "jsCode": "// Prepare Store Neo4j - Updated for Schema v1.5 Compliance\nconst fatObject = $input.first().json;\nconst executionContext = fatObject.execution_context || {};\n\nconst statement = `\n  // Create or update FATObject with Researcher label\n  MERGE (fat:FATObject:Researcher {asset_id: $asset_id})\n  SET fat.asset_type = $asset_type, \n      fat.display_name = $display_name,\n      fat.given_name = $given_name,\n      fat.family_name = $family_name,\n      fat.orcid_id = $orcid_id,\n      fat.dense_text = $dense_text,\n      fat.creation_mode = $creation_mode,\n      fat.version = $version,\n      fat.provenance = $provenance,\n      fat.status = $status,\n      fat.updated_at = datetime()\n  \n  // Link to ThinObject\n  WITH fat\n  MATCH (thin:ThinObject {asset_id: $thin_object_id})\n  MERGE (fat)-[:FABRICATED_FROM]->(thin)\n  \n  // Link to Organisation\n  WITH fat\n  MERGE (org:Organisation:FATObject {asset_id: $org_asset_id})\n  ON CREATE SET org.display_name = $institution_name\n  MERGE (fat)-[:AFFILIATED_WITH]->(org)\n  \n  RETURN fat.asset_id AS created_asset_id\n`;\n\nconst parameters = {\n  asset_id: fatObject.asset_id,\n  asset_type: fatObject.asset_type,\n  thin_object_id: fatObject.provenance.source_thin_object,\n  display_name: fatObject.display_name,\n  given_name: fatObject.given_name,\n  family_name: fatObject.family_name,\n  orcid_id: fatObject.views.dense.orcid || null,\n  dense_text: fatObject.dense_text,\n  creation_mode: fatObject.creation_mode,\n  version: fatObject.version,\n  provenance: JSON.stringify(fatObject.provenance),\n  status: \"fabricated\",\n  \n  // Organisation details\n  org_asset_id: 'org:' + (fatObject.views.dense.institution || 'unknown').toLowerCase().replace(/\\s+/g, '-'),\n  institution_name: fatObject.views.dense.institution || 'Unknown Institution'\n};\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: statement,\n      parameters: parameters\n    },\n    fat_object: fatObject,\n    execution_context: executionContext\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -553,13 +553,13 @@
         224,
         1360
       ],
-      "id": "438971de-9df0-423f-ad1b-2cc6cdf637a0",
+      "id": "00d8ec43-396e-4ea8-bfb2-c9f0dbf89ec8",
       "name": "Prepare Store Neo4j"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendHeaders": true,
@@ -582,7 +582,7 @@
         416,
         1360
       ],
-      "id": "0a37e2a9-cbfd-4c9e-ac46-cc19f5638b6a",
+      "id": "1404b838-4d45-41e7-8f28-2a71e7c7a525",
       "name": "Store in Neo4j",
       "credentials": {
         "httpBasicAuth": {
@@ -601,13 +601,13 @@
         656,
         1360
       ],
-      "id": "122c35a1-5334-4c87-8aba-9dbfe566f4b8",
+      "id": "6571896e-a8e7-4663-907e-8c80d3fe42cf",
       "name": "Prepare Qdrant Payload"
     },
     {
       "parameters": {
         "method": "PUT",
-        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researchers_v1/points?wait=true",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_researcher_v1/points?wait=true",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "qdrantRestApi",
         "sendHeaders": true,
@@ -630,7 +630,7 @@
         896,
         1360
       ],
-      "id": "288f9fbd-d3ad-40d2-a75b-3bc35e0886b1",
+      "id": "26b5b785-5a0b-4bb6-9682-57d396647652",
       "name": "Store in Qdrant",
       "credentials": {
         "qdrantRestApi": {
@@ -649,7 +649,7 @@
         1136,
         1360
       ],
-      "id": "c7147eb2-475d-4969-864c-7fbc5887d49e",
+      "id": "f03e39db-a1fe-40e1-a8df-7300aac817f9",
       "name": "Prepare PostgreSQL Payload"
     },
     {
@@ -684,7 +684,7 @@
         1376,
         1360
       ],
-      "id": "51b29f08-dbcf-4751-9ce3-cdf83722e714",
+      "id": "ce01c360-6d37-4040-aabe-c25b89f09aaa",
       "name": "Store in Supabase(Postgre)",
       "credentials": {
         "qdrantRestApi": {
@@ -704,24 +704,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
-        -1264
+        560,
+        -624
       ],
-      "id": "8b8bc18e-a90b-49a7-86b2-b1d0d7831462",
+      "id": "cd365a97-53f7-4cf4-b890-52f2f89ffe6b",
       "name": "Prepare Fetch ThinObjects (colin)"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Prepare Fetch ThinObjects - Normal Mode\n// Fetches raw ThinObjects ready for initial fabrication\n// UPDATED: Now fetches direct fields stored by OBJECT-1 v3.x\n\nconst executionContext = $input.first().json;\nconst batchSize = 30;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject)\n        WHERE thin.status = $status\n          AND thin.object_type = $object_type\n          AND NOT EXISTS((thin)<-[:FABRICATED_FROM]-(:FATObject))\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          \n          // NEW: Direct fields from OBJECT-1 v3.x\n          biography: thin.biography,\n          research_interests: thin.research_interests,\n          current_projects: thin.current_projects,\n          expertise_keywords: thin.expertise_keywords,\n          collaborators: thin.collaborators,\n          keywords: thin.keywords,\n          publications: thin.publications,\n          patents: thin.patents,\n          affiliations: thin.affiliations,\n          grants: thin.grants,\n          metrics: thin.metrics,\n          data_quality_flags: thin.data_quality_flags,\n          data_completeness: thin.data_completeness,\n          field_hashes: thin.field_hashes,\n          \n          // Legacy JSON fields (backward compatibility)\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        ORDER BY thin.created_at ASC\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"raw\",\n        object_type: \"researcher\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1184,
-        -32
-      ],
-      "id": "a2a28673-cdcf-4335-93ac-20f5e3e6c6d5",
-      "name": "Prepare Fetch ThinObjects"
     },
     {
       "parameters": {
@@ -742,7 +729,7 @@
         640,
         656
       ],
-      "id": "effd54ed-af5d-4375-978a-f23c8a6eeed2",
+      "id": "a3ba3b00-6944-438d-8cde-1f98f1c05568",
       "name": "Pass 2: LLM Enrichment"
     },
     {
@@ -756,7 +743,7 @@
           ]
         }
       },
-      "id": "b59c6417-cd5f-4a57-bd9d-814bc5c18189",
+      "id": "cbe25734-c3ed-4bb3-bf42-757cd2a37d88",
       "name": "Schedule Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
@@ -778,7 +765,7 @@
         -336
       ],
       "typeVersion": 1,
-      "id": "2d3ee27f-456b-4c33-a873-bfb89b803afe",
+      "id": "56a14392-3858-4d84-8385-fda052d02a10",
       "name": "Sticky Note"
     },
     {
@@ -794,7 +781,7 @@
         416
       ],
       "typeVersion": 1,
-      "id": "aebc8d9b-0569-433a-a933-d54264efbef4",
+      "id": "3c76722a-9668-48af-abb4-88437017534d",
       "name": "Sticky Note1"
     },
     {
@@ -809,8 +796,21 @@
         1120
       ],
       "typeVersion": 1,
-      "id": "e5cb668b-fc76-472b-b8dd-4ca369bb3545",
+      "id": "ca524589-1f60-48e8-af5f-483c81bea966",
       "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Fetch ThinObjects - Normal Mode\n// Fetches raw ThinObjects ready for initial fabrication\n// UPDATED: Now fetches direct fields stored by OBJECT-1 v3.x\n\nconst executionContext = $input.first().json;\nconst batchSize = 30;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject)\n        WHERE thin.status = $status\n          AND thin.object_type = $object_type\n          AND NOT EXISTS((thin)<-[:FABRICATED_FROM]-(:FATObject))\n        RETURN {\n          object_id: thin.asset_id,\n          name: thin.name,\n          orcid: thin.orcid,\n          email: thin.email,\n          institution: thin.institution,\n          \n          // NEW: Direct fields from OBJECT-1 v3.x\n          biography: thin.biography,\n          research_interests: thin.research_interests,\n          current_projects: thin.current_projects,\n          expertise_keywords: thin.expertise_keywords,\n          collaborators: thin.collaborators,\n          keywords: thin.keywords,\n          publications: thin.publications,\n          patents: thin.patents,\n          affiliations: thin.affiliations,\n          grants: thin.grants,\n          metrics: thin.metrics,\n          data_quality_flags: thin.data_quality_flags,\n          data_completeness: thin.data_completeness,\n          field_hashes: thin.field_hashes,\n          \n          // Legacy JSON fields (backward compatibility)\n          orcid_data: thin.orcid_data,\n          scopus_data: thin.scopus_data,\n          scholar_data: thin.scholar_data,\n          university_data: thin.university_data,\n          patents_data: thin.patents_data,\n          source_metadata: thin.source_metadata,\n          created_at: thin.created_at\n        } as thin_object\n        ORDER BY thin.created_at ASC\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"raw\",\n        object_type: \"researcher\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -64
+      ],
+      "id": "5bbc0799-2a16-459c-a3b4-70ccf8eca934",
+      "name": "Prepare Fetch ThinObjects"
     }
   ],
   "pinData": {},
@@ -1165,17 +1165,6 @@
         []
       ]
     },
-    "Prepare Fetch ThinObjects": {
-      "main": [
-        [
-          {
-            "node": "Fetch ThinObjects",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Pass 2: LLM Enrichment": {
       "main": [
         [
@@ -1197,18 +1186,29 @@
           }
         ]
       ]
+    },
+    "Prepare Fetch ThinObjects": {
+      "main": [
+        [
+          {
+            "node": "Fetch ThinObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "53a5e4bb-c305-4ac5-af83-a70db31c4359",
+  "versionId": "95ef7419-d9b2-4fdc-8ba7-8c6f05a53935",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },
-  "id": "teZrSkEFhH8Ig7Ii",
+  "id": "UOqzYNcjx4gDUJCM",
   "tags": [
     {
       "updatedAt": "2025-12-18T21:22:51.435Z",

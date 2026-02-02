@@ -1,12 +1,12 @@
 {
-  "name": "SYSTEM-2_CRE_Gen4",
+  "name": "SYSTEM-2 FAT Constraints (CF1-CF10, CF12)",
   "nodes": [
     {
       "parameters": {},
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -320,
+        -384,
         416
       ],
       "id": "724b9c0a-689c-425b-92b4-903026ccb7cb",
@@ -779,7 +779,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "9fc2500b-32bb-43ec-9a50-d1b86d0ad349",
+  "versionId": "94919526-65af-45a0-b736-8299fe40276c",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

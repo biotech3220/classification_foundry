@@ -1,5 +1,5 @@
 {
-  "name": "INSTANCE-1_v3.3",
+  "name": "SYSTEM-1 FAT Standard B (Domain Hub)",
   "nodes": [
     {
       "parameters": {
@@ -1240,7 +1240,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "25da4760-bc89-44b9-9176-3a0f1c116e59",
+  "versionId": "b4ab2d45-f4db-4b18-8160-ac0e40a141fc",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"

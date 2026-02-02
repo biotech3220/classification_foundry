@@ -6,8 +6,8 @@
         "rule": {
           "interval": [
             {
-              "field": "cronExpression",
-              "expression": "0 * * * *"
+              "field": "months",
+              "monthsInterval": 3
             }
           ]
         }
@@ -748,11 +748,11 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "f839326c-fb3f-45f2-9168-4589c653e03a",
+  "versionId": "9040fdb2-54d7-430d-82c4-3e64bbb41e51",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

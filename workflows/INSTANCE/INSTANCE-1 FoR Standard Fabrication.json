@@ -1,5 +1,5 @@
 {
-  "name": "SYSTEM-1_v3.2",
+  "name": "INSTANCE-1 FoR Standard Fabrication",
   "nodes": [
     {
       "parameters": {
@@ -20,15 +20,15 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -3216,
-        -144
+        -2432,
+        80
       ],
       "id": "b256ed46-2ef9-4b87-b541-f894e56b3db3",
       "name": "Start Field Enrichment"
     },
     {
       "parameters": {
-        "jsCode": "// Node: Prepare Fetch Thin Standards\nconst batchSize = 20;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR)\n        WHERE s.status = $status\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          standard_version: s.standard_version,\n          provenance: s.provenance,\n          level: s.level\n        } as standard_data\n        ORDER BY s.code\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"thin\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+        "jsCode": "// Node: Prepare Fetch Thin Standards\nconst batchSize = 100;\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: `\n        MATCH (s:Standard:FoR)\n        WHERE s.status = $status\n        RETURN {\n          asset_id: s.asset_id,\n          code: s.code,\n          name: s.name,\n          standard_version: s.standard_version,\n          provenance: s.provenance,\n          level: s.level\n        } as standard_data\n        ORDER BY s.code\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"thin\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -822,7 +822,8 @@
         "rule": {
           "interval": [
             {
-              "field": "minutes"
+              "field": "minutes",
+              "minutesInterval": 1
             }
           ]
         }
@@ -830,8 +831,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -2448,
-        80
+        -2656,
+        -112
       ],
       "id": "c4c9ddca-18b8-4472-90f3-ea3ba2222a04",
       "name": "Schedule Trigger"
@@ -1310,22 +1311,146 @@
       ],
       "id": "42c5b029-c335-4472-b384-a7b491574fae",
       "name": "Prepare: Count Standards Query"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Qdrant Scroll - get ALL points\nreturn [{\n  json: {\n    scroll_payload: {\n      limit: 2500,\n      with_payload: true,\n      with_vectors: false\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        1888
+      ],
+      "id": "54362209-ec8e-4a39-b346-5abdf80cf3f9",
+      "name": "Prepare Qdrant Scroll"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_anzsrc1_for_2020/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.scroll_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        1888
+      ],
+      "id": "d708005b-8a81-41ea-9c2d-0a2e35642fef",
+      "name": "Scroll Qdrant Collection",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Qdrant and create THIN standard structure\nconst response = $input.first().json;\nconst points = response.result?.points || [];\n\nconsole.log(`Retrieved ${points.length} points from Qdrant`);\n\nif (points.length === 0) {\n  throw new Error('No points found in Qdrant collection!');\n}\n\n// Transform to thin standards format\nconst thinStandards = points.map(point => {\n  const p = point.payload;\n  \n  // Determine level from code length\n  const codeStr = String(p.code);\n  let level = 'field';\n  if (codeStr.length === 2) level = 'division';\n  else if (codeStr.length === 4) level = 'group';\n  else if (codeStr.length === 6) level = 'field';\n  \n  return {\n    asset_id: p.asset_id,\n    code: parseInt(p.code),\n    name: p.name,\n    level: p.level || level,\n    standard_version: p.standard_version || 'ANZSRC_FoR_2020',\n    provenance: JSON.stringify({\n      source: 'ANZSRC_FoR_2020',\n      created_at: p.fabricated_at || new Date().toISOString(),\n      ingestion_method: 'qdrant_recovery'\n    })\n  };\n});\n\nconsole.log(`Prepared ${thinStandards.length} thin standards`);\nconsole.log('Sample:', JSON.stringify(thinStandards[0], null, 2));\n\nreturn [{\n  json: {\n    total: thinStandards.length,\n    standards: thinStandards\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        1888
+      ],
+      "id": "c9886364-025e-4ef7-a0e0-423e38bb3d95",
+      "name": "Parse & Create Thin Standards"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Neo4j MERGE for thin standards\nconst input = $input.first().json;\nconst standards = input.standards;\n\nconsole.log(`Creating ${standards.length} thin standards in Neo4j`);\n\nconst neo4jPayload = {\n  statement: `\n    UNWIND $standards AS s\n    MERGE (std:Standard:FoR {asset_id: s.asset_id})\n    SET std.code = s.code,\n        std.name = s.name,\n        std.level = s.level,\n        std.standard_version = s.standard_version,\n        std.provenance = s.provenance,\n        std.status = 'thin',\n        std.created_at = coalesce(std.created_at, datetime()),\n        std.updated_at = datetime()\n    RETURN count(std) as created\n  `,\n  parameters: {\n    standards: standards\n  }\n};\n\nreturn [{\n  json: {\n    neo4j_payload: neo4jPayload,\n    total: standards.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        1888
+      ],
+      "id": "5794c547-b49b-48f2-9eb1-1eba6a33b6aa",
+      "name": "Prepare Neo4j MERGE (Thin)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1056,
+        1888
+      ],
+      "id": "d1853e84-cceb-4319-ac4e-2b787a9fee6a",
+      "name": "Execute Neo4j MERGE",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify and summarize\nconst response = $input.first().json;\nconst prepNode = $('Prepare Neo4j MERGE (Thin)').first().json;\n\nconst resultWrapper = Array.isArray(response) ? response[0] : response;\n\nif (resultWrapper?.errors && resultWrapper.errors.length > 0) {\n  throw new Error(`Neo4j error: ${resultWrapper.errors[0].message}`);\n}\n\nconst created = resultWrapper?.data?.values?.[0]?.[0] || 0;\n\nreturn [{\n  json: {\n    status: 'SUCCESS',\n    message: 'Thin standards created - ready for SYSTEM-1 fabrication',\n    standards_created: created,\n    total_attempted: prepNode.total,\n    next_step: 'Run SYSTEM-1 to fabricate these thin standards',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        1888
+      ],
+      "id": "1016f8d4-c6b1-4dde-aa87-381f6fb0ae5b",
+      "name": "Verify Recovery"
     }
   ],
   "pinData": {
     "Schedule Trigger": [
       {
         "json": {
-          "timestamp": "2025-12-19T08:50:50.004+11:00",
-          "Readable date": "December 19th 2025, 8:50:50 am",
-          "Readable time": "8:50:50 am",
-          "Day of week": "Friday",
-          "Year": "2025",
-          "Month": "December",
-          "Day of month": "19",
-          "Hour": "08",
-          "Minute": "50",
-          "Second": "50",
+          "timestamp": "2026-01-17T22:55:10.003+11:00",
+          "Readable date": "January 17th 2026, 10:55:10 pm",
+          "Readable time": "10:55:10 pm",
+          "Day of week": "Saturday",
+          "Year": "2026",
+          "Month": "January",
+          "Day of month": "17",
+          "Hour": "22",
+          "Minute": "55",
+          "Second": "10",
           "Timezone": "Australia/Melbourne (UTC+11:00)"
         }
       }
@@ -1345,7 +1470,13 @@
     },
     "Start Field Enrichment": {
       "main": [
-        []
+        [
+          {
+            "node": "Prepare Neo4j Query for Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Fetch Thin Standards": {
@@ -1756,31 +1887,13 @@
     },
     "Check for Errors": {
       "main": [
-        [
-          {
-            "node": "Send Error Notification",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Send Success Notification",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [],
+        []
       ]
     },
     "Schedule Trigger": {
       "main": [
-        [
-          {
-            "node": "Prepare Neo4j Query for Standards",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "HTTP Request - Generate Embedding": {
@@ -1963,13 +2076,68 @@
           }
         ]
       ]
+    },
+    "Prepare Qdrant Scroll": {
+      "main": [
+        [
+          {
+            "node": "Scroll Qdrant Collection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scroll Qdrant Collection": {
+      "main": [
+        [
+          {
+            "node": "Parse & Create Thin Standards",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Create Thin Standards": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j MERGE (Thin)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j MERGE (Thin)": {
+      "main": [
+        [
+          {
+            "node": "Execute Neo4j MERGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Neo4j MERGE": {
+      "main": [
+        [
+          {
+            "node": "Verify Recovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "f81220eb-e495-4e4e-a33f-aa34fc505b1e",
+  "versionId": "ee05b930-7a75-42cd-82eb-7c5457b6659b",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"

@@ -6,8 +6,8 @@
         "rule": {
           "interval": [
             {
-              "field": "hours",
-              "hoursInterval": 4
+              "field": "months",
+              "monthsInterval": 3
             }
           ]
         }
@@ -378,16 +378,16 @@
     "Schedule Trigger": [
       {
         "json": {
-          "timestamp": "2025-11-28T01:04:27.004+11:00",
-          "Readable date": "November 28th 2025, 1:04:27 am",
-          "Readable time": "1:04:27 am",
-          "Day of week": "Friday",
+          "timestamp": "2025-12-24T04:00:16.008+11:00",
+          "Readable date": "December 24th 2025, 4:00:16 am",
+          "Readable time": "4:00:16 am",
+          "Day of week": "Wednesday",
           "Year": "2025",
-          "Month": "November",
-          "Day of month": "28",
-          "Hour": "01",
-          "Minute": "04",
-          "Second": "27",
+          "Month": "December",
+          "Day of month": "24",
+          "Hour": "04",
+          "Minute": "00",
+          "Second": "16",
           "Timezone": "Australia/Melbourne (UTC+11:00)"
         }
       }
@@ -577,7 +577,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "3751fa0b-340b-4a8a-bff5-f3e5fe466b23",
+  "versionId": "0fe7e214-4c97-4b73-b0a7-e7735a7c1118",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

@@ -6,7 +6,8 @@
         "rule": {
           "interval": [
             {
-              "field": "seconds"
+              "field": "months",
+              "monthsInterval": 3
             }
           ]
         }
@@ -685,7 +686,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "91147035-c5b1-4768-8b04-ad88583f4197",
+  "versionId": "0f668190-39d0-4ff4-943a-22428250b6cc",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

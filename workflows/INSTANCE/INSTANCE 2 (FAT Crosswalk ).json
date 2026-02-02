@@ -1,5 +1,5 @@
 {
-  "name": "INSTANCE 2 (Crosswalk Fabrication)",
+  "name": "INSTANCE 2 (FAT Crosswalk )",
   "nodes": [
     {
       "parameters": {
@@ -726,8 +726,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [
-        -512,
-        -32
+        -928,
+        -112
       ]
     },
     {
@@ -756,7 +756,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "position": [
         -640,
-        432
+        400
       ],
       "typeVersion": 1,
       "id": "57de0ff4-e9e4-4be2-9726-e73e0840adf0",
@@ -792,6 +792,17 @@
       "typeVersion": 1,
       "id": "526454da-a82b-4854-ac7c-9a2c4fd08639",
       "name": "Sticky Note3"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        -32
+      ],
+      "id": "3020ee64-afda-4396-8e43-3b0657b39ee5",
+      "name": "Start Field Enrichment"
     }
   ],
   "pinData": {
@@ -1160,6 +1171,11 @@
     },
     "Schedule Trigger": {
       "main": [
+        []
+      ]
+    },
+    "Start Field Enrichment": {
+      "main": [
         [
           {
             "node": "Prepare Fetch Standard A Query",
@@ -1174,7 +1190,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "a725a8c9-61b0-4eb4-83fb-f1cd8a954393",
+  "versionId": "75ab7fe3-997c-4847-9b5d-cad1570eab55",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
