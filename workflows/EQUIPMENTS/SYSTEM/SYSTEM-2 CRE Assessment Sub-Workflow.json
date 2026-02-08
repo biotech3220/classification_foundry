@@ -1,0 +1,149 @@
+{
+  "name": "SYSTEM-2 CRE Assessment Sub-Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "a77e98b5-04e6-4587-9d2d-c96a58485fc3",
+      "typeVersion": 1.1,
+      "name": "SYSTEM-2_CRE_Assessment",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -32,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\n// Validate required fields\nif (!input.asset_id) {\n  throw new Error(\"Missing required field: asset_id\");\n}\n\nif (!input.entity_data) {\n  throw new Error(\"Missing required field: entity_data\");\n}\n\n// Detect object type\nconst objectType = input.object_type || input.entity_data?.object_type || 'unknown';\nconst isResearcher = objectType === 'researcher' || input.asset_id?.includes('researcher');\nconst isEquipment = objectType === 'equipment' || input.asset_id?.includes('equipment');\n\n// Set defaults for optional fields — polymorphic across entity types\nconst validated = {\n  asset_id: input.asset_id,\n  object_type: objectType,\n  is_researcher: isResearcher,\n  is_equipment: isEquipment,\n  classification_confidence: input.classification_confidence || 0.5,\n  entity_data: {\n    // === Shared fields ===\n    trl_level: input.entity_data.trl_level || null,\n    certifications: input.entity_data.certifications || [],\n    inference_type: input.entity_data.inference_type || \"keyword\",\n    \n    // === Equipment-specific fields ===\n    scale: input.entity_data.scale || null,                          // CF2: bench, pilot, production\n    calibration_date: input.entity_data.calibration_date || null,    // CF4: ISO date string\n    maintenance_status: input.entity_data.maintenance_status || null, // CF4: current, overdue, unknown\n    operational_status: input.entity_data.operational_status || null, // CF4: operational, decommissioned\n    facility_region: input.entity_data.facility_region || null,      // CF6: country/region code\n    facility_id: input.entity_data.facility_id || null               // CF6: facility identifier\n  },\n  requirements: {\n    // === Shared requirements ===\n    required_trl: input.requirements?.required_trl || null,\n    required_certifications: input.requirements?.required_certifications || [],\n    \n    // === Equipment-specific requirements ===\n    required_scale: input.requirements?.required_scale || null,            // CF2: minimum scale\n    max_calibration_age_days: input.requirements?.max_calibration_age_days || 365,  // CF4: max days since calibration\n    allowed_regions: input.requirements?.allowed_regions || [],            // CF6: allowed regions\n    required_facility_types: input.requirements?.required_facility_types || [] // CF6: facility types\n  }\n};\n\nreturn [{\n  json: validated\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        -128
+      ],
+      "id": "7a0d304c-3a9a-4c7e-a923-6d2c76db02c8",
+      "name": "Validate Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\n// =============================================\n// POLYMORPHIC CONSTRAINT SELECTION\n// Select constraint families based on object type\n// Researcher: CF1, CF4, CF7, CF9, CF12\n// Equipment:  CF1, CF2, CF4, CF5, CF6\n// =============================================\n\nlet constraintFamilies;\n\nif (input.is_equipment) {\n  // Equipment constraints per equipment_instance_spec_v1.3 Section 3.2\n  constraintFamilies = ['CF1', 'CF2', 'CF4', 'CF5', 'CF6'];\n} else if (input.is_researcher) {\n  // Researcher constraints per researcher_instance_spec_v2.3\n  constraintFamilies = ['CF1', 'CF5', 'CF12'];\n} else {\n  // Fallback: fetch all potentially relevant constraints\n  constraintFamilies = ['CF1', 'CF2', 'CF4', 'CF5', 'CF6', 'CF7', 'CF9', 'CF12'];\n}\n\nconst cfList = constraintFamilies.map(cf => `'${cf}'`).join(', ');\n\nreturn [{\n  json: {\n    constraint_families_requested: constraintFamilies,\n    neo4j_payload: {\n      statement: `\n        MATCH (cf:ConstraintFamily)\n        WHERE cf.id IN [${cfList}]\n        RETURN cf.id AS family_id,\n               cf.gate_mode AS gate_mode,\n               cf.pass_condition AS pass_condition,\n               cf.pass_confidence AS pass_confidence,\n               cf.fail_confidence AS fail_confidence,\n               cf.fail_action AS fail_action\n      `,\n      parameters: {}\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -128
+      ],
+      "id": "bc47f7b8-d63f-4d39-acad-5278388211a0",
+      "name": "Create Fetch Constraints Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        -128
+      ],
+      "id": "39ce134d-1b18-4d8b-bde9-8b12be2b756b",
+      "name": "Fetch Constraints (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Validate Input').first().json;\nconst neo4jResult = $input.first().json;\n\n// Parse Neo4j response\nconst constraints = {};\nconst rows = neo4jResult.data?.values || [];\n\nfor (const row of rows) {\n  constraints[row[0]] = {\n    family_id: row[0],\n    gate_mode: row[1],\n    pass_condition: row[2],\n    pass_confidence: row[3],\n    fail_confidence: row[4],\n    fail_action: row[5]\n  };\n}\n\n// Initialize results\nconst constraint_results = {};\nconst blocking_failures = [];\nconst penalising_failures = [];\nlet requires_hitl = false;\nlet total_penalty = 0;\n\n// Helper: apply gate mode consequence\nfunction applyGateMode(cfId, gateMode) {\n  if (gateMode === 'block') {\n    blocking_failures.push(cfId);\n  } else if (gateMode === 'penalise') {\n    penalising_failures.push(cfId);\n    total_penalty += 0.05;\n  }\n}\n\n// Detect object type\nconst isResearcher = input.is_researcher;\nconst isEquipment = input.is_equipment;\n\n// =============================================\n// CF1 - Technology Readiness Level\n// Equipment: Assesses maturity (TRL 1-9)\n// Researcher: SKIP — TRL doesn't apply to people\n// =============================================\nif (isResearcher) {\n  constraint_results.CF1 = { \n    passed: true, \n    skipped: true, \n    reason: \"CF1 (TRL) not applicable to researchers\" \n  };\n} else if (constraints.CF1 && input.requirements.required_trl !== null) {\n  const entity_trl = input.entity_data.trl_level || 0;\n  const required_trl = input.requirements.required_trl;\n  \n  if (entity_trl >= required_trl) {\n    constraint_results.CF1 = {\n      passed: true,\n      entity_value: entity_trl,\n      required_value: required_trl\n    };\n  } else {\n    constraint_results.CF1 = {\n      passed: false,\n      entity_value: entity_trl,\n      required_value: required_trl,\n      reason: `TRL gap: required ${required_trl}, entity has ${entity_trl}`\n    };\n    applyGateMode('CF1', constraints.CF1.gate_mode);\n  }\n} else {\n  constraint_results.CF1 = { passed: true, skipped: true, reason: \"No TRL requirement\" };\n}\n\n// =============================================\n// CF2 - Scale Constraints (EQUIPMENT ONLY)\n// Validates bench/pilot/production alignment\n// =============================================\nif (isEquipment && constraints.CF2) {\n  const entityScale = (input.entity_data.scale || '').toLowerCase();\n  const requiredScale = (input.requirements.required_scale || '').toLowerCase();\n  \n  if (!requiredScale) {\n    constraint_results.CF2 = { \n      passed: true, \n      skipped: true, \n      reason: \"No scale requirement specified\" \n    };\n  } else if (!entityScale) {\n    // Scale unknown — flag for HITL but don't block\n    constraint_results.CF2 = {\n      passed: false,\n      entity_value: 'unknown',\n      required_value: requiredScale,\n      reason: `Equipment scale unknown, required: ${requiredScale}`\n    };\n    requires_hitl = true;\n    // Penalise rather than block when scale is unknown\n    penalising_failures.push('CF2');\n    total_penalty += 0.03;\n  } else {\n    // Scale hierarchy: bench < pilot < production\n    const scaleHierarchy = { 'bench': 1, 'lab': 1, 'pilot': 2, 'production': 3, 'industrial': 3 };\n    const entityLevel = scaleHierarchy[entityScale] || 0;\n    const requiredLevel = scaleHierarchy[requiredScale] || 0;\n    \n    if (entityLevel >= requiredLevel) {\n      constraint_results.CF2 = {\n        passed: true,\n        entity_value: entityScale,\n        entity_level: entityLevel,\n        required_value: requiredScale,\n        required_level: requiredLevel\n      };\n    } else {\n      constraint_results.CF2 = {\n        passed: false,\n        entity_value: entityScale,\n        entity_level: entityLevel,\n        required_value: requiredScale,\n        required_level: requiredLevel,\n        reason: `Scale mismatch: equipment is ${entityScale} (${entityLevel}), required ${requiredScale} (${requiredLevel})`\n      };\n      applyGateMode('CF2', constraints.CF2.gate_mode);\n    }\n  }\n} else if (isResearcher) {\n  constraint_results.CF2 = { \n    passed: true, \n    skipped: true, \n    reason: \"CF2 (Scale) not applicable to researchers\" \n  };\n} else if (!constraints.CF2) {\n  constraint_results.CF2 = { passed: true, skipped: true, reason: \"CF2 not loaded\" };\n}\n\n// =============================================\n// CF4 - Temporal Constraints (EQUIPMENT ONLY)\n// Calibration currency + maintenance status\n// =============================================\nif (isEquipment && constraints.CF4) {\n  const calibrationDate = input.entity_data.calibration_date;\n  const maintenanceStatus = (input.entity_data.maintenance_status || '').toLowerCase();\n  const operationalStatus = (input.entity_data.operational_status || '').toLowerCase();\n  const maxCalibrationAgeDays = input.requirements.max_calibration_age_days || 365;\n  \n  let cf4Passed = true;\n  let cf4Reasons = [];\n  \n  // Check 1: Operational status\n  if (operationalStatus === 'decommissioned') {\n    cf4Passed = false;\n    cf4Reasons.push('Equipment is decommissioned');\n  }\n  \n  // Check 2: Maintenance status\n  if (maintenanceStatus === 'overdue') {\n    cf4Passed = false;\n    cf4Reasons.push('Maintenance is overdue');\n  }\n  \n  // Check 3: Calibration currency\n  let calibrationAgeDays = null;\n  if (calibrationDate) {\n    const calDate = new Date(calibrationDate);\n    const now = new Date();\n    calibrationAgeDays = Math.floor((now - calDate) / (1000 * 60 * 60 * 24));\n    \n    if (calibrationAgeDays > maxCalibrationAgeDays) {\n      cf4Passed = false;\n      cf4Reasons.push(`Calibration expired: ${calibrationAgeDays} days ago (max ${maxCalibrationAgeDays})`);\n    }\n  }\n  \n  if (cf4Passed) {\n    constraint_results.CF4 = {\n      passed: true,\n      operational_status: operationalStatus || 'unknown',\n      maintenance_status: maintenanceStatus || 'unknown',\n      calibration_age_days: calibrationAgeDays\n    };\n  } else {\n    constraint_results.CF4 = {\n      passed: false,\n      operational_status: operationalStatus || 'unknown',\n      maintenance_status: maintenanceStatus || 'unknown',\n      calibration_age_days: calibrationAgeDays,\n      max_calibration_age_days: maxCalibrationAgeDays,\n      reasons: cf4Reasons,\n      reason: cf4Reasons.join('; ')\n    };\n    \n    // Decommissioned is blocking; other temporal issues penalise\n    if (operationalStatus === 'decommissioned') {\n      blocking_failures.push('CF4');\n    } else {\n      applyGateMode('CF4', constraints.CF4.gate_mode);\n    }\n  }\n} else if (isResearcher) {\n  constraint_results.CF4 = { \n    passed: true, \n    skipped: true, \n    reason: \"CF4 (Temporal) — researchers use different temporal constraints\" \n  };\n} else if (!constraints.CF4) {\n  constraint_results.CF4 = { passed: true, skipped: true, reason: \"CF4 not loaded\" };\n}\n\n// =============================================\n// CF5 - Regulatory Compliance\n// Shared: both equipment and researchers\n// Equipment: GMP, ISO, NATA certifications\n// Researcher: Ethics approvals, certifications\n// =============================================\nif (constraints.CF5 && input.requirements.required_certifications.length > 0) {\n  const entity_certs = input.entity_data.certifications || [];\n  const required_certs = input.requirements.required_certifications;\n  \n  const missing_certs = required_certs.filter(cert => !entity_certs.includes(cert));\n  \n  if (missing_certs.length === 0) {\n    constraint_results.CF5 = {\n      passed: true,\n      entity_certifications: entity_certs,\n      required_certifications: required_certs\n    };\n  } else {\n    constraint_results.CF5 = {\n      passed: false,\n      entity_certifications: entity_certs,\n      required_certifications: required_certs,\n      missing: missing_certs,\n      reason: `Missing certifications: ${missing_certs.join(', ')}`\n    };\n    applyGateMode('CF5', constraints.CF5.gate_mode);\n  }\n} else {\n  constraint_results.CF5 = { passed: true, skipped: true, reason: \"No certification requirement\" };\n}\n\n// =============================================\n// CF6 - Geographic Constraints (EQUIPMENT ONLY)\n// Inherited from hosting facility\n// =============================================\nif (isEquipment && constraints.CF6) {\n  const facilityRegion = (input.entity_data.facility_region || '').toUpperCase();\n  const facilityId = input.entity_data.facility_id || null;\n  const allowedRegions = (input.requirements.allowed_regions || []).map(r => r.toUpperCase());\n  \n  if (allowedRegions.length === 0) {\n    constraint_results.CF6 = { \n      passed: true, \n      skipped: true, \n      reason: \"No geographic restriction specified\" \n    };\n  } else if (!facilityRegion) {\n    // Region unknown — flag for HITL\n    constraint_results.CF6 = {\n      passed: false,\n      entity_region: 'unknown',\n      facility_id: facilityId,\n      allowed_regions: allowedRegions,\n      reason: 'Facility region unknown, cannot verify geographic compliance'\n    };\n    requires_hitl = true;\n    penalising_failures.push('CF6');\n    total_penalty += 0.02;\n  } else if (allowedRegions.includes(facilityRegion)) {\n    constraint_results.CF6 = {\n      passed: true,\n      entity_region: facilityRegion,\n      facility_id: facilityId,\n      allowed_regions: allowedRegions\n    };\n  } else {\n    constraint_results.CF6 = {\n      passed: false,\n      entity_region: facilityRegion,\n      facility_id: facilityId,\n      allowed_regions: allowedRegions,\n      reason: `Equipment in ${facilityRegion}, allowed regions: ${allowedRegions.join(', ')}`\n    };\n    applyGateMode('CF6', constraints.CF6.gate_mode);\n  }\n} else if (isResearcher) {\n  constraint_results.CF6 = { \n    passed: true, \n    skipped: true, \n    reason: \"CF6 (Geographic) not applicable to researchers\" \n  };\n} else if (!constraints.CF6) {\n  constraint_results.CF6 = { passed: true, skipped: true, reason: \"CF6 not loaded\" };\n}\n\n// =============================================\n// CF12 - Inference Confidence (RESEARCHER ONLY)\n// Not applicable to equipment\n// =============================================\nif (isResearcher && constraints.CF12) {\n  const inference_type = input.entity_data.inference_type || \"keyword\";\n  \n  const inference_map = {\n    \"explicit\": \"INF_EXPLICIT\",\n    \"publication\": \"INF_PUBLICATION\",\n    \"patent\": \"INF_PATENT\",\n    \"keyword\": \"INF_KEYWORD\",\n    \"crossdomain\": \"INF_CROSSDOMAIN\",\n    \"equipment\": \"INF_EQUIPMENT\",\n    \"collaboration\": \"INF_COLLABORATION\",\n    \"undisclosed\": \"INF_UNDISCLOSED\"\n  };\n  \n  const inference_code = inference_map[inference_type] || \"INF_KEYWORD\";\n  \n  if (inference_code === \"INF_EXPLICIT\") {\n    constraint_results.CF12 = {\n      passed: true,\n      inference_type: inference_code,\n      confidence_modifier: 1.0\n    };\n  } else {\n    constraint_results.CF12 = {\n      passed: false,\n      inference_type: inference_code,\n      confidence_modifier: 0.85,\n      reason: `Capability inferred via ${inference_type}, not explicitly declared`\n    };\n    requires_hitl = true;\n  }\n} else if (isEquipment) {\n  constraint_results.CF12 = { \n    passed: true, \n    skipped: true, \n    reason: \"CF12 (Inference Confidence) not applicable to equipment\" \n  };\n}\n\n// =============================================\n// CALCULATE FINAL MODIFIER\n// =============================================\nlet final_confidence_modifier = 0;\n\nif (blocking_failures.length > 0) {\n  // Blocking failure = confidence floors at 0\n  final_confidence_modifier = -input.classification_confidence;\n} else if (total_penalty > 0) {\n  final_confidence_modifier = -total_penalty;\n}\n\n// =============================================\n// RETURN CRE OUTPUT\n// =============================================\nreturn [{\n  json: {\n    asset_id: input.asset_id,\n    object_type: input.object_type,\n    constraint_families_assessed: Object.keys(constraint_results),\n    constraint_results: constraint_results,\n    blocking_failures: blocking_failures,\n    penalising_failures: penalising_failures,\n    requires_hitl: requires_hitl,\n    final_confidence_modifier: final_confidence_modifier\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        -128
+      ],
+      "id": "f4a3bc41-3bdc-49a4-a854-c22a68b0fcee",
+      "name": "Assess Constraints"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "SYSTEM-2_CRE_Assessment": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Create Fetch Constraints Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Fetch Constraints Query": {
+      "main": [
+        [
+          {
+            "node": "Fetch Constraints (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Constraints (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Assess Constraints",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "24289cc1-6665-4514-a174-d1b7205e3697",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "7wgDbsjDcjLdQNSJ",
+  "tags": []
+}

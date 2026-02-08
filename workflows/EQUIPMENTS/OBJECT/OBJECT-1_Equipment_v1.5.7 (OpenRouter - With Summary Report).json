@@ -1,0 +1,598 @@
+{
+  "name": "OBJECT-1_Equipment_v1.5.7 (OpenRouter - With Summary Report)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Build Perplexity Query\n// Purpose: Construct search query for equipment specifications\n// VERSION: v1.3 - NEW NODE\n// ============================================================\n\nconst item = $input.first().json;\n\n// Build search query optimized for technical specifications\nconst query = `\"${item.equipment_name}\" specifications energy consumption throughput capacity technical data sheet`;\n\n// Build the Perplexity API request body\nconst requestBody = {\n  model: 'sonar',\n  messages: [\n    {\n      role: 'system',\n      content: `You are a technical equipment specification extractor. Extract ONLY factual specifications from search results. Return a JSON object with these fields (use null if not found):\n- manufacturer: string (company name)\n- model: string (model number/name)\n- energy_consumption_kwh: number (power consumption in kWh or kW)\n- throughput_kg_hr: number (processing capacity in kg/hr)\n- throughput_L_hr: number (processing capacity in L/hr, for liquids)\n- water_usage_L_hr: number (water consumption in L/hr)\n- operating_temperature_min_c: number (minimum operating temp in Celsius)\n- operating_temperature_max_c: number (maximum operating temp in Celsius)\n- operating_pressure_bar: number (operating pressure in bar)\n- batch_capacity_kg: number (batch size in kg)\n- batch_capacity_L: number (batch size in litres)\n- dimensions_mm: string (L x W x H in mm)\n- weight_kg: number (equipment weight)\n- voltage: string (electrical requirements)\n- certifications: array of strings (CE, FDA, etc.)\n\nRespond ONLY with valid JSON. No explanations.`\n    },\n    {\n      role: 'user',\n      content: `Find technical specifications for: ${item.equipment_name}\\n\\nContext: This is laboratory/pilot-scale processing equipment at a biofactory. Extract manufacturer specs, energy consumption, throughput capacity, and operating parameters.`\n    }\n  ],\n  max_tokens: 1024,\n  temperature: 0.1,\n  return_citations: true\n};\n\nreturn [{\n  json: {\n    ...item,\n    perplexity_query: query,\n    perplexity_request: requestBody\n  }\n}];"
+      },
+      "id": "428664fb-795e-4c87-8702-b94272148f65",
+      "name": "Build Perplexity Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4992,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.perplexity.ai/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "perplexityApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.perplexity_request) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b8178663-53aa-4a4a-9adc-39c66ad88c22",
+      "name": "Perplexity API Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5232,
+        400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "EGYFqeyPSXZKoGqV",
+          "name": "Scopus InstToken"
+        },
+        "perplexityApi": {
+          "id": "siAXCQ9D4Y3aFyWX",
+          "name": "Perplexity account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Parse Perplexity Response\n// Purpose: Extract LCA parameters from Perplexity response\n// VERSION: v1.3 - NEW NODE\n// ============================================================\n\nconst item = $('Build Perplexity Query').first().json;\nconst response = $input.first().json;\n\n// Initialize LCA parameters with nulls\nlet lca_parameters = {\n  manufacturer: null,\n  model: null,\n  energy_consumption_kwh: null,\n  throughput_kg_hr: null,\n  throughput_L_hr: null,\n  water_usage_L_hr: null,\n  operating_temperature_min_c: null,\n  operating_temperature_max_c: null,\n  operating_pressure_bar: null,\n  batch_capacity_kg: null,\n  batch_capacity_L: null,\n  dimensions_mm: null,\n  weight_kg: null,\n  voltage: null,\n  certifications: []\n};\n\nlet perplexity_metadata = {\n  enriched: false,\n  enriched_at: null,\n  citations: [],\n  error: null\n};\n\ntry {\n  // Check if we got a valid response\n  if (response.choices && response.choices[0] && response.choices[0].message) {\n    const content = response.choices[0].message.content;\n    \n    // Try to parse JSON from response\n    // Handle potential markdown code blocks\n    let jsonStr = content;\n    if (content.includes('```json')) {\n      jsonStr = content.split('```json')[1].split('```')[0].trim();\n    } else if (content.includes('```')) {\n      jsonStr = content.split('```')[1].split('```')[0].trim();\n    }\n    \n    const parsed = JSON.parse(jsonStr);\n    \n    // Merge parsed values (only non-null)\n    for (const [key, value] of Object.entries(parsed)) {\n      if (value !== null && value !== undefined && value !== '' && lca_parameters.hasOwnProperty(key)) {\n        lca_parameters[key] = value;\n      }\n    }\n    \n    perplexity_metadata.enriched = true;\n    perplexity_metadata.enriched_at = new Date().toISOString();\n    \n    // Extract citations if available\n    if (response.citations) {\n      perplexity_metadata.citations = response.citations;\n    }\n    \n    console.log(`SUCCESS: Enriched ${item.equipment_id} - found manufacturer: ${lca_parameters.manufacturer}, energy: ${lca_parameters.energy_consumption_kwh}`);\n  } else {\n    perplexity_metadata.error = 'No valid response from Perplexity';\n    console.log(`WARN: No enrichment data for ${item.equipment_id}`);\n  }\n} catch (e) {\n  perplexity_metadata.error = e.message;\n  console.log(`ERROR: Failed to parse Perplexity response for ${item.equipment_id}: ${e.message}`);\n}\n\n// Count how many LCA fields were populated\nconst lcaFieldsPopulated = Object.entries(lca_parameters)\n  .filter(([k, v]) => v !== null && (Array.isArray(v) ? v.length > 0 : true))\n  .length;\n\nperplexity_metadata.fields_populated = lcaFieldsPopulated;\n\nreturn [{\n  json: {\n    equipment_id: item.equipment_id,\n    equipment_name: item.equipment_name,\n    // Use enriched values if found, otherwise keep original nulls\n    manufacturer: lca_parameters.manufacturer || item.manufacturer,\n    model: lca_parameters.model || item.model,\n    serial_number: item.serial_number,\n    location: item.location,\n    facility_id: item.facility_id,\n    operational_status: item.operational_status,\n    notes: item.notes,\n    reference_classification: item.reference_classification,\n    // NEW: LCA parameters for Blueprint execution\n    lca_parameters: lca_parameters,\n    perplexity_metadata: perplexity_metadata,\n    mode: item.mode\n  }\n}];"
+      },
+      "id": "7b9ec023-f5a9-4ae9-b851-24f1283140ce",
+      "name": "Parse Perplexity Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5472,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## OBJECT-1 Equipment: Data Acquisition (v1.3)\n**NEW: Perplexity LCA Enrichment**\n\nIngests 31 in-scope equipment items from Deakin BioFactory\n\n**Pipeline:**\n1. Load seed data + mapping\n2. Loop: Perplexity enrichment for LCA parameters\n3. Format & hash with LCA data\n4. Store ThinObject:Equipment in Neo4j\n5. Store record in Supabase\n\n**LCA Parameters Extracted:**\n- energy_consumption_kwh\n- throughput_kg_hr / throughput_L_hr\n- water_usage_L_hr\n- operating_temperature range\n- batch_capacity\n- manufacturer, model\n\nSkips EQ-033, EQ-034 (OUT_OF_SCOPE)",
+        "height": 960,
+        "width": 3272,
+        "color": 6
+      },
+      "id": "3ca6b159-ab6e-4b37-a2bf-b0540c463344",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3936,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Format & Hash Equipment Item\n// Combines: Format + Hash + Summary into single node\n// VERSION: v1.3 - UPDATED for LCA parameters\n// ============================================================\n\nconst item = $input.first().json;\n\n// --- djb2 hash (same as researcher OBJECT-1) ---\nfunction djb2(value) {\n  let str = '';\n  try {\n    if (value === undefined || value === null) str = 'null';\n    else if (typeof value === 'string') str = value;\n    else if (typeof value === 'number') str = String(value);\n    else str = JSON.stringify(value);\n  } catch (e) { str = 'error'; }\n  if (!str || typeof str !== 'string') str = 'empty';\n  let hash = 5381;\n  for (let i = 0; i < str.length; i++) {\n    hash = ((hash << 5) + hash) + str.charCodeAt(i);\n    hash = hash & hash;\n  }\n  return Math.abs(hash).toString(16).padStart(8, '0');\n}\n\n// --- Data completeness (UPDATED for v1.3) ---\nlet completeness = 0;\nif (item.equipment_name) completeness += 15;\nif (item.location) completeness += 5;\nif (item.facility_id) completeness += 5;\nif (item.operational_status) completeness += 5;\nif (item.notes) completeness += 10;\nif (item.reference_classification) completeness += 20;\nif (item.manufacturer) completeness += 10;\nif (item.model) completeness += 5;\n// NEW: LCA parameters boost completeness significantly\nif (item.lca_parameters) {\n  const lca = item.lca_parameters;\n  if (lca.energy_consumption_kwh) completeness += 5;\n  if (lca.throughput_kg_hr || lca.throughput_L_hr) completeness += 5;\n  if (lca.water_usage_L_hr) completeness += 5;\n  if (lca.batch_capacity_kg || lca.batch_capacity_L) completeness += 5;\n  if (lca.operating_temperature_max_c) completeness += 5;\n}\n\n// --- Field hashes (UPDATED for v1.3) ---\nconst field_hashes = {\n  identity: djb2({ equipment_id: item.equipment_id, equipment_name: item.equipment_name }),\n  location: djb2({ location: item.location, facility_id: item.facility_id }),\n  operational: djb2({ operational_status: item.operational_status }),\n  classification_ref: djb2(item.reference_classification),\n  unit_operations: djb2(item.reference_classification ? item.reference_classification.unit_operations : null),\n  specifications: djb2({ manufacturer: item.manufacturer, model: item.model, serial_number: item.serial_number }),\n  lca_parameters: djb2(item.lca_parameters),  // NEW\n  notes: djb2(item.notes)\n};\nconst checksum = djb2(Object.values(field_hashes).join('-'));\n\nconst refClass = item.reference_classification || {};\nconst nameSlug = item.equipment_id.toLowerCase().replace(/-/g, '_');\nconst assetId = `thin:equipment:${nameSlug}`;\nconst now = new Date().toISOString();\n\nreturn [{\n  json: {\n    asset_id: assetId,\n    equipment_id: item.equipment_id,\n    equipment_name: item.equipment_name,\n    manufacturer: item.manufacturer,\n    model: item.model,\n    serial_number: item.serial_number,\n    location: item.location,\n    facility_id: item.facility_id,\n    operational_status: item.operational_status,\n    notes: item.notes,\n    reference_classification: item.reference_classification,\n    unit_operations: refClass.unit_operations || [],\n    // NEW: LCA parameters\n    lca_parameters: item.lca_parameters || {},\n    perplexity_metadata: item.perplexity_metadata || {},\n    data_completeness: completeness,\n    field_hashes: field_hashes,\n    checksum: checksum,\n    sources: JSON.stringify({ \n      csv_inventory: { scraped: true, timestamp: now, source_name: 'Equipment CSV Inventory', source_type: 'institutional_inventory' },\n      perplexity: { scraped: item.perplexity_metadata?.enriched || false, timestamp: item.perplexity_metadata?.enriched_at || null, source_name: 'Perplexity AI', source_type: 'web_search_enrichment' }\n    }),\n    source_metadata: JSON.stringify({ \n      sources_scraped: ['csv_inventory', 'perplexity'], \n      scrape_timestamps: { csv_inventory: now, perplexity: item.perplexity_metadata?.enriched_at || null } \n    }),\n    mode: 'initial_ingest'\n  }\n}];"
+      },
+      "id": "b50218a9-5fe5-4597-99a7-6f8dc083474f",
+      "name": "Format & Hash Equipment Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5712,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "71c2efcf-e1e8-4e5e-9e96-de62b6956e14",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        4752,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Load & Prepare Equipment Data\n// Purpose: Load seed CSV + enriched mapping, merge, filter OUT_OF_SCOPE\n// Output: 31 in-scope equipment items ready for processing\n// VERSION: v1.4 - PATCHED: Added supplier data to mappingData\n// ============================================================\n\n// --- SEED DATA (equipment_seed_input_TEMPLATE.csv) ---\n// No changes to seedData - it stays the same\nconst seedData = [\n  { equipment_id: 'EQ-001', equipment_name: 'Iatroscan', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'TLC-FID for lipid analysis' },\n  { equipment_id: 'EQ-002', equipment_name: 'Macfuge 260 - Centrifuge Separator', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Pilot-scale centrifugal separator' },\n  { equipment_id: 'EQ-003', equipment_name: 'Filter Press', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Plate and frame filtration - GAP REMEDIATED' },\n  { equipment_id: 'EQ-004', equipment_name: 'Sieve Shakers', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Particle size separation' },\n  { equipment_id: 'EQ-005', equipment_name: 'Dehydrator shipping container', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Large-scale dehydration system' },\n  { equipment_id: 'EQ-006', equipment_name: 'PSS Combi-Unit/Mill head', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Size reduction equipment' },\n  { equipment_id: 'EQ-007', equipment_name: 'Decanter centrifuge', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Continuous solid-liquid separation' },\n  { equipment_id: 'EQ-008', equipment_name: 'IOPAK Basket Centrifuge', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Batch centrifugal separation' },\n  { equipment_id: 'EQ-009', equipment_name: 'Frozen Block Flaker', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Frozen material size reduction' },\n  { equipment_id: 'EQ-010', equipment_name: 'FD80GP Freeze Dry', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Production freeze dryer' },\n  { equipment_id: 'EQ-011', equipment_name: 'FD30 Extraction System F-Series', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Supercritical fluid extraction' },\n  { equipment_id: 'EQ-012', equipment_name: 'Membrane Filtration- Hybrid Skid', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Membrane separation system' },\n  { equipment_id: 'EQ-013', equipment_name: '20L continuous Rotavap', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Solvent evaporation' },\n  { equipment_id: 'EQ-014', equipment_name: 'Lyovapor', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Laboratory lyophiliser' },\n  { equipment_id: 'EQ-015', equipment_name: '-80 Freezer', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Ultra-low temperature storage' },\n  { equipment_id: 'EQ-016', equipment_name: '50L Rotavap', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Large-scale solvent evaporation' },\n  { equipment_id: 'EQ-017', equipment_name: 'Ethanol Extraction Unit (CES-300)', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Solvent extraction with centrifugal separation' },\n  { equipment_id: 'EQ-018', equipment_name: 'Environmental Recycling System', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Waste treatment/recycling system' },\n  { equipment_id: 'EQ-019', equipment_name: 'Shipping container with sliding doors for Drying', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Container-based drying system' },\n  { equipment_id: 'EQ-020', equipment_name: 'Jacketed Kettle', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Heated mixing vessel' },\n  { equipment_id: 'EQ-021', equipment_name: 'Peristaltic pump and silicone tubing', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Fluid transfer' },\n  { equipment_id: 'EQ-022', equipment_name: 'Fibre Analyser', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Dietary fibre analysis' },\n  { equipment_id: 'EQ-023', equipment_name: 'Lab scale supercritical (SCF)', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Laboratory supercritical fluid extraction' },\n  { equipment_id: 'EQ-024', equipment_name: 'Wastemaster', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Waste management system' },\n  { equipment_id: 'EQ-025', equipment_name: 'Pilot Scale Homogenizer', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'High-pressure homogenisation' },\n  { equipment_id: 'EQ-026', equipment_name: 'Freeze Dryer (KA), Vacuum oven and drying ovens', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Combined drying systems' },\n  { equipment_id: 'EQ-027', equipment_name: 'Vacuum Ovens', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Low-temperature vacuum drying' },\n  { equipment_id: 'EQ-028', equipment_name: 'Convection Ovens', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Convective drying' },\n  { equipment_id: 'EQ-029', equipment_name: '10L Hydrothermal Reactor', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Hydrothermal processing reactor' },\n  { equipment_id: 'EQ-030', equipment_name: 'Paper making machine', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Fibre sheet forming - specialised' },\n  { equipment_id: 'EQ-031', equipment_name: 'Forklift', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Material handling' },\n  { equipment_id: 'EQ-032', equipment_name: 'Packaging equipment', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Product packaging' },\n  { equipment_id: 'EQ-035', equipment_name: 'Mixquip series - drum mixing units', location: 'Waurn Ponds', facility_id: 'facility:deakin-biofactory', operational_status: 'operational', notes: 'Drum-mounted mixers' }\n];\n\n// --- ENRICHED MAPPING (equipment_mapping_deakin_biofactory_enriched) ---\n// PATCHED v1.4: Added 'supplier' field from source inventory spreadsheet\nconst mappingData = {\n  'EQ-001': { unspsc_code: 41115701, unspsc_name: 'Gas chromatograph', coverage_status: 'COVERED', unit_operations: 'lipid_analysis;chromatography', oecd_fos: 1.4, supplier: null },\n  'EQ-002': { unspsc_code: 40161701, unspsc_name: 'Centrifuges', coverage_status: 'COVERED', unit_operations: 'solid_liquid_separation', oecd_fos: 2.4, supplier: null },\n  'EQ-003': { unspsc_code: 41104910, unspsc_name: 'Laboratory multi sheet or press filters', coverage_status: 'COVERED', unit_operations: 'solid_liquid_separation', oecd_fos: 2.4, supplier: 'Filquip Pty' },\n  'EQ-004': { unspsc_code: 41105002, unspsc_name: 'Sieve shakers', coverage_status: 'COVERED', unit_operations: 'sieving', oecd_fos: 2.4, supplier: 'Rowe Scientific' },\n  'EQ-005': { unspsc_code: 41104507, unspsc_name: 'Drying cabinets or ovens', coverage_status: 'COVERED', unit_operations: 'drying', oecd_fos: 2.4, supplier: 'Agridry Systems' },\n  'EQ-006': { unspsc_code: 41101702, unspsc_name: 'Laboratory mills', coverage_status: 'COVERED', unit_operations: 'size_reduction', oecd_fos: 2.4, supplier: 'Hanningfield Process Systems' },\n  'EQ-007': { unspsc_code: 40161701, unspsc_name: 'Centrifuges', coverage_status: 'COVERED', unit_operations: 'solid_liquid_separation', oecd_fos: 2.4, supplier: 'Lemitec' },\n  'EQ-008': { unspsc_code: 40161701, unspsc_name: 'Centrifuges', coverage_status: 'COVERED', unit_operations: 'solid_liquid_separation', oecd_fos: 2.4, supplier: 'Process Plant Network' },\n  'EQ-009': { unspsc_code: 41101707, unspsc_name: 'Laboratory crushers or pulverizers', coverage_status: 'COVERED', unit_operations: 'size_reduction', oecd_fos: 2.4, supplier: 'Cuddon' },\n  'EQ-010': { unspsc_code: 24131604, unspsc_name: 'Freeze drying equipment', coverage_status: 'COVERED', unit_operations: 'freeze_drying', oecd_fos: 2.9, supplier: 'Cuddon' },\n  'EQ-011': { unspsc_code: 41104018, unspsc_name: 'Solid phase extraction preparations', coverage_status: 'COVERED', unit_operations: 'extraction', oecd_fos: 2.4, supplier: null },\n  'EQ-012': { unspsc_code: 40161507, unspsc_name: 'Filter membranes', coverage_status: 'COVERED', unit_operations: 'membrane_separation', oecd_fos: 2.4, supplier: null },\n  'EQ-013': { unspsc_code: 41104803, unspsc_name: 'Laboratory evaporators', coverage_status: 'COVERED', unit_operations: 'evaporation', oecd_fos: 2.4, supplier: null },\n  'EQ-014': { unspsc_code: 41104707, unspsc_name: 'Lyophilizers or freeze dryers', coverage_status: 'COVERED', unit_operations: 'freeze_drying', oecd_fos: 2.9, supplier: 'InVitro Technologies' },\n  'EQ-015': { unspsc_code: 41104302, unspsc_name: 'Ultra low and cryogenic freezers', coverage_status: 'COVERED', unit_operations: 'cooling;storage', oecd_fos: 2.4, supplier: 'InVitro Technologies' },\n  'EQ-016': { unspsc_code: 41104803, unspsc_name: 'Laboratory evaporators', coverage_status: 'COVERED', unit_operations: 'evaporation', oecd_fos: 2.4, supplier: 'InVitro Technologies' },\n  'EQ-017': { unspsc_code: 41104018, unspsc_name: 'Solid phase extraction preparations', coverage_status: 'COVERED', unit_operations: 'extraction;solid_liquid_separation', oecd_fos: 2.4, supplier: null },\n  'EQ-018': { unspsc_code: 41103211, unspsc_name: 'Laboratory wastewater treatment equipment', coverage_status: 'COVERED', unit_operations: 'waste_treatment', oecd_fos: 2.4, supplier: null },\n  'EQ-019': { unspsc_code: 41104507, unspsc_name: 'Drying cabinets or ovens', coverage_status: 'COVERED', unit_operations: 'drying', oecd_fos: 2.4, supplier: null },\n  'EQ-020': { unspsc_code: 41103808, unspsc_name: 'Laboratory heating mantles', coverage_status: 'COVERED', unit_operations: 'heating;mixing', oecd_fos: 2.4, supplier: null },\n  'EQ-021': { unspsc_code: 41105102, unspsc_name: 'Peristaltic pumps', coverage_status: 'COVERED', unit_operations: 'pumping', oecd_fos: 2.4, supplier: null },\n  'EQ-022': { unspsc_code: 41104808, unspsc_name: 'Crude fiber extractors', coverage_status: 'COVERED', unit_operations: 'fibre_analysis', oecd_fos: 1.4, supplier: null },\n  'EQ-023': { unspsc_code: 41115723, unspsc_name: 'Supercritical fluid chromatograph', coverage_status: 'COVERED', unit_operations: 'extraction', oecd_fos: 2.4, supplier: 'Shimadzu' },\n  'EQ-024': { unspsc_code: 41103211, unspsc_name: 'Laboratory wastewater treatment equipment', coverage_status: 'COVERED', unit_operations: 'waste_treatment', oecd_fos: 2.4, supplier: 'Green Eco Technologies' },\n  'EQ-025': { unspsc_code: 41101504, unspsc_name: 'Homogenizers', coverage_status: 'COVERED', unit_operations: 'homogenisation', oecd_fos: 2.4, supplier: null },\n  'EQ-026': { unspsc_code: 41104707, unspsc_name: 'Lyophilizers or freeze dryers', coverage_status: 'COVERED', unit_operations: 'freeze_drying;drying', oecd_fos: 2.9, supplier: null },\n  'EQ-027': { unspsc_code: 41104509, unspsc_name: 'Vacuum ovens', coverage_status: 'COVERED', unit_operations: 'drying', oecd_fos: 2.4, supplier: null },\n  'EQ-028': { unspsc_code: 41104501, unspsc_name: 'Laboratory mechanical convection ovens', coverage_status: 'COVERED', unit_operations: 'drying', oecd_fos: 2.4, supplier: null },\n  'EQ-029': { unspsc_code: 41103505, unspsc_name: 'Reactors', coverage_status: 'COVERED', unit_operations: 'chemical_reaction;pretreatment', oecd_fos: 2.4, supplier: null },\n  'EQ-030': { unspsc_code: 23151815, unspsc_name: 'Sheet or pulp mold systems', coverage_status: 'COVERED', unit_operations: 'formulation', oecd_fos: 2.9, supplier: null },\n  'EQ-031': { unspsc_code: 24101601, unspsc_name: 'Forklifts', coverage_status: 'COVERED', unit_operations: 'conveying', oecd_fos: 2.4, supplier: null },\n  'EQ-032': { unspsc_code: 23152903, unspsc_name: 'Packaging vacuum', coverage_status: 'COVERED', unit_operations: 'packaging', oecd_fos: 2.4, supplier: null },\n  'EQ-033': { unspsc_code: null, unspsc_name: null, coverage_status: 'OUT_OF_SCOPE', unit_operations: null, oecd_fos: null, supplier: null },\n  'EQ-034': { unspsc_code: null, unspsc_name: null, coverage_status: 'OUT_OF_SCOPE', unit_operations: null, oecd_fos: null, supplier: null },\n  'EQ-035': { unspsc_code: 23191001, unspsc_name: 'Continuous mixers', coverage_status: 'COVERED', unit_operations: 'mixing', oecd_fos: 2.4, supplier: null }\n};\n\n// --- MERGE & FILTER ---\nconst results = [];\nlet skipped = 0;\n\nfor (const seed of seedData) {\n  const mapping = mappingData[seed.equipment_id];\n  if (!mapping || mapping.coverage_status === 'OUT_OF_SCOPE') {\n    skipped++;\n    continue;\n  }\n  results.push({\n    json: {\n      equipment_id: seed.equipment_id,\n      equipment_name: seed.equipment_name,\n      // PATCHED v1.4: Use supplier from mapping as manufacturer\n      manufacturer: mapping.supplier || null,\n      model: null,\n      serial_number: null,\n      location: seed.location,\n      facility_id: seed.facility_id,\n      operational_status: seed.operational_status,\n      notes: seed.notes,\n      reference_classification: {\n        unspsc_code: mapping.unspsc_code,\n        unspsc_name: mapping.unspsc_name,\n        unit_operations: mapping.unit_operations ? mapping.unit_operations.split(';') : [],\n        oecd_fos: mapping.oecd_fos,\n        coverage_status: mapping.coverage_status\n      },\n      mode: 'initial_ingest'\n    }\n  });\n}\n\nconsole.log(`Loaded ${results.length} in-scope equipment items (skipped ${skipped} OUT_OF_SCOPE)`);\nconsole.log(`Items with supplier data: ${results.filter(r => r.json.manufacturer).length}`);\nreturn results;"
+      },
+      "id": "c0e1a534-9462-40fa-bba4-19ad7c5f44e1",
+      "name": "Load & Prepare Equipment Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Neo4j Parameters\n// PURPOSE: Build Cypher payload for HTTP Request\n// VERSION: v1.3 - UPDATED for LCA parameters\n// ============================================================\n\nconst e = $input.first().json;\nconst refClass = e.reference_classification || {};\nconst lca = e.lca_parameters || {};\nconst pplxMeta = e.perplexity_metadata || {};\n\nconst payload = {\n  statement: `MERGE (thin:ThinObject:Equipment {asset_id: $asset_id}) \n    SET thin.status = $status, \n        thin.object_type = $object_type, \n        thin.equipment_id = $equipment_id, \n        thin.equipment_name = $equipment_name, \n        thin.manufacturer = $manufacturer, \n        thin.model = $model, \n        thin.serial_number = $serial_number, \n        thin.location = $location, \n        thin.facility_id = $facility_id, \n        thin.operational_status = $operational_status, \n        thin.notes = $notes, \n        thin.reference_unspsc_code = $reference_unspsc_code, \n        thin.reference_unspsc_name = $reference_unspsc_name, \n        thin.reference_oecd_fos = $reference_oecd_fos, \n        thin.unit_operations = $unit_operations, \n        thin.reference_classification = $reference_classification, \n        thin.lca_parameters = $lca_parameters,\n        thin.lca_energy_kwh = $lca_energy_kwh,\n        thin.lca_throughput_kg_hr = $lca_throughput_kg_hr,\n        thin.lca_throughput_L_hr = $lca_throughput_L_hr,\n        thin.lca_water_L_hr = $lca_water_L_hr,\n        thin.lca_batch_capacity_kg = $lca_batch_capacity_kg,\n        thin.lca_batch_capacity_L = $lca_batch_capacity_L,\n        thin.lca_temp_min_c = $lca_temp_min_c,\n        thin.lca_temp_max_c = $lca_temp_max_c,\n        thin.lca_pressure_bar = $lca_pressure_bar,\n        thin.perplexity_enriched = $perplexity_enriched,\n        thin.perplexity_enriched_at = $perplexity_enriched_at,\n        thin.sources = $sources, \n        thin.sources_count = $sources_count, \n        thin.source_metadata = $source_metadata, \n        thin.data_completeness = $data_completeness, \n        thin.field_hashes = $field_hashes, \n        thin.checksum = $checksum, \n        thin.created_at = coalesce(thin.created_at, datetime()), \n        thin.updated_at = datetime() \n    WITH thin \n    MATCH (f:Facility {facility_id: $facility_id}) \n    MERGE (thin)-[:LOCATED_AT]->(f) \n    RETURN thin.asset_id AS asset_id, thin.equipment_name AS name, thin.status AS status, thin.data_completeness AS completeness`,\n  parameters: {\n    asset_id: e.asset_id,\n    status: 'raw',\n    object_type: 'equipment',\n    equipment_id: e.equipment_id,\n    equipment_name: e.equipment_name,\n    manufacturer: e.manufacturer || null,\n    model: e.model || null,\n    serial_number: e.serial_number || null,\n    location: e.location,\n    facility_id: e.facility_id,\n    operational_status: e.operational_status,\n    notes: e.notes,\n    reference_unspsc_code: refClass.unspsc_code || null,\n    reference_unspsc_name: refClass.unspsc_name || null,\n    reference_oecd_fos: refClass.oecd_fos || null,\n    unit_operations: e.unit_operations || [],\n    reference_classification: JSON.stringify(refClass),\n    // LCA parameters - both as JSON blob and as individual fields for querying\n    lca_parameters: JSON.stringify(lca),\n    lca_energy_kwh: lca.energy_consumption_kwh || null,\n    lca_throughput_kg_hr: lca.throughput_kg_hr || null,\n    lca_throughput_L_hr: lca.throughput_L_hr || null,\n    lca_water_L_hr: lca.water_usage_L_hr || null,\n    lca_batch_capacity_kg: lca.batch_capacity_kg || null,\n    lca_batch_capacity_L: lca.batch_capacity_L || null,\n    lca_temp_min_c: lca.operating_temperature_min_c || null,\n    lca_temp_max_c: lca.operating_temperature_max_c || null,\n    lca_pressure_bar: lca.operating_pressure_bar || null,\n    perplexity_enriched: pplxMeta.enriched || false,\n    perplexity_enriched_at: pplxMeta.enriched_at || null,\n    sources: e.sources,\n    sources_count: pplxMeta.enriched ? 2 : 1,\n    source_metadata: e.source_metadata,\n    data_completeness: e.data_completeness || 0,\n    field_hashes: JSON.stringify(e.field_hashes || {}),\n    checksum: e.checksum || ''\n  }\n};\n\nreturn [{ json: payload }];"
+      },
+      "id": "d4c06f09-cf19-4de0-a560-07c2775b223b",
+      "name": "Prepare Neo4j Parameters",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5952,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ statement: $json.statement, parameters: $json.parameters }) }}",
+        "options": {}
+      },
+      "id": "ff058b4c-9482-440a-81a4-95c1adf857cf",
+      "name": "Store ThinObject to Neo4j",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6192,
+        400
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Supabase Payload\n// VERSION: v1.3 - FIXED (removed non-existent columns)\n// ============================================================\n\nconst prev = $('Format & Hash Equipment Item').first().json;\n\nconst payload = [{\n  asset_id: prev.asset_id,\n  checksum: prev.checksum,\n  version: 1,\n  job_id: 'eq_acq_' + Date.now(),\n  status: 'raw'\n}];\n\nreturn [{ json: { payload } }];"
+      },
+      "id": "7736d56f-d4d8-4926-a01e-f4ac66ae933e",
+      "name": "Prepare Supabase Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6432,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/thin_object_records?on_conflict=asset_id",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates, return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "7950b104-dcee-4cbf-8e10-5f247a0120b7",
+      "name": "Store in Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6672,
+        400
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Log & Loop Back\n// VERSION: v1.3 - UPDATED for LCA enrichment logging\n// ============================================================\n\nconst prev = $('Format & Hash Equipment Item').first().json;\nconst pplxMeta = prev.perplexity_metadata || {};\n\nconst enrichStatus = pplxMeta.enriched \n  ? `ENRICHED (${pplxMeta.fields_populated} LCA fields)` \n  : 'BASE ONLY';\n\nconsole.log(`SUCCESS: ${prev.equipment_id} - ${prev.equipment_name} | ${enrichStatus} | Completeness: ${prev.data_completeness}%`);\n\nreturn [{ \n  json: { \n    status: 'success', \n    asset_id: prev.asset_id, \n    equipment_id: prev.equipment_id, \n    name: prev.equipment_name,\n    enriched: pplxMeta.enriched || false,\n    lca_fields: pplxMeta.fields_populated || 0,\n    completeness: prev.data_completeness\n  } \n}];"
+      },
+      "id": "fecdee28-4a36-4bdb-8e59-da06850e9ac8",
+      "name": "Log & Loop Back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6912,
+        400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "647a4bcc-b5ab-47aa-a351-c18ae4632eda",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        6016,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.results = [];\n\nconst items = [\n  { equipment_id: 'EQ-003', equipment_name: 'Filter Press', manufacturer: 'Autemi', model: 'LAB200' },\n  { equipment_id: 'EQ-005', equipment_name: 'Dehydrator shipping container', manufacturer: 'Agridry Systems', model: null },\n  { equipment_id: 'EQ-006', equipment_name: 'PSS Combi-Unit/Mill head', manufacturer: 'Hanningfield Process Systems', model: 'Uni-Mill' },\n  { equipment_id: 'EQ-008', equipment_name: 'IOPAK Basket Centrifuge', manufacturer: 'IOPAK', model: 'IHY-15' },\n  { equipment_id: 'EQ-011', equipment_name: 'FD30 Extraction System F-Series', manufacturer: null, model: 'FD30 F-Series' },\n  { equipment_id: 'EQ-015', equipment_name: '-80 Freezer', manufacturer: 'InVitro Technologies', model: null },\n  { equipment_id: 'EQ-023', equipment_name: 'Lab scale supercritical (SCF)', manufacturer: 'Shimadzu', model: 'Nexera UC' },\n  { equipment_id: 'EQ-025', equipment_name: 'Pilot Scale Homogenizer', manufacturer: null, model: null },\n  { equipment_id: 'EQ-026', equipment_name: 'Freeze Dryer (KA)', manufacturer: 'Biolab Scientific', model: 'BFR1H1' },\n  { equipment_id: 'EQ-027', equipment_name: 'Vacuum Ovens', manufacturer: null, model: null },\n  { equipment_id: 'EQ-028', equipment_name: 'Convection Ovens', manufacturer: null, model: null },\n  { equipment_id: 'EQ-030', equipment_name: 'Paper making machine', manufacturer: null, model: 'Fourdrinier Pilot' },\n  { equipment_id: 'EQ-031', equipment_name: 'Forklift', manufacturer: null, model: null },\n  { equipment_id: 'EQ-032', equipment_name: 'Packaging equipment', manufacturer: null, model: null }\n];\n\nreturn items.map(item => ({ json: item }));"
+      },
+      "id": "95fdf58f-6ca7-4de5-8a57-b1c283e00313",
+      "name": "Load Equipment Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6240,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nlet context = 'Equipment: ' + item.equipment_name;\nif (item.manufacturer) context += '\\nManufacturer: ' + item.manufacturer;\nif (item.model) context += '\\nModel: ' + item.model;\n\nconst request = {\n  model: 'anthropic/claude-sonnet-4',\n  max_tokens: 4096,\n  messages: [{\n    role: 'user',\n    content: 'Find technical specifications for this equipment:\\n\\n' + context + '\\n\\nI need SCALE-CRITICAL data (capacity in kg or L, throughput in kg/hr).\\n\\nExtract (use null if unknown):\\n- manufacturer, model, weight_kg\\n- batch_capacity_kg, batch_capacity_L\\n- throughput_kg_hr (if kg/day divide by 24)\\n- throughput_L_hr, dimensions_mm\\n- energy_consumption_kwh, voltage\\n- operating_pressure_bar, certifications, source\\n\\nRespond with ONLY valid JSON.'\n  }]\n};\n\nreturn [{ json: { ...item, api_request: request } }];"
+      },
+      "id": "d7d6b34f-a0d4-497b-8101-11e9c5af51de",
+      "name": "Build API Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6688,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "HTTP-Referer",
+              "value": "https://n8n.io"
+            },
+            {
+              "name": "X-Title",
+              "value": "Equipment LCA"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.api_request) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "86cc8e70-9f8e-432c-a714-474bb8b529c5",
+      "name": "Call OpenRouter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6896,
+        2192
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $('Build API Request').first().json;\nconst response = $input.first().json;\n\nlet lca = {\n  manufacturer: null, model: null, weight_kg: null,\n  batch_capacity_kg: null, batch_capacity_L: null,\n  throughput_kg_hr: null, throughput_L_hr: null,\n  dimensions_mm: null, energy_consumption_kwh: null,\n  voltage: null, operating_pressure_bar: null, certifications: []\n};\n\nlet meta = { enriched: false, error: null, scale_fields: [], source: null };\n\ntry {\n  if (response.error) throw new Error(JSON.stringify(response.error));\n  \n  let content = response.choices && response.choices[0] && response.choices[0].message ? response.choices[0].message.content : '';\n  \n  if (content.includes('```json')) content = content.split('```json')[1].split('```')[0];\n  else if (content.includes('```')) content = content.split('```')[1].split('```')[0];\n  \n  const match = content.match(/\\{[\\s\\S]*\\}/);\n  if (match) {\n    const parsed = JSON.parse(match[0]);\n    for (const [k, v] of Object.entries(parsed)) {\n      if (v != null && v !== '') {\n        if (lca.hasOwnProperty(k)) {\n          if (k === 'certifications') lca[k] = Array.isArray(v) ? v : [v];\n          else if (['weight_kg','batch_capacity_kg','batch_capacity_L','throughput_kg_hr','throughput_L_hr','energy_consumption_kwh','operating_pressure_bar'].includes(k)) {\n            const n = parseFloat(v); if (!isNaN(n)) lca[k] = n;\n          } else lca[k] = v;\n        }\n        if (['source','source_url','url'].includes(k)) meta.source = v;\n      }\n    }\n    meta.enriched = true;\n  }\n  \n  meta.scale_fields = ['weight_kg','batch_capacity_kg','batch_capacity_L','throughput_kg_hr','throughput_L_hr'].filter(function(f) { return lca[f] !== null; });\n} catch (e) {\n  meta.error = e.message;\n}\n\nreturn [{ json: {\n  equipment_id: item.equipment_id,\n  equipment_name: item.equipment_name,\n  original_manufacturer: item.manufacturer,\n  original_model: item.model,\n  lca_parameters: lca,\n  enrichment_metadata: meta\n}}];"
+      },
+      "id": "00e24f8e-a556-4594-994e-a072e5515dfc",
+      "name": "Parse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7120,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst staticData = $getWorkflowStaticData('global');\n\nif (!staticData.results) staticData.results = [];\nstaticData.results.push(result);\n\nreturn [{ json: { continue: true } }];"
+      },
+      "id": "605127e8-8693-4a3c-b262-4b92d13cc21b",
+      "name": "Store & Loop Back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7344,
+        2192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst results = staticData.results || [];\n\nconst withScaleData = results.filter(function(r) { \n  return r.enrichment_metadata && r.enrichment_metadata.scale_fields && r.enrichment_metadata.scale_fields.length > 0; \n});\n\nconst summary = {\n  total_processed: results.length,\n  with_scale_data: withScaleData.length,\n  without_scale_data: results.length - withScaleData.length,\n  success_rate_percent: Math.round(withScaleData.length / results.length * 100),\n  items: results\n};\n\nstaticData.results = [];\n\nreturn [{ json: summary }];"
+      },
+      "id": "acf60cf1-fcc3-480e-af21-e9474d3a3366",
+      "name": "Summary Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6688,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "7d600085-4ab2-4cab-84bc-227c580e9f14",
+      "name": "Loop Over Items1",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        6464,
+        2192
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Build Perplexity Query": {
+      "main": [
+        [
+          {
+            "node": "Perplexity API Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perplexity API Call": {
+      "main": [
+        [
+          {
+            "node": "Parse Perplexity Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Perplexity Response": {
+      "main": [
+        [
+          {
+            "node": "Format & Hash Equipment Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format & Hash Equipment Item": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Build Perplexity Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load & Prepare Equipment Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Parameters": {
+      "main": [
+        [
+          {
+            "node": "Store ThinObject to Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store ThinObject to Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Prepare Supabase Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Supabase Payload": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase": {
+      "main": [
+        [
+          {
+            "node": "Log & Loop Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log & Loop Back": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Equipment Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Equipment Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build API Request": {
+      "main": [
+        [
+          {
+            "node": "Call OpenRouter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OpenRouter": {
+      "main": [
+        [
+          {
+            "node": "Parse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Response": {
+      "main": [
+        [
+          {
+            "node": "Store & Loop Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store & Loop Back": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Summary Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "3e91df5c-5479-43a5-b745-12695abf4765",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "JfhGlaS51K_IXL4AKGv0U",
+  "tags": []
+}

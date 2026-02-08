@@ -1,0 +1,696 @@
+{
+  "name": "GOVERN-2_Equipment: Change Severity Classification",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "monthsInterval": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2752,
+        560
+      ],
+      "id": "514b36f4-c22b-408d-a4d8-c344337f0979",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/change_detection_queue?queue_status=eq.pending_classification&order=priority.desc,scanned_at.asc&limit=50",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2480,
+        560
+      ],
+      "id": "eebb3d18-add2-4129-ac82-827b5b72cd33",
+      "name": "Fetch Pending Entries",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0b89b5a1-f86b-40c1-9c76-a46741f79775",
+              "leftValue": "={{ $json.queue_entry_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2272,
+        560
+      ],
+      "id": "138b97e3-374a-4ac9-b6d0-09a893249ff5",
+      "name": "Has Pending Entries"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1936,
+        544
+      ],
+      "id": "a50efd00-7ba0-44f0-a8fb-87798f4a1934",
+      "name": "Loop Through Entries"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.scan_status }}",
+                    "rightValue": "verification_failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "1264434d-59b4-4826-a406-8b28c1631591"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2ee3745c-9cea-452d-b48d-59d9905b50cd",
+                    "leftValue": "={{ $json.scan_status }}",
+                    "rightValue": "verified_unchanged",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -1680,
+        544
+      ],
+      "id": "a580acda-2747-4816-befb-0bead2d6e4d7",
+      "name": "Route By Scan Status"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// Node: Calculate Severity Score (Equipment Instance)\n// Purpose: Score change severity using equipment-specific field weights\n//\n// Field Weight Mapping (from spec):\n//   operational_status: 0.9 (HIGH / critical)\n//   calibration_status: 0.7 (HIGH)\n//   specifications:     0.5 (MEDIUM)\n//   location:           0.4 (MEDIUM)\n//   manufacturer:       0.2 (LOW)\n//   model:              0.2 (LOW)\n// ============================================================\n\nconst item = $json;\nconst scanResult = item.scan_result || {};\nconst changedFields = scanResult.changed_fields || [];\nconst changeSignals = scanResult.change_signals || [];\n\n// ---- Equipment Field Categories & Impact Weights ----\nconst fieldCategories = {\n  // CRITICAL: Operational changes (weight HIGH = 0.9)\n  'operational_status':    { category: 'operational', impact: 0.9 },\n  'status':                { category: 'operational', impact: 0.7 },\n  'condition':             { category: 'operational', impact: 0.6 },\n\n  // HIGH: Calibration & compliance\n  'calibration_status':    { category: 'calibration', impact: 0.7 },\n  'last_calibration_date': { category: 'calibration', impact: 0.6 },\n  'calibration_due':       { category: 'calibration', impact: 0.7 },\n  'maintenance_status':    { category: 'calibration', impact: 0.5 },\n  'maintenance_date':      { category: 'calibration', impact: 0.4 },\n\n  // MEDIUM: Specifications (may require re-classification)\n  'specifications':        { category: 'specifications', impact: 0.5 },\n  'capacity':              { category: 'specifications', impact: 0.5 },\n  'throughput':            { category: 'specifications', impact: 0.5 },\n  'throughput_kg_hr':      { category: 'specifications', impact: 0.5 },\n  'throughput_l_hr':       { category: 'specifications', impact: 0.5 },\n  'power_kw':              { category: 'specifications', impact: 0.4 },\n  'weight_kg':             { category: 'specifications', impact: 0.3 },\n  'dimensions_mm':         { category: 'specifications', impact: 0.2 },\n  'operating_temp_min_c':  { category: 'specifications', impact: 0.3 },\n  'operating_temp_max_c':  { category: 'specifications', impact: 0.3 },\n  'scale':                 { category: 'specifications', impact: 0.6 },\n\n  // MEDIUM: Location (redeployment indicator)\n  'location':              { category: 'location', impact: 0.4 },\n  'facility_id':           { category: 'location', impact: 0.4 },\n  'room':                  { category: 'location', impact: 0.2 },\n\n  // LOW: Identity / metadata\n  'manufacturer':          { category: 'identity', impact: 0.2 },\n  'model':                 { category: 'identity', impact: 0.2 },\n  'serial_number':         { category: 'identity', impact: 0.1 },\n  'equipment_name':        { category: 'identity', impact: 0.15 },\n  'notes':                 { category: 'identity', impact: 0.05 }\n};\n\n// Category weights for final severity calculation\nconst categoryWeights = {\n  operational:     0.35,   // Highest: operational status is most critical\n  calibration:     0.25,   // High: compliance & maintenance\n  specifications:  0.20,   // Medium: may trigger re-classification\n  location:        0.10,   // Medium: redeployment tracking\n  identity:        0.10    // Low: manufacturer/model rarely changes\n};\n\n// Accumulate deltas per category\nconst categoryDeltas = {\n  operational: 0,\n  calibration: 0,\n  specifications: 0,\n  location: 0,\n  identity: 0\n};\n\nfor (const field of changedFields) {\n  const fieldLower = field.toLowerCase();\n  const config = fieldCategories[fieldLower];\n\n  if (config) {\n    categoryDeltas[config.category] += config.impact;\n  } else {\n    // Unknown fields get minimal identity impact\n    categoryDeltas.identity += 0.05;\n  }\n}\n\n// Also factor in change signals from GOVERN-1\nfor (const signal of changeSignals) {\n  if (signal.type === 'calibration_due') {\n    categoryDeltas.calibration += 0.5;\n  } else if (signal.type === 'operational_status_change') {\n    categoryDeltas.operational += 0.8;\n  } else if (signal.type === 'maintenance_status') {\n    categoryDeltas.calibration += 0.3;\n  } else if (signal.type === 'specification_change') {\n    categoryDeltas.specifications += 0.5;\n  }\n}\n\n// Cap each category at 1.0\nfor (const cat of Object.keys(categoryDeltas)) {\n  if (categoryDeltas[cat] > 1.0) {\n    categoryDeltas[cat] = 1.0;\n  }\n}\n\n// Weighted severity score\nconst severityScore =\n  (categoryDeltas.operational * categoryWeights.operational) +\n  (categoryDeltas.calibration * categoryWeights.calibration) +\n  (categoryDeltas.specifications * categoryWeights.specifications) +\n  (categoryDeltas.location * categoryWeights.location) +\n  (categoryDeltas.identity * categoryWeights.identity);\n\nconst roundedScore = Math.round(severityScore * 10000) / 10000;\n\n// ---- Severity Thresholds (Equipment) ----\nlet severity;\nlet routed_to;\nlet priority = item.priority || 'normal';\n\nif (roundedScore < 0.05) {\n  severity = 'none';\n  routed_to = 'no_action';\n} else if (roundedScore < 0.20) {\n  severity = 'minor';\n  routed_to = 'metadata_update_queue';\n} else if (roundedScore < 0.50) {\n  severity = 'major';\n  routed_to = 'refabrication_queue';\n} else {\n  severity = 'critical';\n  routed_to = 'refabrication_queue';\n  priority = 'high';\n}\n\n// Override: any critical operational signal forces refabrication\nconst hasCriticalSignal = changeSignals.some(s => s.severity === 'critical');\nif (hasCriticalSignal && severity !== 'critical') {\n  severity = 'critical';\n  routed_to = 'refabrication_queue';\n  priority = 'high';\n}\n\nconst routingReason = `Severity ${severity} (score: ${roundedScore}) based on ${changedFields.length} changed fields` +\n  (changeSignals.length > 0 ? ` and ${changeSignals.length} change signals` : '') +\n  `: ${changedFields.join(', ')}`;\n\nreturn {\n  queue_entry_id: item.queue_entry_id,\n  asset_id: item.asset_id,\n  entity_type: 'equipment',\n  severity: severity,\n  severity_score: roundedScore,\n  routed_to: routed_to,\n  routing_reason: routingReason,\n  priority: priority,\n  changed_fields: changedFields,\n  change_signals: changeSignals,\n  category_deltas: categoryDeltas\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1264,
+        768
+      ],
+      "id": "3f558fa1-e718-4f19-bc0d-30dc691834fe",
+      "name": "Calculate Severity Score"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $json;\n\nreturn {\n  queue_entry_id: item.queue_entry_id,\n  asset_id: item.asset_id,\n  entity_type: 'equipment',\n  severity: null,\n  severity_score: null,\n  routed_to: 'retry_queue',\n  routing_reason: 'Equipment scan verification failed - routing for re-scan',\n  priority: item.priority || 'normal',\n  changed_fields: [],\n  change_signals: []\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        400
+      ],
+      "id": "c6a1e3ad-6eb3-4b18-af56-ca5ee3463ce2",
+      "name": "Prepare Retry Routing"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $json;\n\nreturn {\n  queue_entry_id: item.queue_entry_id,\n  asset_id: item.asset_id,\n  entity_type: 'equipment',\n  severity: 'none',\n  severity_score: 0,\n  routed_to: 'no_action',\n  routing_reason: 'No changes detected - equipment freshness verified',\n  priority: item.priority || 'normal',\n  changed_fields: [],\n  change_signals: []\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        560
+      ],
+      "id": "93dff01e-059c-40e1-8e73-bc3b3307b681",
+      "name": "Prepare No-Action Routing"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -848,
+        544
+      ],
+      "id": "e6c22dfc-29e9-44a8-a389-d9c5026de662",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.routed_to }}",
+                    "rightValue": "refabrication_queue",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "1264434d-59b4-4826-a406-8b28c1631591"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2ee3745c-9cea-452d-b48d-59d9905b50cd",
+                    "leftValue": "={{ $json.routed_to }}",
+                    "rightValue": "metadata_update_queue",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2d620d9b-f3c8-4af1-ae46-10d942b90fcf",
+                    "leftValue": "={{ $json.routed_to }}",
+                    "rightValue": "=retry_queue",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -272,
+        528
+      ],
+      "id": "da758093-12e4-4e8c-be80-767c03d394ed",
+      "name": "Route to Downstream Queue"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/change_detection_queue?queue_entry_id=eq.{{ $json.queue_entry_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue_status\": \"routed\",\n  \"severity\": \"{{ $json.severity }}\",\n  \"severity_score\": {{ $json.severity_score ?? 'null' }},\n  \"routed_to\": \"{{ $json.routed_to }}\",\n  \"classified_at\": \"{{ $now.toISO() }}\",\n  \"routed_at\": \"{{ $now.toISO() }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -576,
+        560
+      ],
+      "id": "478615d2-229d-4f1e-ba18-6a0432ead29d",
+      "name": "Update Queue Entry",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/refabrication_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"source_queue_entry_id\": \"{{ $json.queue_entry_id }}\",\n  \"asset_id\": \"{{ $json.asset_id }}\",\n  \"entity_type\": \"{{ $json.entity_type }}\",\n  \"severity\": \"{{ $json.severity }}\",\n  \"severity_score\": {{ $json.severity_score }},\n  \"changed_fields\": {{ JSON.stringify($json.scan_result.changed_fields) }},\n  \"refabrication_reason\": \"{{ $json.routed_to }} - severity {{ $json.severity }} ({{ $json.severity_score }})\",\n  \"priority\": \"{{ $json.priority }}\",\n  \"queue_status\": \"pending_refabrication\",\n  \"queued_at\": \"{{ $now.toISO() }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        48,
+        -32
+      ],
+      "id": "0bf809b7-4fa6-4c05-9f9b-7cbeb8b286d1",
+      "name": "Insert Refabrication Entry",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/metadata_update_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"source_queue_entry_id\": \"{{ $json.queue_entry_id }}\",\n  \"asset_id\": \"{{ $json.asset_id }}\",\n  \"entity_type\": \"{{ $json.entity_type }}\",\n  \"severity\": \"{{ $json.severity }}\",\n  \"severity_score\": {{ $json.severity_score }},\n  \"changed_fields\": {{ JSON.stringify($json.scan_result.changed_fields) }},\n  \"update_reason\": \"Minor changes - severity {{ $json.severity }} ({{ $json.severity_score }})\",\n  \"priority\": \"{{ $json.priority }}\",\n  \"queue_status\": \"pending_update\",\n  \"queued_at\": \"{{ $now.toISO() }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        96,
+        256
+      ],
+      "id": "7ba5b200-10a4-4f98-95d9-e3f007e7f373",
+      "name": "Insert Metadata Update Entry",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        112,
+        576
+      ],
+      "id": "aa6c6883-ad96-447d-a12e-390e71f05bb5",
+      "name": "Retry Queue Placeholder"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        128,
+        784
+      ],
+      "id": "747d2edf-067a-4bd8-94c4-8f0a29110f1f",
+      "name": "No Action Required1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn {\n  workflow: 'GOVERN-2_Equipment',\n  asset_type: 'equipment',\n  completed_at: new Date().toISOString(),\n  total_processed: items.length,\n  message: `Processed ${items.length} equipment queue entries`\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1728,
+        256
+      ],
+      "id": "5b957416-8e52-4910-b00f-45ba41abd74f",
+      "name": "Log Processing Summary"
+    }
+  ],
+  "pinData": {
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-11-28T01:04:27.004+11:00",
+          "Readable date": "November 28th 2025, 1:04:27 am",
+          "Readable time": "1:04:27 am",
+          "Day of week": "Friday",
+          "Year": "2025",
+          "Month": "November",
+          "Day of month": "28",
+          "Hour": "01",
+          "Minute": "04",
+          "Second": "27",
+          "Timezone": "Australia/Melbourne (UTC+11:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pending Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pending Entries": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Through Entries": {
+      "main": [
+        [
+          {
+            "node": "Log Processing Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route By Scan Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Entries": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Severity Score": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Route By Scan Status": {
+      "main": [
+        [
+          {
+            "node": "Prepare Retry Routing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare No-Action Routing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Calculate Severity Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Retry Routing": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare No-Action Routing": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Update Queue Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Queue Entry": {
+      "main": [
+        [
+          {
+            "node": "Route to Downstream Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route to Downstream Queue": {
+      "main": [
+        [
+          {
+            "node": "Insert Refabrication Entry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Metadata Update Entry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Through Entries",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Retry Queue Placeholder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Action Required1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Refabrication Entry": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Metadata Update Entry": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Entries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "b2cb1aaf-b27a-4764-8f74-faf634c90d4c",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "jfh3mL4IhpUxUWCxeXNsh",
+  "tags": []
+}

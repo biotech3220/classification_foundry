@@ -1,0 +1,194 @@
+{
+  "name": "INSTANCE-2 Equipment UNSPSC-OECD Crosswalk",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "7e95b836-db4f-4612-b10e-13383f3691f8",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "jsCode": "// INSTANCE-2: Create [:MAPS_TO] relationships from UNSPSC -> OECD FOS\n// This reads commodities that have oecd_fos property and links them to OECD FOS nodes\n\nconst cypher = {\n  statement: `\n    MATCH (com:Standard:UNSPSC {level: 'commodity'})\n    WHERE com.oecd_fos IS NOT NULL AND com.oecd_fos <> ''\n    MATCH (oecd:Standard:OECD_FOS {code: com.oecd_fos})\n    MERGE (com)-[r:MAPS_TO]->(oecd)\n    SET r.confidence = 0.95,\n        r.mapping_type = 'primary',\n        r.source = 'unit_operations_vocabulary',\n        r.created_by = 'INSTANCE-2',\n        r.created_at = datetime()\n    RETURN count(r) as crosswalks_created\n  `,\n  parameters: {}\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypher\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "ac9c963b-0dbb-48fc-8727-edc2cf1e6e3d",
+      "name": "Prepare Crosswalk Query"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "id": "904b60f1-c0db-4a20-b4e4-977ff2a10f5d",
+      "name": "Create MAPS_TO Relationships",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verification query\nconst cypher = {\n  statement: `\n    // Count crosswalks by OECD FOS\n    MATCH (com:Standard:UNSPSC)-[r:MAPS_TO]->(oecd:Standard:OECD_FOS)\n    WITH oecd.code as oecd_code, oecd.name as oecd_name, count(r) as count\n    ORDER BY count DESC\n    WITH collect({code: oecd_code, name: oecd_name, count: count}) as distribution\n    \n    // Total count\n    MATCH (:Standard:UNSPSC)-[r:MAPS_TO]->(:Standard:OECD_FOS)\n    \n    RETURN {\n      total_crosswalks: count(r),\n      oecd_distribution: distribution\n    } as summary\n  `,\n  parameters: {}\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypher\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "id": "2be4336a-930c-44fc-b65f-84c68c227e30",
+      "name": "Prepare Verification"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "id": "74bbb57e-5fe2-4550-a469-9a7db87dfc83",
+      "name": "Verify Crosswalks",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\n// Parse Neo4j response\nconst result = Array.isArray(response) ? response[0] : response;\nconst summary = result?.data?.values?.[0]?.[0] || {};\n\nconsole.log('\\n========================================');\nconsole.log('INSTANCE-2 COMPLETE: UNSPSC -> OECD Crosswalks');\nconsole.log('========================================');\n\nconsole.log(`\\nTotal [:MAPS_TO] relationships: ${summary.total_crosswalks}`);\n\nif (summary.oecd_distribution) {\n  console.log('\\nOECD FOS Distribution:');\n  for (const item of summary.oecd_distribution) {\n    const pct = ((item.count / summary.total_crosswalks) * 100).toFixed(1);\n    console.log(`  ${item.code} (${item.name}): ${item.count} (${pct}%)`);\n  }\n}\n\nconsole.log('========================================\\n');\n\nreturn [{\n  json: {\n    status: 'INSTANCE-2 COMPLETE',\n    total_crosswalks: summary.total_crosswalks,\n    distribution: summary.oecd_distribution\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "id": "5aee5ddb-9810-49f7-8c96-9b45611f433e",
+      "name": "Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Prepare Crosswalk Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Crosswalk Query": {
+      "main": [
+        [
+          {
+            "node": "Create MAPS_TO Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create MAPS_TO Relationships": {
+      "main": [
+        [
+          {
+            "node": "Prepare Verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Verification": {
+      "main": [
+        [
+          {
+            "node": "Verify Crosswalks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Crosswalks": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "00188621-e757-492d-8a26-930f5f91d032",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "yBBADgY3sPST6jbzPbl0c",
+  "tags": []
+}

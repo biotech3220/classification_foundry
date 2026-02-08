@@ -1,0 +1,1386 @@
+{
+  "name": "OBJECT-3 Equipment Classification & Assessment (v1.0.0)",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        784,
+        -416
+      ],
+      "id": "f552f9f6-5bb3-49a8-a554-0017c137529f",
+      "name": "When clicking 'Execute workflow'",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        784,
+        -224
+      ],
+      "id": "9a03cb0d-7556-4260-a770-ec71d063decf",
+      "name": "Schedule Trigger",
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Fetch FATObjects (Equipment)\n// Version: v1.1.0 (Equipment OBJECT-3)\n// PURPOSE: Fetch fabricated equipment for classification\n// FIX: equipment_name → display_name (matches actual Neo4j property)\n// FIX: removed dense_view (doesn't exist, only dense_text)\n// ============================================================\n\nconst testLimit = 40; // 33 equipment + margin; null = fetch all\n\nlet cypherPayload;\n\nif (testLimit) {\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject:Equipment)\n      WHERE fat.status = 'fabricated'\n      OPTIONAL MATCH (fat)-[:HOSTED_BY]->(f:Facility)\n      RETURN \n          fat.asset_id AS asset_id,\n          fat.display_name AS name,\n          fat.equipment_id AS equipment_id,\n          fat.manufacturer AS manufacturer,\n          fat.model AS model,\n          fat.equipment_complexity AS equipment_complexity,\n          fat.capabilities AS capabilities,\n          fat.applications AS applications,\n          fat.operational_parameters AS operational_parameters,\n          fat.scale AS scale,\n          fat.operational_status AS operational_status,\n          fat.location AS location,\n          f.facility_id AS facility_id,\n          fat.dense_text AS dense_text,\n          fat.status AS status,\n          fat.version AS version,\n          fat.fabricated_at AS fabricated_at\n      ORDER BY fat.equipment_id ASC\n      LIMIT ${testLimit}\n    `,\n    parameters: {}\n  };\n  console.log(`🧪 TEST MODE: Fetching ${testLimit} equipment item(s)`);\n} else {\n  cypherPayload = {\n    statement: `\n      MATCH (fat:FATObject:Equipment)\n      WHERE fat.status = 'fabricated'\n      OPTIONAL MATCH (fat)-[:HOSTED_BY]->(f:Facility)\n      RETURN \n          fat.asset_id AS asset_id,\n          fat.display_name AS name,\n          fat.equipment_id AS equipment_id,\n          fat.manufacturer AS manufacturer,\n          fat.model AS model,\n          fat.equipment_complexity AS equipment_complexity,\n          fat.capabilities AS capabilities,\n          fat.applications AS applications,\n          fat.operational_parameters AS operational_parameters,\n          fat.scale AS scale,\n          fat.operational_status AS operational_status,\n          fat.location AS location,\n          f.facility_id AS facility_id,\n          fat.dense_text AS dense_text,\n          fat.status AS status,\n          fat.version AS version,\n          fat.fabricated_at AS fabricated_at\n      ORDER BY fat.equipment_id ASC\n    `,\n    parameters: {}\n  };\n  console.log(`PRODUCTION MODE: Fetching ALL fabricated equipment`);\n}\n\nreturn [{\n  json: {\n    fetch_mode: testLimit ? `test_limit_${testLimit}` : 'all',\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1024,
+        -416
+      ],
+      "id": "489180d3-83b3-4bd9-a95c-1b575fbe8b70",
+      "name": "Prepare Fetch FATObjects",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1264,
+        -416
+      ],
+      "id": "d54f2c90-4a83-458f-83af-bb313a878546",
+      "name": "Fetch FATObjects",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Parse Neo4j Response (Equipment)\n// Version: v1.0.0\n// Extracts equipment data from Neo4j query response\n// ============================================================\n\nconst neo4jResponse = $input.first().json;\nconst responseData = Array.isArray(neo4jResponse) ? neo4jResponse[0] : neo4jResponse;\n\nif (responseData.errors?.length > 0) {\n  throw new Error(`Neo4j error: ${responseData.errors[0].message}`);\n}\n\nconst columns = responseData.data?.fields || [];\nconst rows = responseData.data?.values || [];\n\nif (rows.length === 0) {\n  console.log('⚠️ No fabricated equipment found');\n  return [{ json: { equipment_count: 0, items: [] } }];\n}\n\nconsole.log(`✅ Found ${rows.length} fabricated equipment items`);\n\nconst items = rows.map(row => {\n  const item = {};\n  columns.forEach((col, i) => { item[col] = row[i]; });\n  \n  // Parse capabilities and applications (may be stored as JSON strings)\n  let capabilities = item.capabilities || [];\n  let applications = item.applications || [];\n  let operationalParameters = item.operational_parameters || {};\n  \n  if (typeof capabilities === 'string') {\n    try { capabilities = JSON.parse(capabilities); } catch(e) { capabilities = [capabilities]; }\n  }\n  if (typeof applications === 'string') {\n    try { applications = JSON.parse(applications); } catch(e) { applications = [applications]; }\n  }\n  if (typeof operationalParameters === 'string') {\n    try { operationalParameters = JSON.parse(operationalParameters); } catch(e) { operationalParameters = {}; }\n  }\n  \n  // Use dense_text or dense_view for the text representation\n  const denseViewText = item.dense_text || item.dense_view || '';\n  \n  return {\n    json: {\n      asset_id: item.asset_id,\n      name: item.name || 'Unknown Equipment',\n      equipment_id: item.equipment_id,\n      manufacturer: item.manufacturer || null,\n      model: item.model || null,\n      equipment_complexity: item.equipment_complexity || 'single-purpose',\n      capabilities: capabilities,\n      applications: applications,\n      operational_parameters: operationalParameters,\n      scale: item.scale || 'bench',\n      operational_status: item.operational_status || 'operational',\n      location: item.location || null,\n      facility_id: item.facility_id || null,\n      dense_view_text: denseViewText,\n      status: item.status,\n      version: item.version,\n      fabricated_at: item.fabricated_at\n    }\n  };\n});\n\nconsole.log(`   First item: ${items[0]?.json?.name} (${items[0]?.json?.asset_id})`);\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1504,
+        -416
+      ],
+      "id": "a3b043e0-cc04-442e-add5-6694cdcaf665",
+      "name": "Parse Neo4j Response",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        1744,
+        -416
+      ],
+      "id": "7342e63a-f92a-4ff8-9376-27d4d76d2d90",
+      "name": "Loop Over Items",
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Check Data Quality (Equipment)\n// Version: v1.0.0\n// Equipment-specific data quality assessment\n// v3.8.3 pattern: ALWAYS classify, let OBJECT-4 route\n// ============================================================\n\nconst inputData = $input.first().json;\n\nconst capabilities = inputData.capabilities || [];\nconst applications = inputData.applications || [];\nconst operationalParameters = inputData.operational_parameters || {};\nconst scale = inputData.scale || '';\nconst manufacturer = inputData.manufacturer || '';\nconst model = inputData.model || '';\nconst denseViewText = inputData.dense_view_text || '';\n\n// Calculate metrics\nconst hasCapabilities = capabilities.length >= 2;\nconst hasApplications = applications.length >= 1;\nconst hasParameters = Object.keys(operationalParameters).length >= 1;\nconst hasScale = scale.length > 0;\nconst hasDenseView = denseViewText.length >= 50;\n\nconst hasSufficientEvidence = hasCapabilities || hasDenseView;\nconst hasEnrichedContext = hasApplications || hasParameters;\nconst isSufficient = hasSufficientEvidence && hasEnrichedContext;\nconst isSparse = !isSufficient;\n\nconst dataQuality = {\n  capability_count: capabilities.length,\n  application_count: applications.length,\n  parameter_count: Object.keys(operationalParameters).length,\n  dense_view_length: denseViewText.length,\n  has_manufacturer: !!manufacturer,\n  has_model: !!model,\n  \n  has_capabilities: hasCapabilities,\n  has_applications: hasApplications,\n  has_parameters: hasParameters,\n  has_scale: hasScale,\n  has_dense_view: hasDenseView,\n  \n  has_sufficient_evidence: hasSufficientEvidence,\n  has_enriched_context: hasEnrichedContext,\n  sufficient: isSufficient,\n  is_sparse: isSparse,\n  \n  missing_fields: [],\n  confidence_penalty: 0\n};\n\nif (!hasCapabilities) dataQuality.missing_fields.push('capabilities');\nif (!hasApplications) dataQuality.missing_fields.push('applications');\nif (!hasParameters) dataQuality.missing_fields.push('operational_parameters');\nif (!hasScale) dataQuality.missing_fields.push('scale');\nif (!hasDenseView) dataQuality.missing_fields.push('dense_view');\n\nif (isSparse) {\n  dataQuality.confidence_penalty = 0.25;\n  dataQuality.has_issue = true;\n} else if (dataQuality.missing_fields.length > 0) {\n  dataQuality.confidence_penalty = 0.10;\n  dataQuality.has_issue = true;\n}\n\nconsole.log(`\\n============================================================`);\nconsole.log(`📊 DATA QUALITY CHECK: ${inputData.name}`);\nconsole.log(`============================================================`);\nconsole.log(`   Capabilities:    ${capabilities.length} ${hasCapabilities ? '✅' : '⚠️'}`);\nconsole.log(`   Applications:    ${applications.length} ${hasApplications ? '✅' : '⚠️'}`);\nconsole.log(`   Parameters:      ${Object.keys(operationalParameters).length} ${hasParameters ? '✅' : '⚠️'}`);\nconsole.log(`   Dense View:      ${denseViewText.length} chars ${hasDenseView ? '✅' : '⚠️'}`);\nconsole.log(`   ─────────────────────────────────────────────────────────`);\nconsole.log(`   Data Status:     ${isSparse ? 'SPARSE ⚠️' : 'SUFFICIENT ✅'}`);\nconsole.log(`   Penalty:         -${dataQuality.confidence_penalty * 100}%`);\nconsole.log(`   ACTION:          PROCEED TO CLASSIFICATION ✅`);\nconsole.log(`============================================================\\n`);\n\nreturn [{\n  json: {\n    ...inputData,\n    data_quality: dataQuality,\n    classification_skipped: false,\n    routing_decision: 'PROCEED_TO_CLASSIFICATION'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1984,
+        -416
+      ],
+      "id": "8e83f901-045f-4c4c-b6b3-b1378ec7d577",
+      "name": "Check Data Quality",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Set status to 'classifying'\nconst inputData = $input.first().json;\n\nreturn [{\n  json: {\n    ...inputData,\n    neo4j_status_payload: {\n      statement: `\n        MATCH (fat:FATObject {asset_id: $asset_id})\n        SET fat.status = 'classifying',\n            fat.classification_started_at = datetime()\n        RETURN fat.asset_id, fat.status\n      `,\n      parameters: {\n        asset_id: inputData.asset_id\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2224,
+        -416
+      ],
+      "id": "42d25fca-a9b9-4da8-b017-6e7728261516",
+      "name": "Prepare Status Update to Classifying",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_status_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        2464,
+        -416
+      ],
+      "id": "2f415175-c2ff-4ced-b3ca-bd67d3bc52f2",
+      "name": "Execute Status Update to Classifying",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const neo4jResponse = $input.first().json;\nconst prevData = $('Prepare Status Update to Classifying').item.json;\n\nconst responseData = Array.isArray(neo4jResponse) ? neo4jResponse[0] : neo4jResponse;\nif (responseData.errors?.length > 0) {\n  console.log(`⚠️ Status update error: ${responseData.errors[0].message}`);\n}\n\nconsole.log(`✅ Status updated to 'classifying' for ${prevData.asset_id}`);\n\nreturn [{ json: prevData }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2704,
+        -416
+      ],
+      "id": "0cd44239-a5fe-44c5-a6b3-6a35d181927e",
+      "name": "Parse Status Update Response",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_equipment_v1/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    filter: {\n      must: [{\n        key: \"asset_id\",\n        match: { value: $json.asset_id }\n      }]\n    },\n    limit: 1,\n    with_payload: true,\n    with_vector: true\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        2944,
+        -416
+      ],
+      "id": "c2f05cec-ee85-4b3d-a7c9-d147cc51a6ef",
+      "name": "Fetch Embedding Vector",
+      "typeVersion": 4.1,
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Merge Embedding (Equipment)\n// Combines Qdrant vector with Neo4j equipment data\n// ============================================================\n\nconst qdrantResponse = $input.first().json;\nconst equipmentData = $('Parse Status Update Response').item.json;\n\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  throw new Error(`No embedding found in Qdrant for ${equipmentData.asset_id}`);\n}\n\nconst point = points[0];\nconst embeddingVector = point.vector;\nconst payload = point.payload || {};\n\nif (!embeddingVector || embeddingVector.length !== 3072) {\n  throw new Error(`Invalid embedding vector. Expected 3072 dims, got ${embeddingVector?.length || 0}`);\n}\n\nconst denseViewText = equipmentData.dense_view_text || payload.dense_text || '';\n\nconsole.log(`✅ Embedding merged for ${equipmentData.name}`);\nconsole.log(`   Vector dimensions: ${embeddingVector.length}`);\nconsole.log(`   Dense view length: ${denseViewText.length} chars`);\nconsole.log(`   Qdrant point ID: ${point.id}`);\n\nreturn [{\n  json: {\n    // Equipment identity\n    asset_id: equipmentData.asset_id,\n    name: equipmentData.name,\n    equipment_id: equipmentData.equipment_id,\n    manufacturer: equipmentData.manufacturer,\n    model: equipmentData.model,\n    qdrant_point_id: point.id,\n    \n    // Equipment-specific fields\n    equipment_complexity: equipmentData.equipment_complexity || payload.equipment_complexity || 'single-purpose',\n    capabilities: equipmentData.capabilities || payload.capabilities || [],\n    applications: equipmentData.applications || payload.applications || [],\n    operational_parameters: equipmentData.operational_parameters || payload.operational_parameters || {},\n    scale: equipmentData.scale || payload.scale || 'bench',\n    operational_status: equipmentData.operational_status || 'operational',\n    location: equipmentData.location,\n    facility_id: equipmentData.facility_id,\n    \n    // Dense view\n    dense_view_text: denseViewText,\n    \n    // Embedding\n    embedding_vector: embeddingVector,\n    \n    // Data quality (pass through)\n    data_quality: equipmentData.data_quality\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3184,
+        -416
+      ],
+      "id": "31a1b25b-430f-4fc3-81ad-f20c0d9314e9",
+      "name": "Merge Embedding",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Vector Search UNSPSC (Single Phase)\n// Version: v1.0.0 (Equipment OBJECT-3)\n// UNSPSC has 948 commodities - search directly at commodity level\n// No hierarchical group→field search needed (unlike ANZSRC)\n// ============================================================\n\nconst inputData = $input.first().json;\n\nif (!inputData.embedding_vector || inputData.embedding_vector.length !== 3072) {\n  throw new Error(`Invalid embedding vector. Expected 3072 dims, got ${inputData.embedding_vector?.length || 0}`);\n}\n\n// Direct commodity-level search (UNSPSC is flat enough)\nconst qdrantRequest = {\n  query: inputData.embedding_vector,\n  filter: {\n    must: [{\n      key: \"level\",\n      match: { value: \"commodity\" }\n    }]\n  },\n  limit: 50,\n  with_payload: true,\n  with_vector: false\n};\n\nconsole.log(`🔍 Preparing UNSPSC vector search for ${inputData.name}`);\nconsole.log(`   Searching standards_unspsc_v1 (commodity level, limit 50)`);\n\nreturn [{\n  json: {\n    ...inputData,\n    qdrant_unspsc_request: qdrantRequest\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3424,
+        -416
+      ],
+      "id": "78d01bb5-734d-40fe-8d81-a9ed88000ae8",
+      "name": "Prepare Vector Search UNSPSC",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_unspsc_v1/points/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qdrant_unspsc_request) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3664,
+        -416
+      ],
+      "id": "8796c31b-a6a2-4819-8e0d-0cf1d692db46",
+      "name": "Vector Search UNSPSC",
+      "typeVersion": 4.1,
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Parse Vector Search Results (UNSPSC Commodities)\n// Version: v1.0.0\n// Extracts UNSPSC commodity candidates with scores\n// ============================================================\n\nconst qdrantResponse = $input.first().json;\nconst originalData = $('Prepare Vector Search UNSPSC').item.json;\n\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || responseData.points || [];\n\nif (points.length === 0) {\n  console.log('⚠️ No UNSPSC candidates found');\n  throw new Error(`No candidate standards found for ${originalData.asset_id}`);\n}\n\nconst unspscCandidates = points.map(point => ({\n  code: String(point.payload.code),\n  name: point.payload.name || point.payload.commodity_name || 'Unknown',\n  level: point.payload.level || 'commodity',\n  segment_code: point.payload.segment_code || String(point.payload.code).substring(0, 2),\n  family_code: point.payload.family_code || String(point.payload.code).substring(0, 4) + '0000',\n  class_code: point.payload.class_code || String(point.payload.code).substring(0, 6) + '00',\n  embedding_text: point.payload.embedding_text || null,\n  unit_operations: point.payload.unit_operations || '',\n  oecd_fos: point.payload.oecd_fos || null,\n  score: point.score\n}));\n\nconsole.log(`✅ UNSPSC search returned ${points.length} candidates`);\nconsole.log(`   Top 5: ${unspscCandidates.slice(0, 5).map(c => c.code + ' ' + c.name.substring(0, 30)).join(', ')}`);\n\nreturn [{\n  json: {\n    asset_id: originalData.asset_id,\n    name: originalData.name,\n    equipment_id: originalData.equipment_id,\n    manufacturer: originalData.manufacturer,\n    model: originalData.model,\n    qdrant_point_id: originalData.qdrant_point_id,\n    equipment_complexity: originalData.equipment_complexity,\n    capabilities: originalData.capabilities,\n    applications: originalData.applications,\n    operational_parameters: originalData.operational_parameters,\n    scale: originalData.scale,\n    dense_view_text: originalData.dense_view_text,\n    embedding_vector: originalData.embedding_vector,\n    data_quality: originalData.data_quality,\n    \n    // UNSPSC candidates\n    unspsc_candidates: unspscCandidates,\n    unspsc_candidate_count: unspscCandidates.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3904,
+        -416
+      ],
+      "id": "04f62721-5540-436b-bb11-54fe8ca9bf47",
+      "name": "Parse Vector Search Results",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Cohere Rerank Request for UNSPSC candidates\nconst inputData = $input.first().json;\n\nconst documents = inputData.unspsc_candidates.map(c => {\n  if (c.embedding_text) return c.embedding_text;\n  return `${c.code} - ${c.name}` + (c.unit_operations ? ` (${c.unit_operations})` : '');\n});\n\nconst richCount = inputData.unspsc_candidates.filter(c => c.embedding_text).length;\nconsole.log(`Cohere request: ${documents.length} docs (${richCount} with rich context)`);\n\nconst cohereRequestBody = {\n  model: \"rerank-v3.5\",\n  query: inputData.dense_view_text,\n  documents: documents,\n  top_n: 25\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    cohere_request_body: cohereRequestBody\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4144,
+        -416
+      ],
+      "id": "c6ea67ce-6e03-4b2f-abdf-ab63215341f3",
+      "name": "Prepare Cohere Request",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cohere.com/v2/rerank",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "cohereApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.cohere_request_body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        4384,
+        -416
+      ],
+      "id": "3eef9d64-4813-411c-9ec9-e562b3afd895",
+      "name": "Cohere Rerank",
+      "typeVersion": 4.1,
+      "credentials": {
+        "cohereApi": {
+          "id": "JyKbWvdds8nxsq1s",
+          "name": "CohereApi Production Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Cohere Rerank Results for UNSPSC\nconst cohereResponse = $input.first().json;\nconst originalData = $('Parse Vector Search Results').item.json;\n\nconst candidates = originalData.unspsc_candidates;\nconst rerankedResults = cohereResponse.results || [];\n\nconst rerankedCandidates = rerankedResults.map(result => ({\n  ...candidates[result.index],\n  rerank_score: result.relevance_score\n}));\n\nconsole.log(`✅ Reranked to ${rerankedCandidates.length} UNSPSC candidates`);\nconsole.log(`   Top 3: ${rerankedCandidates.slice(0, 3).map(c => c.code + ' (' + c.rerank_score.toFixed(3) + ')').join(', ')}`);\n\nreturn [{\n  json: {\n    ...originalData,\n    unspsc_candidates: rerankedCandidates,\n    unspsc_candidate_count: rerankedCandidates.length,\n    reranking: {\n      applied: true,\n      model: 'rerank-v3.5',\n      original_count: candidates.length,\n      reranked_count: rerankedCandidates.length\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4624,
+        -416
+      ],
+      "id": "5f722abc-5f19-43be-8d36-1a86bcb2968a",
+      "name": "Parse Cohere Rerank Results",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare FOS Vector Search (Standard B - OECD FOS)\nconst inputData = $input.first().json;\nconst mergeData = $('Merge Embedding').item.json;\nconst embeddingVector = mergeData.embedding_vector;\n\nif (!embeddingVector || embeddingVector.length !== 3072) {\n  throw new Error(`Invalid embedding vector. Expected 3072 dims, got ${embeddingVector?.length || 0}`);\n}\n\nconst qdrantFosRequest = {\n  query: embeddingVector,\n  limit: 10,\n  with_payload: true,\n  with_vector: false\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    embedding_vector: embeddingVector,\n    qdrant_fos_request: qdrantFosRequest\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4864,
+        -416
+      ],
+      "id": "79098046-9d25-41da-b0e1-c4db7d599259",
+      "name": "Prepare FOS Vector Search",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/standards_oecd_fos_2007/points/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qdrant_fos_request) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        5104,
+        -416
+      ],
+      "id": "88d66e1e-5715-4eee-a3c6-c5c18ded47e8",
+      "name": "Vector Search FOS (Qdrant)",
+      "typeVersion": 4.1,
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse FOS Vector Search Results\nconst qdrantResponse = $input.first().json;\nconst originalData = $('Prepare FOS Vector Search').item.json;\n\nconst responseData = Array.isArray(qdrantResponse) ? qdrantResponse[0] : qdrantResponse;\nconst points = responseData.result?.points || [];\n\nif (points.length === 0) {\n  console.log('⚠️ FOS search: No candidates found - proceeding with UNSPSC only');\n  return [{ json: { ...originalData, fos_candidates: [], fos_candidate_count: 0 } }];\n}\n\nconst fosCandidates = points\n  .filter(p => p.payload.level === 'field')\n  .map(p => ({\n    code: p.payload.code,\n    name: p.payload.name,\n    score: p.score,\n    group_code: p.payload.group_code,\n    embedding_text: p.payload.embedding_text || null\n  }));\n\nconsole.log(`✅ FOS search: ${fosCandidates.length} field-level candidates`);\nconsole.log(`   Top 3: ${fosCandidates.slice(0, 3).map(c => c.code + ' ' + c.name).join(', ')}`);\n\nreturn [{\n  json: {\n    ...originalData,\n    fos_candidates: fosCandidates,\n    fos_candidate_count: fosCandidates.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        5344,
+        -416
+      ],
+      "id": "beded738-b5dd-48cf-9730-c4912e8f5a1d",
+      "name": "Parse FOS Candidates",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Equipment Classification LLM Prompt\n// Version: v1.2.0 (Equipment OBJECT-3)\n// Aligned with: equipment_instance_spec_v1.3 Section 10\n// UPDATED: Stronger scale-aware classification enforcement\n// ============================================================\n\nconst inputData = $input.first().json;\n\n// Equipment fields\nconst name = inputData.name || 'Unknown Equipment';\nconst manufacturer = inputData.manufacturer || 'Not specified';\nconst model = inputData.model || 'Not specified';\nconst capabilities = inputData.capabilities || [];\nconst applications = inputData.applications || [];\nconst operationalParams = inputData.operational_parameters || {};\nconst scale = inputData.scale || 'bench';\nconst complexity = inputData.equipment_complexity || 'single-purpose';\n\n// Get UNSPSC candidates (Standard A) - Top 25 from reranking\nconst unspscCandidates = inputData.unspsc_candidates || [];\n\n// Get FOS candidates (Standard B)\nconst fosCandidates = inputData.fos_candidates || [];\n\n// Format UNSPSC candidate list\nconst unspscList = unspscCandidates.map(c =>\n  `  ${c.code} - ${c.name}` + (c.unit_operations ? ` [${c.unit_operations}]` : '')\n).join('\\n');\n\n// Format FOS candidate list\nconst fosList = fosCandidates.map(c =>\n  `  ${c.code} - ${c.name}`\n).join('\\n');\n\n// Format capabilities\nconst capList = capabilities.length > 0 \n  ? capabilities.join(', ') \n  : 'Not specified';\n\n// Format applications\nconst appList = applications.length > 0 \n  ? applications.join(', ') \n  : 'Not specified';\n\n// Format operational parameters\nconst paramList = Object.keys(operationalParams).length > 0\n  ? Object.entries(operationalParams).map(([k, v]) => `${k}: ${v}`).join(', ')\n  : 'Not specified';\n\n// Determine code count guidance based on equipment complexity\nlet codeGuidance = '1';\nlet complexityDescription = 'single-purpose equipment with one primary function';\n\nif (complexity === 'multi-function') {\n  codeGuidance = '2';\n  complexityDescription = 'multi-function equipment with multiple capabilities';\n} else if (complexity === 'platform') {\n  codeGuidance = '2-3';\n  complexityDescription = 'integrated platform/system with multiple modules';\n}\n\n// Determine required code prefix based on scale\nlet requiredPrefix = '411xxxxx';\nlet scaleEnforcement = 'MUST use laboratory codes (411xxxxx)';\nif (scale === 'production') {\n  requiredPrefix = '411xxxxx or 231xxxxx/232xxxxx';\n  scaleEnforcement = 'MAY use industrial codes if weight > 500kg, otherwise prefer 411xxxxx';\n}\n\n// ============================================================\n// BUILD CLASSIFICATION PROMPT (Section 10 of equipment_instance_spec_v1.3)\n// ============================================================\nconst userPrompt = `You are an equipment classification specialist. Your task is to classify laboratory and processing equipment against the United Nations Standard Products and Services Code (UNSPSC).\n\n============================================================\nEQUIPMENT PROFILE\n============================================================\n\nEquipment Name: ${name}\nManufacturer: ${manufacturer}\nModel: ${model}\nEquipment Complexity: ${complexity} (${complexityDescription})\nScale: ${scale}\n\n------------------------------------------------------------\nCAPABILITIES\n------------------------------------------------------------\n${capList}\n\n------------------------------------------------------------\nAPPLICATIONS\n------------------------------------------------------------\n${appList}\n\n------------------------------------------------------------\nOPERATIONAL PARAMETERS\n------------------------------------------------------------\n${paramList}\n\n------------------------------------------------------------\nDENSE VIEW (Full Equipment Description)\n------------------------------------------------------------\n${inputData.dense_view_text || 'Not available'}\n\n============================================================\n⚠️ CRITICAL: SCALE-BASED CODE SELECTION (MANDATORY) ⚠️\n============================================================\n\nTHIS IS THE MOST IMPORTANT RULE. VIOLATIONS WILL BE REJECTED.\n\nCURRENT EQUIPMENT SCALE: \"${scale}\"\nREQUIRED CODE PREFIX: ${requiredPrefix}\nENFORCEMENT: ${scaleEnforcement}\n\nHARD RULES (NO EXCEPTIONS):\n┌─────────────────────────────────────────────────────────────┐\n│ IF scale = \"bench\"  → ONLY 411xxxxx codes allowed           │\n│ IF scale = \"pilot\"  → ONLY 411xxxxx codes allowed           │\n│ IF scale = \"unknown\"→ ONLY 411xxxxx codes allowed           │\n│ IF scale = \"production\" → 411xxxxx preferred, 231/232 OK    │\n└─────────────────────────────────────────────────────────────┘\n\nFORBIDDEN CLASSIFICATIONS (will be rejected):\n❌ 23152101 (Vibratory sieves) - USE 41105002 (Lab sieve shakers) instead\n❌ 23201204 (Food drying equipment) - USE 41104507 (Lab drying cabinets) instead\n❌ 23191001 (Continuous mixers) - USE 41103801 (Lab mixers) instead\n❌ 23181505 (Dehydrating machinery) - USE 41104507 (Lab drying cabinets) instead\n❌ 24131604 (Industrial freeze dryers) - USE 41104707 (Lab lyophilizers) instead\n❌ ANY 231xxxxx or 232xxxxx code for bench/pilot scale equipment\n\nCORRECT CLASSIFICATIONS (use these patterns):\n✅ Sieve shaker → 41105002 (Laboratory sieve shakers)\n✅ Dehydrator/dryer → 41104507 (Laboratory drying cabinets) or 41104510 (Lab dehydrators)\n✅ Mixer → 41103801 (Laboratory mixers)\n✅ Centrifuge → 41103903 or 41103905 (Laboratory centrifuges/separators)\n✅ Freeze dryer → 41104707 (Lyophilizers) or 41104701 (Lab freeze dryers)\n✅ Reactor → 41103505 (Laboratory reactors)\n✅ Crusher/flaker → 41101707 (Laboratory crushers)\n\nWHY THIS MATTERS:\nThis equipment is at Deakin BioFactory, a RESEARCH facility. Even if equipment \nperforms industrial-type operations, it is laboratory/pilot equipment and must \nbe classified with laboratory codes (411xxxxx) unless explicitly production-scale.\n\n============================================================\nDUAL-STANDARD CLASSIFICATION TASK\n============================================================\n\nYou must classify this equipment against TWO taxonomies independently.\n\n------------------------------------------------------------\nSTANDARD A: UNSPSC (Primary Classification)\n------------------------------------------------------------\n\nAssign ${codeGuidance} code(s) from the candidates below.\nThese are specific 8-digit UNSPSC commodity codes.\n\n⚠️ FILTER CANDIDATES: Only select codes starting with \"411\" for this ${scale}-scale equipment.\n\nCANDIDATE CODES (from vector retrieval + reranking):\n${unspscList || '  No candidates available'}\n\n------------------------------------------------------------\nSTANDARD B: OECD Fields of Science 2007 (Domain Context)\n------------------------------------------------------------\n\nAssign exactly 1 code from the candidates below.\nThese are broader international domain classifications.\n\nCANDIDATE CODES:\n${fosList || '  No candidates available'}\n\n------------------------------------------------------------\nCLASSIFICATION RULES\n------------------------------------------------------------\n\n1. EQUIPMENT CLASSIFICATION DEPTH based on complexity:\n   - Single-purpose equipment: 1 code (e.g., pH meter → one UNSPSC code)\n   - Multi-function equipment: 2 codes (e.g., spectrophotometer with UV-Vis + fluorescence)\n   - Platform/system: 2-3 codes (e.g., HPLC system → column + detector + pump)\n   Maximum: 3 codes. Only assign codes where confidence >= 60.\n\n2. SCALE-BASED CODE PREFIX (MANDATORY - see above):\n   Current scale: \"${scale}\" → ${scaleEnforcement}\n   \n3. EVIDENCE REQUIREMENT:\n   - Every code MUST cite SPECIFIC evidence from capabilities, parameters, or dense view\n   - Reference actual specifications, capabilities, or applications\n   - Do NOT assign codes based on vague similarity\n\n4. HIERARCHICAL CONSTRAINTS:\n   - Don't assign both parent and child codes (e.g., not both Class and Commodity level)\n   - Prefer most specific (Commodity level 8-digit) codes over broad (Segment level)\n\n5. Rank codes by relevance (primary function first)\n\n------------------------------------------------------------\nRESPONSE FORMAT (JSON only)\n------------------------------------------------------------\n{\n  \"standard_a\": {\n    \"taxonomy\": \"UNSPSC\",\n    \"classifications\": [\n      {\n        \"code\": \"41115701\",\n        \"name\": \"Gas chromatograph\",\n        \"confidence\": 92,\n        \"justification\": \"Equipment performs gas chromatography analysis with FID detector\",\n        \"evidence\": [\"GC analysis capability\", \"FID detector\", \"Carrier gas: Helium\"],\n        \"scale_check\": \"Code starts with 411 ✓ - appropriate for ${scale}-scale equipment\"\n      }\n    ]\n  },\n  \"standard_b\": {\n    \"taxonomy\": \"OECD_FOS_2007\",\n    \"classifications\": [\n      {\n        \"code\": \"1.4\",\n        \"name\": \"Chemical Sciences\",\n        \"confidence\": 85,\n        \"justification\": \"Analytical chemistry instrumentation for chemical analysis\"\n      }\n    ]\n  },\n  \"equipment_complexity_assessed\": \"${complexity}\",\n  \"classification_depth_rationale\": \"Explanation of why N codes were assigned based on equipment type\",\n  \"scale_verification\": \"Confirmed: scale=${scale}, all codes start with 411 ✓\",\n  \"reasoning\": \"Overall summary of classification decisions\"\n}\n\n------------------------------------------------------------\nFINAL CHECKLIST (verify before responding)\n------------------------------------------------------------\n□ All Standard A codes start with \"411\" (for ${scale}-scale equipment)\n□ No codes from segments 231 or 232 assigned\n□ Each code has specific evidence cited\n□ Confidence scores reflect actual match quality\n□ scale_check field confirms code prefix is appropriate\n\nRespond ONLY with valid JSON - no markdown, no code blocks, no extra text.`;\n\n// ============================================================\n// RETURN OUTPUT\n// ============================================================\nreturn [{\n  json: {\n    asset_id: inputData.asset_id,\n    name: inputData.name,\n    equipment_id: inputData.equipment_id,\n    manufacturer: inputData.manufacturer,\n    model: inputData.model,\n    qdrant_point_id: inputData.qdrant_point_id,\n    model_llm: 'anthropic/claude-sonnet-4-5',\n    \n    dense_view_text: inputData.dense_view_text,\n    equipment_complexity: complexity,\n    capabilities: inputData.capabilities,\n    applications: inputData.applications,\n    operational_parameters: inputData.operational_parameters,\n    scale: inputData.scale,\n    data_quality: inputData.data_quality,\n    \n    unspsc_candidates: unspscCandidates,\n    unspsc_candidate_count: unspscCandidates.length,\n    fos_candidates: fosCandidates,\n    fos_candidate_count: fosCandidates.length,\n    reranking: inputData.reranking,\n    \n    user_prompt: userPrompt,\n    \n    classification_guidance: {\n      equipment_complexity: complexity,\n      complexity_description: complexityDescription,\n      unspsc_code_range: codeGuidance,\n      fos_code_range: '1',\n      scale_enforcement: scaleEnforcement,\n      required_prefix: requiredPrefix\n    },\n    \n    llm_retry_count: inputData.llm_retry_count || 0\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        5584,
+        -416
+      ],
+      "id": "ed8d85a1-369e-4a54-becb-3b3bf95a2fcf",
+      "name": "Prepare Equipment LLM Prompt",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "HTTP-Referer",
+              "value": "https://fat-classification.n8n.cloud"
+            },
+            {
+              "name": "X-Title",
+              "value": "FAT Equipment OBJECT-3 Classification"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    model: $json.model_llm || 'anthropic/claude-sonnet-4-5',\n    messages: [\n      {\n        role: 'user',\n        content: $json.user_prompt\n      }\n    ],\n    temperature: 0.1,\n    max_tokens: 4000\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1072,
+        -80
+      ],
+      "id": "370067a2-ae24-4abd-902f-c36823f4ecc1",
+      "name": "Pass 2: LLM Classification",
+      "typeVersion": 4.1,
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Parse LLM Response (Equipment)\n// Version: v1.0.0\n// Extracts UNSPSC (Standard A) and OECD FOS (Standard B) classifications\n// ============================================================\n\nconst llmResponse = $input.first().json;\nconst promptData = $('Prepare Equipment LLM Prompt').item.json;\n\nconst currentRetryCount = promptData.llm_retry_count || 0;\nconst MAX_RETRIES = 2;\n\nlet content;\n\ntry {\n  if (llmResponse.choices?.[0]?.message?.content) {\n    content = llmResponse.choices[0].message.content;\n  } else if (llmResponse.text) {\n    content = llmResponse.text;\n  } else {\n    throw new Error(`Unexpected LLM response structure: ${JSON.stringify(llmResponse).slice(0, 200)}`);\n  }\n\n  if (!content) throw new Error('No content in LLM response');\n\n  let parsed;\n  let cleanContent = content.trim();\n  \n  if (cleanContent.startsWith('```json')) cleanContent = cleanContent.slice(7);\n  else if (cleanContent.startsWith('```')) cleanContent = cleanContent.slice(3);\n  if (cleanContent.endsWith('```')) cleanContent = cleanContent.slice(0, -3);\n  \n  parsed = JSON.parse(cleanContent.trim());\n\n  if (!parsed.standard_a?.classifications) {\n    throw new Error('LLM response missing standard_a.classifications');\n  }\n\n  const CONFIDENCE_THRESHOLD = 0.60;  // Equipment: 0.60 (not 0.70)\n  const MAX_CODES = 3;  // Equipment: max 3 (not 10)\n\n  // Process Standard A (UNSPSC) - confidence as 0-1 scale\n  const standardAClassifications = (parsed.standard_a.classifications || [])\n    .map(c => ({\n      code: String(c.code),\n      name: c.name || 'Unknown',\n      confidence: c.confidence > 1 ? c.confidence / 100 : c.confidence,  // Normalise\n      justification: c.justification || '',\n      evidence: c.evidence || []\n    }))\n    .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n    .sort((a, b) => b.confidence - a.confidence)\n    .slice(0, MAX_CODES);\n\n  // Process Standard B (OECD FOS)\n  const standardBClassifications = (parsed.standard_b?.classifications || [])\n    .map(c => ({\n      code: String(c.code),\n      name: c.name || 'Unknown',\n      confidence: c.confidence > 1 ? c.confidence / 100 : c.confidence,\n      justification: c.justification || '',\n      evidence: c.evidence || []\n    }))\n    .filter(c => c.confidence >= CONFIDENCE_THRESHOLD)\n    .sort((a, b) => b.confidence - a.confidence);\n\n  console.log(`✅ Standard A (UNSPSC): ${standardAClassifications.length} codes`);\n  standardAClassifications.forEach(c => console.log(`   ${c.code} - ${c.name} (${(c.confidence*100).toFixed(0)}%)`));\n  console.log(`✅ Standard B (OECD FOS): ${standardBClassifications.length} codes`);\n\n  return [{\n    json: {\n      asset_id: promptData.asset_id,\n      name: promptData.name,\n      equipment_id: promptData.equipment_id,\n      qdrant_point_id: promptData.qdrant_point_id,\n      model: promptData.model_llm,\n      \n      dense_view_text: promptData.dense_view_text,\n      equipment_complexity: promptData.equipment_complexity,\n      capabilities: promptData.capabilities,\n      data_quality: promptData.data_quality,\n      \n      classifications: standardAClassifications,\n      classification_count: standardAClassifications.length,\n      standard_b_classifications: standardBClassifications,\n      standard_b_count: standardBClassifications.length,\n      \n      equipment_complexity_assessed: parsed.equipment_complexity_assessed || promptData.equipment_complexity,\n      reasoning: parsed.reasoning || '',\n      classification_depth_rationale: parsed.classification_depth_rationale || '',\n      \n      unspsc_candidates: promptData.unspsc_candidates,\n      fos_candidates: promptData.fos_candidates,\n      reranking: promptData.reranking,\n      \n      classification_failed: false,\n      llm_retry_count: currentRetryCount\n    }\n  }];\n\n} catch (error) {\n  console.error(`❌ LLM parse error: ${error.message}`);\n  \n  if (currentRetryCount < MAX_RETRIES) {\n    return [{\n      json: {\n        ...promptData,\n        llm_retry_count: currentRetryCount + 1,\n        parse_error: error.message,\n        classification_failed: false\n      }\n    }];\n  }\n  \n  return [{\n    json: {\n      asset_id: promptData.asset_id,\n      name: promptData.name,\n      qdrant_point_id: promptData.qdrant_point_id,\n      classification_failed: true,\n      failure_reason: `LLM parse failed after ${MAX_RETRIES} retries: ${error.message}`,\n      classifications: [],\n      classification_count: 0,\n      standard_b_classifications: [],\n      standard_b_count: 0,\n      data_quality: promptData.data_quality\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1312,
+        -80
+      ],
+      "id": "9e8c7ba7-f38d-4cf9-b2dc-93669ec7f42c",
+      "name": "Parse LLM Response",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "44c76698-1501-4b91-aa1e-c9f4203e41cc",
+              "leftValue": "={{ $json.classification_failed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1552,
+        -80
+      ],
+      "id": "0b2ab322-cd17-42cd-a8c1-d62839fbf3c4",
+      "name": "Check Parse Success",
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// UNSPSC Hierarchy Check (Equipment)\n// Validates UNSPSC classification hierarchy\n// Replaces ANZSRC Hierarchy Check from researcher workflow\n// ============================================================\n\nconst inputData = $input.first().json;\n\nif (!inputData.classifications || inputData.classifications.length === 0) {\n  console.log(`⚠️ No UNSPSC classifications for ${inputData.name}`);\n  return [{\n    json: {\n      ...inputData,\n      cf1_assessment: {\n        passed: false,\n        violations: [],\n        flags: [{\n          rule: 'no_unspsc_classifications',\n          message: 'LLM could not assign any UNSPSC codes from candidates'\n        }],\n        penalty: 0.5,\n        segments_found: [],\n        families_found: []\n      },\n      requires_hitl: true,\n      hitl_reason: 'No UNSPSC classifications assigned',\n      classification_failed: false,\n      candidate_mismatch: true\n    }\n  }];\n}\n\n// Extract hierarchy info from each 8-digit UNSPSC code\nconst classificationDetails = inputData.classifications.map(c => {\n  const code = String(c.code).padStart(8, '0');\n  return {\n    ...c,\n    segment_code: code.substring(0, 2),\n    family_code: code.substring(0, 4),\n    class_code: code.substring(0, 6),\n    commodity_code: code\n  };\n});\n\nconst segmentsFound = [...new Set(classificationDetails.map(c => c.segment_code))];\nconst familiesFound = [...new Set(classificationDetails.map(c => c.family_code))];\n\n// Check for parent-child conflicts (class + commodity in same branch)\nconst violations = [];\nconst codes = classificationDetails.map(c => c.commodity_code);\n\nfor (const c of classificationDetails) {\n  for (const other of classificationDetails) {\n    if (c.commodity_code !== other.commodity_code) {\n      // Check if one code is a parent of another\n      if (c.class_code === other.class_code && c.commodity_code !== other.commodity_code) {\n        // Same class, different commodities - this is fine (siblings)\n      }\n      if (c.commodity_code.startsWith(other.commodity_code) || other.commodity_code.startsWith(c.commodity_code)) {\n        violations.push({\n          rule: 'parent_child_conflict',\n          codes: [c.commodity_code, other.commodity_code],\n          message: `Hierarchical overlap: ${c.commodity_code} and ${other.commodity_code}`\n        });\n      }\n    }\n  }\n}\n\n// Check for excessive breadth (more than 2 segments for equipment is unusual)\nconst flags = [];\nif (segmentsFound.length > 2) {\n  flags.push({\n    rule: 'excessive_breadth',\n    segments: segmentsFound.length,\n    message: `Equipment classified across ${segmentsFound.length} segments - unusual for equipment`\n  });\n}\n\n// Calculate penalty\nlet penalty = 0;\nif (violations.length > 0) penalty += 0.10 * violations.length;\nif (flags.length > 0) penalty += 0.05;\n\nconsole.log(`✅ UNSPSC Hierarchy Check: ${inputData.name}`);\nconsole.log(`   Segments: ${segmentsFound.join(', ')}`);\nconsole.log(`   Families: ${familiesFound.join(', ')}`);\nconsole.log(`   Violations: ${violations.length}, Flags: ${flags.length}`);\nconsole.log(`   Penalty: -${(penalty * 100).toFixed(0)}%`);\n\nreturn [{\n  json: {\n    ...inputData,\n    cf1_assessment: {\n      passed: violations.length === 0,\n      violations: violations,\n      flags: flags,\n      penalty: Math.min(penalty, 0.30),\n      segments_found: segmentsFound,\n      families_found: familiesFound\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1792,
+        -80
+      ],
+      "id": "9e510ea2-c257-4f5a-af1f-3bb50475332c",
+      "name": "UNSPSC Hierarchy Check",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Crosswalk Assessment Query (Equipment)\n// Uses MAPS_TO relationship (not MAPS_TO_V4)\n// UNSPSC → OECD FOS crosswalk check\n// ============================================================\n\nconst inputData = $input.first().json;\n\nconst classifications = inputData.classifications || [];\nconst standardBClassifications = inputData.standard_b_classifications || [];\n\nconst standardACodes = classifications.map(c => parseInt(c.code, 10));\nconst standardBCodes = standardBClassifications.map(c => c.code);\n\nif (standardBCodes.length === 0 || standardACodes.length === 0) {\n  const reason = standardACodes.length === 0 \n    ? 'No Standard A classifications' \n    : 'No Standard B classifications';\n  \n  console.log(`⚠️ ${reason} - skipping crosswalk assessment`);\n  \n  return [{\n    json: {\n      ...inputData,\n      crosswalk_assessment: {\n        skipped: true,\n        reason: reason,\n        alignment_score: null,\n        modifier: 0\n      },\n      neo4j_payload: {\n        statement: \"RETURN 'skipped' AS status\",\n        parameters: {}\n      }\n    }\n  }];\n}\n\n// Query MAPS_TO relationships (UNSPSC → OECD FOS)\nconst cypherPayload = {\n  statement: `\n    UNWIND $unspsc_codes AS unspsc_code\n    MATCH (a:Standard:UNSPSC {code: unspsc_code})\n    OPTIONAL MATCH (a)-[m:MAPS_TO]->(b:Standard:OECD_FOS)\n    RETURN \n      a.code AS unspsc_code,\n      a.name AS unspsc_name,\n      collect(CASE WHEN b IS NOT NULL THEN {\n        fos_code: b.code,\n        fos_name: b.name,\n        confidence: m.confidence,\n        alignment_score: m.alignment_score,\n        mapping_type: m.mapping_type\n      } ELSE NULL END) AS mapped_fos_codes\n  `,\n  parameters: {\n    unspsc_codes: standardACodes\n  }\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    standard_a_codes: standardACodes,\n    standard_b_codes: standardBCodes,\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2032,
+        -80
+      ],
+      "id": "97331cad-6b0d-4bc9-bff3-d3dbd048311b",
+      "name": "Prepare Crosswalk Assessment Query",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        2272,
+        -80
+      ],
+      "id": "c4acac7e-ec33-403d-b165-614128284e4c",
+      "name": "Execute Crosswalk Assessment",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Calculate Crosswalk Alignment (Equipment)\n// Code-level alignment: codesWithMatch / codesChecked\n// ============================================================\n\nconst neo4jResponse = $input.first().json;\nconst prevData = $('Prepare Crosswalk Assessment Query').item.json;\n\nif (prevData.crosswalk_assessment?.skipped) {\n  return [{ json: prevData }];\n}\n\nconst responseData = Array.isArray(neo4jResponse) ? neo4jResponse[0] : neo4jResponse;\n\nif (responseData.errors?.length > 0) {\n  console.error('Neo4j error:', responseData.errors[0].message);\n  return [{\n    json: {\n      ...prevData,\n      crosswalk_assessment: { error: responseData.errors[0].message, alignment_score: null, modifier: 0.0 }\n    }\n  }];\n}\n\nconst values = responseData.data?.values || [];\nconst assignedFosCodes = new Set(prevData.standard_b_codes);\n\nlet codesWithMatch = 0;\nlet codesChecked = 0;\nlet codesWithNoCrosswalk = 0;\n\nfor (const row of values) {\n  const unspscCode = row[0];\n  const mappedFosCodes = (row[2] || []).filter(m => m !== null);\n  \n  if (mappedFosCodes.length === 0) {\n    codesWithNoCrosswalk++;\n    continue;\n  }\n  \n  codesChecked++;\n  const hasMatch = mappedFosCodes.some(m => assignedFosCodes.has(m.fos_code));\n  if (hasMatch) codesWithMatch++;\n}\n\n// Calculate alignment score\nlet alignmentScore = null;\nlet modifier = 0.0;\n\nif (codesChecked > 0) {\n  alignmentScore = codesWithMatch / codesChecked;\n  \n  if (alignmentScore >= 0.75) modifier = 0.05;        // Strong alignment bonus\n  else if (alignmentScore >= 0.50) modifier = 0.02;    // Moderate alignment\n  else if (alignmentScore >= 0.30) modifier = 0.0;     // Acceptable\n  else modifier = -0.05;                                 // Poor alignment penalty\n} else if (codesWithNoCrosswalk > 0) {\n  modifier = 0.0;  // No crosswalks exist - neutral\n}\n\nconst alignmentStatus = alignmentScore === null ? 'no_crosswalks'\n  : alignmentScore >= 0.75 ? 'strong'\n  : alignmentScore >= 0.50 ? 'aligned'\n  : alignmentScore >= 0.30 ? 'acceptable'\n  : 'misaligned';\n\nconsole.log(`✅ Crosswalk Alignment: ${prevData.name}`);\nconsole.log(`   Score: ${alignmentScore !== null ? (alignmentScore * 100).toFixed(0) + '%' : 'N/A'}`);\nconsole.log(`   Status: ${alignmentStatus}, Modifier: ${modifier > 0 ? '+' : ''}${(modifier * 100).toFixed(0)}%`);\n\nreturn [{\n  json: {\n    ...prevData,\n    crosswalk_assessment: {\n      alignment_score: alignmentScore,\n      alignment_status: alignmentStatus,\n      modifier: modifier,\n      codes_checked: codesChecked,\n      codes_with_match: codesWithMatch,\n      codes_with_no_crosswalk: codesWithNoCrosswalk\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2512,
+        -80
+      ],
+      "id": "4ccc38a0-18b3-472f-8218-4bd10f4704bf",
+      "name": "Calculate Crosswalk Alignment",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare CRE Input (Equipment)\n// Equipment-specific: CF1 (TRL), CF2 (Scale), CF4 (Temporal),\n//                     CF5 (Regulatory), CF6 (Geographic)\n// ============================================================\n\nconst inputData = $input.first().json;\nconst equipmentData = $('Merge Embedding').item.json;\n\n// Infer TRL from equipment signals\nfunction inferEquipmentTRL(data) {\n  const status = (data.operational_status || '').toLowerCase();\n  const scale = (data.scale || '').toLowerCase();\n  \n  if (status === 'decommissioned' || status === 'non-operational') return 3;\n  if (scale === 'production') return 9;\n  if (scale === 'pilot') return 7;\n  if (status === 'operational') return 6;\n  if (status === 'under_maintenance') return 5;\n  return 5; // Default: operational bench equipment\n}\n\n// Average classification confidence\nconst avgConfidence = inputData.classifications.length > 0\n  ? inputData.classifications.reduce((a, c) => a + c.confidence, 0) / inputData.classifications.length\n  : 0;\n\nreturn [{\n  json: {\n    asset_id: inputData.asset_id,\n    classification_confidence: avgConfidence,\n    entity_data: {\n      trl_level: inferEquipmentTRL(equipmentData),\n      scale: equipmentData.scale || 'bench',\n      operational_status: equipmentData.operational_status || 'operational',\n      certifications: [],\n      inference_type: 'equipment_signals'\n    },\n    requirements: {\n      required_trl: 4,  // Lower than researcher (equipment is physical)\n      required_certifications: []\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2752,
+        -80
+      ],
+      "id": "da2539e1-f399-4656-8c4c-1af875c0efe7",
+      "name": "Prepare CRE Input",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "workflowId": "7wgDbsjDcjLdQNSJ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "position": [
+        2992,
+        -80
+      ],
+      "id": "6813a353-72d0-4da8-9ec1-41fc3362328a",
+      "name": "SYSTEM-2_CRE_Assessment",
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge CRE Output (Equipment)\nconst creOutput = $input.first().json;\nconst prevData = $('Calculate Crosswalk Alignment').item.json;\n\nconsole.log(`✅ CRE Assessment Received:`);\nconsole.log(`   Blocking: ${creOutput.blocking_failures?.join(', ') || 'None'}`);\nconsole.log(`   HITL Required: ${creOutput.requires_hitl}`);\n\nreturn [{\n  json: {\n    asset_id: prevData.asset_id,\n    name: prevData.name,\n    equipment_id: prevData.equipment_id,\n    qdrant_point_id: prevData.qdrant_point_id,\n    equipment_complexity: prevData.equipment_complexity,\n    classifications: prevData.classifications,\n    classification_count: prevData.classification_count,\n    standard_b_classifications: prevData.standard_b_classifications,\n    standard_b_count: prevData.standard_b_count,\n    reasoning: prevData.reasoning,\n    model: prevData.model,\n    crosswalk_assessment: prevData.crosswalk_assessment,\n    cf1_assessment: prevData.cf1_assessment,\n    data_quality: prevData.data_quality,\n    \n    cre_assessment: {\n      constraint_results: creOutput.constraint_results || {},\n      blocking_failures: creOutput.blocking_failures || [],\n      penalising_failures: creOutput.penalising_failures || [],\n      requires_hitl: creOutput.requires_hitl || false,\n      cre_penalty: Math.abs(creOutput.final_confidence_modifier || 0)\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3232,
+        -80
+      ],
+      "id": "52bcea64-df26-4822-9b0c-48de04708c63",
+      "name": "Merge CRE Output",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Calculate Final Confidence & Assign Tiers (Equipment)\n// Version: v1.0.0\n// Equipment thresholds: auto-approve 0.80, reject 0.55\n// ============================================================\n\nconst inputData = $input.first().json;\n\nconst classifications = inputData.classifications || [];\nconst cf1Penalty = inputData.cf1_assessment?.penalty || 0.0;\nconst crosswalkModifier = inputData.crosswalk_assessment?.modifier || 0.0;\nconst creAssessment = inputData.cre_assessment || {};\n\n// Data quality penalty\nconst dataQuality = inputData.data_quality || {};\nconst dataQualityPenalty = dataQuality.confidence_penalty || 0;\n\n// Check for CRE blocking\nif (creAssessment.blocking_failures?.length > 0) {\n  console.log(`🚫 BLOCKED by CRE: ${creAssessment.blocking_failures.join(', ')}`);\n  return [{\n    json: {\n      ...inputData,\n      classifications: [],\n      classification_count: 0,\n      tier_summary: { primary_count: 0, secondary_count: 0 },\n      final_confidence: 0.0,\n      confidence_breakdown: {\n        base_mean: 0, cf1_penalty: cf1Penalty,\n        crosswalk_modifier: crosswalkModifier,\n        cre_penalty: creAssessment.cre_penalty || 0,\n        data_quality_penalty: dataQualityPenalty,\n        net_adjustment: 0\n      },\n      blocked_by_cre: true\n    }\n  }];\n}\n\nif (classifications.length === 0) {\n  return [{\n    json: {\n      ...inputData,\n      final_confidence: 0.0,\n      confidence_breakdown: { base_mean: 0 },\n      tier_summary: { primary_count: 0, secondary_count: 0 }\n    }\n  }];\n}\n\n// Calculate base mean confidence\nconst baseMean = classifications.reduce((a, c) => a + c.confidence, 0) / classifications.length;\n\n// CRE penalty\nconst crePenalty = creAssessment.cre_penalty || 0;\n\n// Net adjustment\nconst netAdjustment = -cf1Penalty + crosswalkModifier - crePenalty - dataQualityPenalty;\n\n// Final confidence (clamped 0-1)\nconst finalConfidence = Math.max(0, Math.min(1, baseMean + netAdjustment));\n\n// ============================================================\n// EQUIPMENT TIER ASSIGNMENT\n// Equipment: ranks 1 = \"primary\", ranks 2-3 = \"secondary\"\n// Simpler than researcher (fewer codes)\n// ============================================================\nconst tieredClassifications = classifications.map((c, index) => {\n  const rank = index + 1;\n  const tier = rank === 1 ? 'primary' : 'secondary';\n  \n  // Apply confidence adjustments\n  const adjustedConfidence = Math.max(0, Math.min(1, c.confidence + netAdjustment));\n  \n  return {\n    ...c,\n    rank: rank,\n    tier: tier,\n    adjusted_confidence: adjustedConfidence\n  };\n});\n\nconst primaryCount = tieredClassifications.filter(c => c.tier === 'primary').length;\nconst secondaryCount = tieredClassifications.filter(c => c.tier === 'secondary').length;\n\n// ============================================================\n// EQUIPMENT ROUTING THRESHOLDS\n// Auto-approve: >= 0.80 (not 0.85)\n// Human review: 0.55-0.80 (not 0.65-0.85)\n// Rejection: < 0.55 (not < 0.65)\n// ============================================================\nconst AUTO_APPROVE = 0.80;\nconst REJECT = 0.55;\n\nlet routingDecision;\nif (finalConfidence >= AUTO_APPROVE) routingDecision = 'auto_approve';\nelse if (finalConfidence >= REJECT) routingDecision = 'human_review';\nelse routingDecision = 'reject';\n\nconsole.log(`\\n============================================================`);\nconsole.log(`📊 FINAL CONFIDENCE: ${inputData.name}`);\nconsole.log(`============================================================`);\nconsole.log(`   Base Mean:         ${(baseMean * 100).toFixed(1)}%`);\nconsole.log(`   CF1 Penalty:       -${(cf1Penalty * 100).toFixed(1)}%`);\nconsole.log(`   Crosswalk Mod:     ${crosswalkModifier >= 0 ? '+' : ''}${(crosswalkModifier * 100).toFixed(1)}%`);\nconsole.log(`   CRE Penalty:       -${(crePenalty * 100).toFixed(1)}%`);\nconsole.log(`   Data Quality:      -${(dataQualityPenalty * 100).toFixed(1)}%`);\nconsole.log(`   ─────────────────────────────────────────`);\nconsole.log(`   Final:             ${(finalConfidence * 100).toFixed(1)}%`);\nconsole.log(`   Routing:           ${routingDecision.toUpperCase()}`);\nconsole.log(`   Tiers:             ${primaryCount} primary, ${secondaryCount} secondary`);\nconsole.log(`============================================================\\n`);\n\nreturn [{\n  json: {\n    ...inputData,\n    classifications: tieredClassifications,\n    classification_count: tieredClassifications.length,\n    final_confidence: Math.round(finalConfidence * 10000) / 10000,\n    routing_decision: routingDecision,\n    confidence_breakdown: {\n      base_mean: baseMean,\n      cf1_penalty: cf1Penalty,\n      crosswalk_modifier: crosswalkModifier,\n      cre_penalty: crePenalty,\n      data_quality_penalty: dataQualityPenalty,\n      net_adjustment: netAdjustment\n    },\n    tier_summary: {\n      primary_count: primaryCount,\n      secondary_count: secondaryCount\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3472,
+        -80
+      ],
+      "id": "2f8cb8da-4578-4b7f-bf97-07aaab2abe31",
+      "name": "Calculate Final Confidence & Assign Tiers",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Neo4j Write Query (Equipment)\n// Creates [:CLASSIFIED_AS] relationships to UNSPSC Standards\n// ============================================================\n\nconst inputData = $input.first().json;\n\nif (inputData.classification_failed) {\n  return [{\n    json: {\n      ...inputData,\n      neo4j_payload: {\n        statement: `\n          MATCH (obj:FATObject {asset_id: $asset_id})\n          SET obj.status = 'classification_failed',\n              obj.classification_failed_at = datetime(),\n              obj.classification_failed_reason = $failure_reason\n          RETURN obj.asset_id AS asset_id, obj.status AS status\n        `,\n        parameters: {\n          asset_id: inputData.asset_id,\n          failure_reason: inputData.failure_reason || 'Unknown error'\n        }\n      },\n      is_failure_update: true\n    }\n  }];\n}\n\n// Deduplicate Standard A classifications\nconst seenCodes = new Set();\nconst uniqueClassifications = [];\n\nfor (const c of inputData.classifications) {\n  const code = String(c.code);\n  if (!seenCodes.has(code)) {\n    seenCodes.add(code);\n    uniqueClassifications.push({\n      code: code,  // <-- Keep as STRING, not parseInt\n      name: c.name,\n      confidence: c.adjusted_confidence || c.confidence,\n      justification: c.justification,\n      evidence: c.evidence || [],\n      rank: c.rank || null,\n      tier: c.tier || null\n    });\n  }\n}\n\nconst standardBClassifications = (inputData.standard_b_classifications || []).map(c => ({\n  code: String(c.code),\n  name: c.name,\n  confidence: c.confidence,\n  justification: c.justification || ''\n}));\n\n// Build Cypher to create [:CLASSIFIED_AS] relationships\nconst cypherPayload = {\n  statement: `\n    MATCH (obj:FATObject:Equipment {asset_id: $asset_id})\n    \n    SET obj.status = 'classified',\n        obj.classified_at = datetime(),\n        obj.final_confidence = $final_confidence,\n        obj.routing_decision = $routing_decision,\n        obj.classification_count = $classification_count,\n        obj.equipment_complexity_assessed = $complexity_assessed\n    \n    WITH obj\n    \n    // Create UNSPSC [:CLASSIFIED_AS] relationships\n    UNWIND $classifications_a AS cls\n    MATCH (std:Standard:UNSPSC {code: cls.code})\n    MERGE (obj)-[r:CLASSIFIED_AS]->(std)\n    SET r.confidence = cls.confidence,\n        r.justification = cls.justification,\n        r.rank = cls.rank,\n        r.tier = cls.tier,\n        r.classified_at = datetime(),\n        r.workflow = 'OBJECT-3',\n        r.workflow_version = 'v1.0.0-equipment'\n    \n    WITH obj, count(r) AS standard_a_count\n    \n    // Create OECD FOS [:CLASSIFIED_AS] relationships\n    UNWIND $classifications_b AS cls_b\n    MATCH (fos:Standard:OECD_FOS {code: cls_b.code})\n    MERGE (obj)-[r2:CLASSIFIED_AS]->(fos)\n    SET r2.confidence = cls_b.confidence,\n        r2.justification = cls_b.justification,\n        r2.standard_type = 'domain',\n        r2.classified_at = datetime(),\n        r2.workflow = 'OBJECT-3',\n        r2.workflow_version = 'v1.0.0-equipment'\n    \n    RETURN obj.asset_id AS asset_id, obj.status AS status,\n           standard_a_count, count(r2) AS standard_b_count\n  `,\n  parameters: {\n    asset_id: inputData.asset_id,\n    final_confidence: inputData.final_confidence,\n    routing_decision: inputData.routing_decision,\n    classification_count: uniqueClassifications.length,\n    complexity_assessed: inputData.equipment_complexity_assessed || inputData.equipment_complexity,\n    classifications_a: uniqueClassifications,\n    classifications_b: standardBClassifications\n  }\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    classifications: uniqueClassifications,\n    neo4j_payload: cypherPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3712,
+        -80
+      ],
+      "id": "95e5a377-bc40-4e1a-b0f2-d67a1878a716",
+      "name": "Prepare Neo4j Write Query",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3952,
+        -80
+      ],
+      "id": "1888ccf7-ce75-4bdf-aa54-34e787f40140",
+      "name": "Write to Neo4j",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Qdrant Payload (Equipment)\n// Updates objects_equipment_v1 with classification metadata\n// Uses /points/payload endpoint format (not upsert)\n// ============================================================\n\nconst inputData = $('Prepare Neo4j Write Query').item.json;\nconst existingPayload = $('Merge Embedding').item.json;\n\nconst classificationCodes = inputData.classifications.map(c => parseInt(c.code, 10));\nconst classificationConfidences = inputData.classifications.map(c => c.confidence);\nconst classificationTiers = inputData.classifications.map(c => c.tier || null);\n\nconst primaryCodes = inputData.classifications.filter(c => c.tier === 'primary').map(c => parseInt(c.code, 10));\nconst secondaryCodes = inputData.classifications.filter(c => c.tier === 'secondary').map(c => parseInt(c.code, 10));\n\nconst classificationCodesB = (inputData.standard_b_classifications || []).map(c => c.code);\nconst classificationConfidencesB = (inputData.standard_b_classifications || []).map(c => c.confidence);\n\n// Build the payload to set\nconst payloadToSet = {\n  status: \"classified\",\n  \n  classifications: classificationCodes,\n  classification_confidences: classificationConfidences,\n  classification_taxonomy: \"UNSPSC\",\n  classification_tiers: classificationTiers,\n  primary_codes: primaryCodes,\n  secondary_codes: secondaryCodes,\n  \n  classifications_b: classificationCodesB,\n  classification_confidences_b: classificationConfidencesB,\n  classification_taxonomy_b: \"OECD_FOS_2007\",\n  \n  final_confidence: inputData.final_confidence,\n  routing_decision: inputData.routing_decision,\n  classified_at: new Date().toISOString()\n};\n\n// CORRECT format for /points/payload endpoint\nconst qdrantUpdatePayload = {\n  payload: payloadToSet,\n  points: [existingPayload.qdrant_point_id]\n};\n\nreturn [{\n  json: {\n    ...inputData,\n    qdrant_update_payload: qdrantUpdatePayload,\n    qdrant_point_id: existingPayload.qdrant_point_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4192,
+        -80
+      ],
+      "id": "cc18d185-ce95-4274-9b65-484ba5e2feba",
+      "name": "Prepare Qdrant Payload",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_equipment_v1/points/payload",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qdrant_update_payload) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        4432,
+        -80
+      ],
+      "id": "ad1fe694-639a-4807-9676-c7ece6d8dd04",
+      "name": "Update Qdrant",
+      "typeVersion": 4.1,
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Classification Signals (Equipment)\n// Version: v1.0.0\n// ============================================================\n\nconst inputData = $('Prepare Qdrant Payload').item.json;\nconst timestamp = new Date().toISOString();\nconst assetId = inputData.asset_id;\n\nconst signals = [];\n\n// 1. classification_completed\nsignals.push({\n  signal_type: \"classification_completed\",\n  category: \"AssessmentSignal\",\n  target_entity: assetId,\n  timestamp: timestamp,\n  value: inputData.final_confidence,\n  reason: \"Equipment classification completed\",\n  metadata: JSON.stringify({\n    primary_code: inputData.classifications[0]?.code || null,\n    code_count: inputData.classification_count,\n    equipment_complexity: inputData.equipment_complexity,\n    routing_decision: inputData.routing_decision\n  }),\n  workflow_id: \"OBJECT-3\",\n  workflow_version: \"v1.0.0-equipment\"\n});\n\n// 2. confidence_assessed\nsignals.push({\n  signal_type: \"confidence_assessed\",\n  category: \"MeasurementSignal\",\n  target_entity: assetId,\n  timestamp: timestamp,\n  value: inputData.final_confidence,\n  reason: \"Confidence score calculated\",\n  metadata: JSON.stringify(inputData.confidence_breakdown || {}),\n  workflow_id: \"OBJECT-3\",\n  workflow_version: \"v1.0.0-equipment\"\n});\n\n// 3. threshold_breach (conditional)\nconst AUTO_APPROVE = 0.80;\nif (inputData.final_confidence < AUTO_APPROVE) {\n  const FAIL = 0.55;\n  signals.push({\n    signal_type: \"threshold_breach\",\n    category: \"AssessmentSignal\",\n    target_entity: assetId,\n    timestamp: timestamp,\n    value: inputData.final_confidence,\n    reason: \"Below auto-approval threshold\",\n    metadata: JSON.stringify({\n      threshold: AUTO_APPROVE,\n      actual: inputData.final_confidence,\n      routed_to: inputData.final_confidence >= FAIL ? \"human_review\" : \"reject\"\n    }),\n    workflow_id: \"OBJECT-3\",\n    workflow_version: \"v1.0.0-equipment\"\n  });\n}\n\nconst signalNeo4jPayload = {\n  statement: `\n    UNWIND $signals AS sig\n    MATCH (e {asset_id: sig.target_entity})\n    MERGE (s:Signal {\n      target_entity: sig.target_entity,\n      signal_type: sig.signal_type,\n      workflow_id: sig.workflow_id\n    })\n    ON CREATE SET\n      s.signal_id = sig.target_entity + ':' + sig.signal_type + ':' + sig.workflow_id,\n      s.category = sig.category,\n      s.timestamp = datetime(sig.timestamp),\n      s.value = sig.value,\n      s.reason = sig.reason,\n      s.metadata = sig.metadata,\n      s.workflow_version = sig.workflow_version\n    ON MATCH SET\n      s.timestamp = datetime(sig.timestamp),\n      s.value = sig.value,\n      s.reason = sig.reason,\n      s.metadata = sig.metadata,\n      s.workflow_version = sig.workflow_version\n    MERGE (e)-[:HAS_SIGNAL]->(s)\n    RETURN count(s) AS signals_merged\n  `,\n  parameters: { signals: signals }\n};\n\nconsole.log(`📡 ${signals.length} signals prepared for ${inputData.name}`);\n\nreturn [{\n  json: {\n    ...inputData,\n    signals_emitted: signals,\n    signal_count: signals.length,\n    signal_neo4j_payload: signalNeo4jPayload\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4672,
+        -80
+      ],
+      "id": "8308ffa8-6291-4399-842d-49eaef89562c",
+      "name": "Prepare Classification Signals",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.signal_neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        4912,
+        -80
+      ],
+      "id": "ddeb807b-1d5e-4ba5-b1a9-d85893b17ccd",
+      "name": "Write Signals to Neo4j",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Final Output (Equipment)\n// Summary of classification results\n// ============================================================\n\nconst inputData = $('Prepare Qdrant Payload').item.json;\nconst signalData = $('Prepare Classification Signals').item.json;\n\nconst classifications = inputData.classifications || [];\nconst primaryCodes = classifications.filter(c => c.tier === 'primary');\nconst secondaryCodes = classifications.filter(c => c.tier === 'secondary');\n\nconst output = {\n  asset_id: inputData.asset_id,\n  name: inputData.name,\n  equipment_id: inputData.equipment_id,\n  status: \"classified\",\n  \n  equipment_complexity: inputData.equipment_complexity_assessed || inputData.equipment_complexity,\n  \n  standard_a: {\n    taxonomy: \"UNSPSC\",\n    codes: classifications.map(c => ({\n      code: c.code, name: c.name, confidence: c.confidence,\n      rank: c.rank, tier: c.tier\n    })),\n    count: classifications.length\n  },\n  \n  standard_b: {\n    taxonomy: \"OECD_FOS_2007\",\n    codes: (inputData.standard_b_classifications || []).map(c => ({\n      code: c.code, name: c.name, confidence: c.confidence\n    })),\n    count: inputData.standard_b_count || 0\n  },\n  \n  final_confidence: inputData.final_confidence,\n  routing_decision: inputData.routing_decision,\n  confidence_breakdown: inputData.confidence_breakdown,\n  \n  tier_summary: {\n    primary: primaryCodes.map(c => `${c.code} ${c.name}`),\n    secondary: secondaryCodes.map(c => `${c.code} ${c.name}`)\n  },\n  \n  crosswalk_status: inputData.crosswalk_assessment?.alignment_status || 'unknown',\n  signal_count: signalData.signal_count || 0,\n  \n  workflow: 'OBJECT-3',\n  workflow_version: 'v1.0.0-equipment',\n  classified_at: new Date().toISOString()\n};\n\nconsole.log(`\\n============================================================`);\nconsole.log(`✅ CLASSIFICATION COMPLETE: ${output.name}`);\nconsole.log(`============================================================`);\nconsole.log(`   UNSPSC: ${output.standard_a.codes.map(c => c.code).join(', ')}`);\nconsole.log(`   OECD FOS: ${output.standard_b.codes.map(c => c.code).join(', ')}`);\nconsole.log(`   Confidence: ${(output.final_confidence * 100).toFixed(1)}%`);\nconsole.log(`   Routing: ${output.routing_decision}`);\nconsole.log(`============================================================\\n`);\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        5152,
+        -80
+      ],
+      "id": "44d96b3f-0e7d-4377-85e7-fbd06ee03242",
+      "name": "Final Output",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "23a67dd4-e2c6-47de-bf03-6d93c06b8ac0",
+              "leftValue": "={{ $json.classification_failed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "position": [
+        1552,
+        256
+      ],
+      "id": "cdb552c5-d493-46dc-bf23-01e9fb89d8aa",
+      "name": "Classification Failed",
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.first().json;\n\nreturn [{\n  json: {\n    ...inputData,\n    neo4j_failure_update: {\n      statement: `\n        MATCH (obj:FATObject {asset_id: $asset_id})\n        SET obj.status = 'classification_failed',\n            obj.classification_failed_at = datetime(),\n            obj.classification_failed_reason = $reason\n        RETURN obj.asset_id, obj.status\n      `,\n      parameters: {\n        asset_id: inputData.asset_id,\n        reason: inputData.failure_reason || 'LLM parse failed'\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1792,
+        256
+      ],
+      "id": "354af34b-7c40-42a5-a958-2a1149992148",
+      "name": "Prepare Failure Update (Neo4j)",
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_failure_update }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        2032,
+        256
+      ],
+      "id": "b6ddb96e-0556-4cbf-8016-692578d7714d",
+      "name": "Execute Failure Update",
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch FATObjects": {
+      "main": [
+        [
+          {
+            "node": "Fetch FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch FATObjects": {
+      "main": [
+        [
+          {
+            "node": "Parse Neo4j Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Neo4j Response": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Check Data Quality",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Data Quality": {
+      "main": [
+        [
+          {
+            "node": "Prepare Status Update to Classifying",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Status Update to Classifying": {
+      "main": [
+        [
+          {
+            "node": "Execute Status Update to Classifying",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Status Update to Classifying": {
+      "main": [
+        [
+          {
+            "node": "Parse Status Update Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Status Update Response": {
+      "main": [
+        [
+          {
+            "node": "Fetch Embedding Vector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Embedding Vector": {
+      "main": [
+        [
+          {
+            "node": "Merge Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Vector Search UNSPSC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Vector Search UNSPSC": {
+      "main": [
+        [
+          {
+            "node": "Vector Search UNSPSC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search UNSPSC": {
+      "main": [
+        [
+          {
+            "node": "Parse Vector Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Vector Search Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare Cohere Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Cohere Request": {
+      "main": [
+        [
+          {
+            "node": "Cohere Rerank",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cohere Rerank": {
+      "main": [
+        [
+          {
+            "node": "Parse Cohere Rerank Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Cohere Rerank Results": {
+      "main": [
+        [
+          {
+            "node": "Prepare FOS Vector Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare FOS Vector Search": {
+      "main": [
+        [
+          {
+            "node": "Vector Search FOS (Qdrant)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search FOS (Qdrant)": {
+      "main": [
+        [
+          {
+            "node": "Parse FOS Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse FOS Candidates": {
+      "main": [
+        [
+          {
+            "node": "Prepare Equipment LLM Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Equipment LLM Prompt": {
+      "main": [
+        [
+          {
+            "node": "Pass 2: LLM Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 2: LLM Classification": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Check Parse Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Parse Success": {
+      "main": [
+        [
+          {
+            "node": "UNSPSC Hierarchy Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classification Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classification Failed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Failure Update (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Failure Update (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Execute Failure Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Failure Update": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UNSPSC Hierarchy Check": {
+      "main": [
+        [
+          {
+            "node": "Prepare Crosswalk Assessment Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Crosswalk Assessment Query": {
+      "main": [
+        [
+          {
+            "node": "Execute Crosswalk Assessment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Crosswalk Assessment": {
+      "main": [
+        [
+          {
+            "node": "Calculate Crosswalk Alignment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Crosswalk Alignment": {
+      "main": [
+        [
+          {
+            "node": "Prepare CRE Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare CRE Input": {
+      "main": [
+        [
+          {
+            "node": "SYSTEM-2_CRE_Assessment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SYSTEM-2_CRE_Assessment": {
+      "main": [
+        [
+          {
+            "node": "Merge CRE Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge CRE Output": {
+      "main": [
+        [
+          {
+            "node": "Calculate Final Confidence & Assign Tiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Final Confidence & Assign Tiers": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Write Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Write Query": {
+      "main": [
+        [
+          {
+            "node": "Write to Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Payload": {
+      "main": [
+        [
+          {
+            "node": "Update Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Prepare Classification Signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Classification Signals": {
+      "main": [
+        [
+          {
+            "node": "Write Signals to Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Signals to Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Output": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "50f26c59-e78e-4123-aa9c-679467ccd28a",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "QyS4j-VtyuDo1lCKH27QZ",
+  "tags": [
+    {
+      "updatedAt": "2026-02-03T00:03:00.810Z",
+      "createdAt": "2026-02-03T00:03:00.810Z",
+      "id": "c3sCnpq4H5Xan5xf",
+      "name": "equipment instance"
+    }
+  ]
+}

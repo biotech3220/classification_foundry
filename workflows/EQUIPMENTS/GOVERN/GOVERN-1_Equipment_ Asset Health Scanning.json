@@ -1,0 +1,587 @@
+{
+  "name": "GOVERN-1_Equipment: Asset Health Scanning",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "monthsInterval": 6
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1184,
+        16
+      ],
+      "id": "e8dc877b-423c-470b-a286-cbe7acbdf4ef",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Fetch Due FATObjects (Equipment Instance)\n// Purpose: Build Neo4j query to find Equipment FATObjects due for scanning\n// Criteria: status = 'active' AND next_source_scan <= now()\n// ============================================================\n\nconst now = new Date().toISOString();\nconst batchSize = 50; // Process up to 50 equipment items per cycle\n\nconst cypherPayload = {\n  statement: `\n    MATCH (obj:FATObject:Equipment)\n    WHERE obj.status = 'active'\n      AND obj.next_source_scan <= datetime()\n    \n    RETURN \n      obj.equipment_id AS asset_id,\n      obj.equipment_name AS name,\n      obj.manufacturer AS manufacturer,\n      obj.model AS model,\n      obj.serial_number AS serial_number,\n      obj.location AS location,\n      obj.facility_id AS facility_id,\n      obj.operational_status AS operational_status,\n      obj.last_calibration_date AS last_calibration_date,\n      obj.field_hashes AS field_hashes,\n      obj.last_scanned_at AS last_scanned_at,\n      obj.next_source_scan AS next_source_scan,\n      obj.scan_interval AS scan_interval,\n      obj.source_freshness_score AS source_freshness_score,\n      obj.version AS version\n    \n    ORDER BY obj.next_source_scan ASC\n    LIMIT $batch_size\n  `,\n  parameters: {\n    batch_size: batchSize\n  }\n};\n\nconsole.log(`GOVERN-1 Equipment: Fetching Equipment FATObjects due for scan (limit: ${batchSize})`);\n\nreturn [{\n  json: {\n    neo4j_payload: cypherPayload,\n    batch_size: batchSize,\n    query_time: now,\n    workflow: 'GOVERN-1_Equipment',\n    workflow_version: 'v1.0'\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        16
+      ],
+      "id": "d13c1978-5e79-4b26-8718-0c7eaa8d8e7c",
+      "name": "Prepare Fetch Due FATObjects"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        16
+      ],
+      "id": "ae4a3cc1-360a-49a9-9b2a-31d14c2de5eb",
+      "name": "Fetch Due FATObjects (Neo4j HTTP Request)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Parse Neo4j Response (Equipment Instance)\n// Purpose: Transform Neo4j response into array of Equipment FATObjects\n// ============================================================\n\nconst response = $input.first().json;\nconst queryContext = $('Prepare Fetch Due FATObjects').first().json;\n\nconst fields = response.data?.fields || [];\nconst values = response.data?.values || [];\n\nif (values.length === 0) {\n  console.log('No Equipment FATObjects due for scanning');\n  return [{\n    json: {\n      has_items: false,\n      item_count: 0,\n      items: [],\n      query_time: queryContext.query_time\n    }\n  }];\n}\n\nconst items = values.map(row => {\n  const obj = {};\n  fields.forEach((field, idx) => {\n    obj[field] = row[idx];\n  });\n  \n  let fieldHashes = {};\n  if (obj.field_hashes) {\n    try {\n      fieldHashes = typeof obj.field_hashes === 'string' \n        ? JSON.parse(obj.field_hashes) \n        : obj.field_hashes;\n    } catch (e) {\n      fieldHashes = {};\n    }\n  }\n  \n  return {\n    asset_id: obj.asset_id,\n    name: obj.name,\n    manufacturer: obj.manufacturer,\n    model: obj.model,\n    serial_number: obj.serial_number,\n    location: obj.location,\n    facility_id: obj.facility_id,\n    operational_status: obj.operational_status,\n    last_calibration_date: obj.last_calibration_date,\n    existing_field_hashes: fieldHashes,\n    last_scanned_at: obj.last_scanned_at,\n    next_source_scan: obj.next_source_scan,\n    scan_interval: obj.scan_interval || 180,\n    source_freshness_score: obj.source_freshness_score,\n    version: obj.version\n  };\n});\n\nconsole.log(`Found ${items.length} Equipment FATObjects due for scanning`);\n\nreturn [{\n  json: {\n    has_items: true,\n    item_count: items.length,\n    items: items,\n    query_time: queryContext.query_time\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        16
+      ],
+      "id": "51105365-63b7-4af2-8119-bffb90a8d2c3",
+      "name": "Parse Neo4j Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "94953168-2467-43e7-8a01-7f6397e9a79e",
+              "leftValue": "={{ $json.has_items }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -352,
+        16
+      ],
+      "id": "7d27b983-6a25-4949-8d9b-ff1783139795",
+      "name": "Has Items to Scan"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Log No Items (Equipment Instance)\n// ============================================================\n\nconst context = $input.first().json;\n\nconsole.log('GOVERN-1 Equipment complete: No Equipment FATObjects due for scanning');\n\nreturn [{\n  json: {\n    workflow: 'GOVERN-1_Equipment',\n    status: 'complete',\n    items_scanned: 0,\n    message: 'No Equipment FATObjects due for scanning',\n    next_run: 'In 6 months',\n    completed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        192
+      ],
+      "id": "6a111f9c-13ad-4c7d-8ff6-3c68eb3c75a2",
+      "name": "Log No Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Split Into Items (Equipment Instance)\n// ============================================================\n\nconst data = $input.first().json;\nconst items = data.items || [];\n\nreturn items.map(item => ({\n  json: {\n    ...item,\n    batch_context: {\n      total_items: data.item_count,\n      query_time: data.query_time\n    }\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        0
+      ],
+      "id": "13610f70-6558-4530-9c74-0c6029734e76",
+      "name": "Split Into Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare OBJECT-1 Request (Equipment Instance)\n// Purpose: Format request for OBJECT-1 Equipment maintenance scan\n// ============================================================\n\nconst item = $input.first().json;\n\nconst requestBody = {\n  mode: 'maintenance_scan',\n  \n  // Equipment identifiers\n  asset_id: item.asset_id,\n  asset_type: 'equipment',\n  name: item.name,\n  manufacturer: item.manufacturer,\n  model: item.model,\n  serial_number: item.serial_number,\n  location: item.location,\n  facility_id: item.facility_id,\n  operational_status: item.operational_status,\n  last_calibration_date: item.last_calibration_date,\n  \n  existing_field_hashes: item.existing_field_hashes || {},\n  \n  scan_context: {\n    triggered_by: 'GOVERN-1_Equipment',\n    last_scanned_at: item.last_scanned_at,\n    scan_interval: item.scan_interval,\n    source_freshness_score: item.source_freshness_score\n  }\n};\n\nconsole.log(`Preparing equipment scan request for: ${item.name} (${item.asset_id})`);\n\nreturn [{\n  json: {\n    request_body: requestBody,\n    asset_id: item.asset_id,\n    name: item.name,\n    scan_interval: item.scan_interval,\n    batch_context: item.batch_context\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1216,
+        400
+      ],
+      "id": "9f944a4f-27f1-447b-8702-bbcf00c7fcd3",
+      "name": "Prepare OBJECT-1 Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://mbcrc.app.n8n.cloud/webhook/object1-maintenance-scan",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.request_body }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1008,
+        400
+      ],
+      "id": "7b10cf12-6f2a-4de0-bafe-60abdf64bf8e",
+      "name": "Call OBJECT-1 Webhook",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Process Scan Result (Equipment Instance)\n// Purpose: Process OBJECT-1 Equipment scan response\n// Includes equipment-specific change signal detection\n// ============================================================\n\nconst webhookResponse = $input.first().json;\nconst requestContext = $('Prepare OBJECT-1 Request').first().json;\n\nif (!webhookResponse || !webhookResponse.scan_status) {\n  console.log(`Scan failed for ${requestContext.name}: Invalid response`);\n  \n  return [{\n    json: {\n      asset_id: requestContext.asset_id,\n      name: requestContext.name,\n      scan_success: false,\n      scan_status: 'verification_failed',\n      error: 'Invalid or empty response from OBJECT-1 Equipment',\n      changed_fields: [],\n      change_count: 0,\n      change_signals: [],\n      new_field_hashes: {},\n      metrics_snapshot: null,\n      fresh_data: null,\n      scanned_at: new Date().toISOString(),\n      scan_interval: requestContext.scan_interval,\n      batch_context: requestContext.batch_context\n    }\n  }];\n}\n\nconst scanStatus = webhookResponse.scan_status;\nconst changedFields = webhookResponse.changed_fields || [];\nconst changeCount = webhookResponse.change_count || changedFields.length;\n\nconsole.log(`Scan complete for ${requestContext.name}: ${scanStatus}`);\nif (changeCount > 0) {\n  console.log(`   Changed fields: ${changedFields.join(', ')}`);\n}\n\n// ---- Equipment-Specific Change Signal Detection ----\nconst changeSignals = [];\n\n// Signal 1: Calibration due\nif (webhookResponse.fresh_data?.last_calibration_date) {\n  const lastCal = new Date(webhookResponse.fresh_data.last_calibration_date);\n  const daysSinceCalibration = Math.floor((Date.now() - lastCal.getTime()) / (1000 * 60 * 60 * 24));\n  if (daysSinceCalibration > 365) {\n    changeSignals.push({\n      type: 'calibration_due',\n      severity: 'moderate',\n      days_overdue: daysSinceCalibration - 365\n    });\n  }\n}\n\n// Signal 2: Operational status change (CRITICAL)\nif (changedFields.includes('operational_status')) {\n  changeSignals.push({\n    type: 'operational_status_change',\n    severity: 'critical',\n    previous: webhookResponse.previous_field_hashes?.operational_status,\n    current: webhookResponse.fresh_data?.operational_status\n  });\n}\n\n// Signal 3: Location change (maintenance/redeployment indicator)\nif (changedFields.includes('location')) {\n  changeSignals.push({\n    type: 'maintenance_status',\n    severity: 'moderate',\n    detail: 'Equipment location changed - may indicate maintenance or redeployment'\n  });\n}\n\n// Signal 4: Specification changes (may require re-classification)\nconst specFields = ['specifications', 'capacity', 'throughput', 'power'];\nconst specChanges = changedFields.filter(f => specFields.some(s => f.toLowerCase().includes(s)));\nif (specChanges.length > 0) {\n  changeSignals.push({\n    type: 'specification_change',\n    severity: 'moderate',\n    changed_specs: specChanges,\n    detail: 'Specification change may require re-classification'\n  });\n}\n\n// Calculate freshness score\nlet newFreshnessScore = 1.0;\nif (scanStatus === 'changes_detected') {\n  newFreshnessScore = Math.max(0.3, 1.0 - (changeCount * 0.1));\n  const criticalSignals = changeSignals.filter(s => s.severity === 'critical');\n  if (criticalSignals.length > 0) {\n    newFreshnessScore = Math.max(0.2, newFreshnessScore - 0.1);\n  }\n} else if (scanStatus === 'verification_failed') {\n  newFreshnessScore = 0.5;\n}\n\nreturn [{\n  json: {\n    asset_id: webhookResponse.asset_id || requestContext.asset_id,\n    name: webhookResponse.name || requestContext.name,\n    manufacturer: webhookResponse.manufacturer,\n    model: webhookResponse.model,\n    operational_status: webhookResponse.operational_status,\n    \n    scan_success: true,\n    scan_status: scanStatus,\n    changed_fields: changedFields,\n    change_count: changeCount,\n    change_signals: changeSignals,\n    change_details: webhookResponse.change_details || {},\n    \n    new_field_hashes: webhookResponse.new_field_hashes || {},\n    previous_field_hashes: webhookResponse.previous_field_hashes || {},\n    \n    metrics_snapshot: webhookResponse.metrics_snapshot || null,\n    fresh_data: webhookResponse.fresh_data || null,\n    \n    data_completeness: webhookResponse.data_completeness,\n    data_quality_flags: webhookResponse.data_quality_flags || [],\n    \n    sources_scraped: webhookResponse.sources_scraped || [],\n    source_success: webhookResponse.source_success || {},\n    \n    new_freshness_score: newFreshnessScore,\n    \n    scanned_at: webhookResponse.scanned_at || new Date().toISOString(),\n    scan_duration_ms: webhookResponse.scan_duration_ms,\n    scan_interval: requestContext.scan_interval,\n    batch_context: requestContext.batch_context\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        400
+      ],
+      "id": "24a2bce7-447e-47c6-81ae-48290058746f",
+      "name": "Process Scan Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Neo4j Freshness Update (Equipment Instance)\n// Purpose: Build Cypher to update Equipment FATObject freshness\n// ============================================================\n\nconst scanResult = $input.first().json;\n\nif (!scanResult.asset_id) {\n  throw new Error('Missing asset_id in scan result');\n}\n\n// Equipment default: 180 days, ceiling: 365 days\nconst scanIntervalDays = scanResult.scan_interval || 180;\n\nlet adjustedInterval = scanIntervalDays;\nif (scanResult.scan_status === 'changes_detected') {\n  adjustedInterval = Math.max(30, Math.floor(scanIntervalDays * 0.75));\n  // Critical signals -> scan even sooner\n  const criticalSignals = (scanResult.change_signals || []).filter(s => s.severity === 'critical');\n  if (criticalSignals.length > 0) {\n    adjustedInterval = Math.max(14, Math.floor(adjustedInterval * 0.5));\n  }\n} else if (scanResult.scan_status === 'verified_unchanged') {\n  adjustedInterval = Math.min(365, Math.floor(scanIntervalDays * 1.25));\n}\n\nlet freshnessScore = scanResult.new_freshness_score;\nif (freshnessScore === undefined || freshnessScore === null) {\n  freshnessScore = 1.0;\n  if (scanResult.scan_status === 'changes_detected') {\n    const changeCount = scanResult.change_count || 0;\n    freshnessScore = Math.max(0.3, 1.0 - (changeCount * 0.1));\n  } else if (scanResult.scan_status === 'verification_failed') {\n    freshnessScore = 0.5;\n  }\n}\n\nconst scannedAt = scanResult.scanned_at || new Date().toISOString();\nconst fieldHashesStr = typeof scanResult.new_field_hashes === 'string'\n  ? scanResult.new_field_hashes\n  : JSON.stringify(scanResult.new_field_hashes || {});\n\nconst cypherPayload = {\n  statement: `\n    MATCH (obj:FATObject:Equipment {equipment_id: $asset_id})\n    WHERE obj.status = 'active'\n    SET obj.last_scanned_at = datetime($scanned_at),\n        obj.next_source_scan = datetime($scanned_at) + duration({days: $interval_days}),\n        obj.scan_interval = $interval_days,\n        obj.source_freshness_score = $freshness_score,\n        obj.field_hashes = $field_hashes,\n        obj.scan_count = coalesce(obj.scan_count, 0) + 1,\n        obj.last_scan_status = $scan_status,\n        obj.last_change_signal_count = $signal_count\n    RETURN obj.equipment_id AS asset_id, obj.next_source_scan AS next_scan\n  `,\n  parameters: {\n    asset_id: scanResult.asset_id,\n    scanned_at: scannedAt,\n    interval_days: adjustedInterval,\n    freshness_score: freshnessScore,\n    field_hashes: fieldHashesStr,\n    scan_status: scanResult.scan_status,\n    signal_count: (scanResult.change_signals || []).length\n  }\n};\n\nconsole.log(`Updating freshness for ${scanResult.name}:`);\nconsole.log(`   Freshness: ${freshnessScore.toFixed(2)}, Next scan in: ${adjustedInterval} days`);\n\nreturn [{\n  json: {\n    neo4j_payload: cypherPayload,\n    scan_result: scanResult,\n    adjusted_interval: adjustedInterval,\n    freshness_score: freshnessScore\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -592,
+        400
+      ],
+      "id": "be0a628e-8577-44f6-841f-1181dd96ea80",
+      "name": "Prepare Neo4j Freshness Update"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -336,
+        400
+      ],
+      "id": "fd543ec9-a117-4b1d-a7a1-46d1d03f3e85",
+      "name": "Update Neo4j Freshness (HTTP Request)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Prepare Queue Entry (Equipment Instance)\n// Purpose: Prepare entry for change_detection_queue (Supabase)\n// Feeds into GOVERN-2 for severity classification\n// ============================================================\n\nconst context = $('Prepare Neo4j Freshness Update').first().json;\nconst scanResult = context.scan_result;\nconst neo4jResponse = $input.first().json;\n\nlet priority = 'normal';\nif (scanResult.change_count >= 5) {\n  priority = 'high';\n} else if (scanResult.scan_status === 'verification_failed') {\n  priority = 'high';\n}\n\n// Equipment-specific: critical signals escalate to critical priority\nconst criticalSignals = (scanResult.change_signals || []).filter(s => s.severity === 'critical');\nif (criticalSignals.length > 0) {\n  priority = 'critical';\n}\n\nconst queueEntry = {\n  asset_id: scanResult.asset_id,\n  entity_type: 'equipment',\n  \n  scan_status: scanResult.scan_status,\n  \n  scan_result: {\n    changed_fields: scanResult.changed_fields || [],\n    change_count: scanResult.change_count || 0,\n    change_signals: scanResult.change_signals || [],\n    new_field_hashes: scanResult.new_field_hashes || {},\n    previous_field_hashes: scanResult.previous_field_hashes || {},\n    metrics_snapshot: scanResult.metrics_snapshot || null,\n    fresh_data: scanResult.fresh_data || null,\n    change_details: scanResult.change_details || {},\n    data_completeness: scanResult.data_completeness,\n    data_quality_flags: scanResult.data_quality_flags || [],\n    sources_scraped: scanResult.sources_scraped || [],\n    source_success: scanResult.source_success || {},\n    scan_duration_ms: scanResult.scan_duration_ms\n  },\n  \n  priority: priority,\n  queue_status: 'pending_classification',\n  \n  scanned_at: scanResult.scanned_at || new Date().toISOString()\n};\n\nconsole.log(`Queuing equipment scan result for ${scanResult.name}`);\nconsole.log(`   Status: ${scanResult.scan_status}, Priority: ${priority}`);\n\nreturn [{\n  json: {\n    queue_entry: queueEntry,\n    scan_result: scanResult,\n    batch_context: scanResult.batch_context\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        400
+      ],
+      "id": "4c7c6771-aff0-4a18-ae2e-e2d3fd6df822",
+      "name": "Prepare Queue Entry"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/change_detection_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.queue_entry }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        400
+      ],
+      "id": "b2a8435a-53dd-42c1-8c6c-4359add4a435",
+      "name": "Write to change_detection_queue (Supabase HTTP Request)",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        },
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Log Scan Complete (Equipment Instance)\n// ============================================================\n\nconst context = $('Prepare Queue Entry').first().json;\nconst scanResult = context.scan_result;\nconst queueResponse = $input.first().json;\n\nconst queueEntryId = Array.isArray(queueResponse) \n  ? queueResponse[0]?.queue_entry_id \n  : queueResponse?.queue_entry_id;\n\nconsole.log(`Equipment scan complete for ${scanResult.name}`);\nconsole.log(`   Status: ${scanResult.scan_status}, Changes: ${scanResult.change_count}`);\n\nreturn [{\n  json: {\n    asset_id: scanResult.asset_id,\n    name: scanResult.name,\n    scan_status: scanResult.scan_status,\n    change_count: scanResult.change_count,\n    change_signals: scanResult.change_signals || [],\n    queue_entry_id: queueEntryId,\n    processed_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        400
+      ],
+      "id": "a54f7b64-2db9-4130-abf5-da43f6070a01",
+      "name": "Log Scan Complete"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        144,
+        0
+      ],
+      "id": "9aecedbb-88d6-4ffc-b6b1-d48e9af078b0",
+      "name": "Loop Through FATObjects"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Node: Final Summary (Equipment Instance)\n// ============================================================\n\nconst allResults = $('Log Scan Complete').all();\n\nconst allSignals = allResults.flatMap(r => r.json.change_signals || []);\nconst criticalSignals = allSignals.filter(s => s.severity === 'critical');\n\nconst summary = {\n  workflow: 'GOVERN-1_Equipment',\n  workflow_version: 'v1.0',\n  asset_type: 'equipment',\n  status: 'complete',\n  \n  total_scanned: allResults.length,\n  changes_detected: allResults.filter(r => r.json.scan_status === 'changes_detected').length,\n  verified_unchanged: allResults.filter(r => r.json.scan_status === 'verified_unchanged').length,\n  verification_failed: allResults.filter(r => r.json.scan_status === 'verification_failed').length,\n  \n  total_change_signals: allSignals.length,\n  critical_signals: criticalSignals.length,\n  signal_breakdown: {\n    calibration_due: allSignals.filter(s => s.type === 'calibration_due').length,\n    operational_status_change: allSignals.filter(s => s.type === 'operational_status_change').length,\n    maintenance_status: allSignals.filter(s => s.type === 'maintenance_status').length,\n    specification_change: allSignals.filter(s => s.type === 'specification_change').length\n  },\n  \n  items_with_changes: allResults\n    .filter(r => r.json.scan_status === 'changes_detected')\n    .map(r => ({\n      asset_id: r.json.asset_id,\n      name: r.json.name,\n      change_count: r.json.change_count,\n      signals: (r.json.change_signals || []).map(s => s.type)\n    })),\n  \n  completed_at: new Date().toISOString(),\n  next_scheduled_run: 'In 6 months'\n};\n\nconsole.log('===================================================');\nconsole.log('GOVERN-1 EQUIPMENT EXECUTION SUMMARY');\nconsole.log('===================================================');\nconsole.log(`   Total Scanned:      ${summary.total_scanned}`);\nconsole.log(`   Changes Detected:   ${summary.changes_detected}`);\nconsole.log(`   Verified Unchanged: ${summary.verified_unchanged}`);\nconsole.log(`   Failed:             ${summary.verification_failed}`);\nconsole.log(`   Change Signals:     ${summary.total_change_signals} (${summary.critical_signals} critical)`);\nconsole.log('===================================================');\n\nreturn [{\n  json: summary\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        400
+      ],
+      "id": "f5ab986a-97d3-46bc-8706-7a80559e260f",
+      "name": "Final Summary"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://mbcrc.app.n8n.cloud/webhook/object1-maintenance-scan",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"mode\": \"maintenance_scan\",\n  \"asset_id\": \"fat:researcher:colin_barrow\",\n  \"name\": \"Colin Barrow\",\n  \"orcid\": \"0000-0002-1825-0097\",\n  \"institution\": \"Deakin University\",\n  \"existing_field_hashes\": {}\n}\n",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -448,
+        896
+      ],
+      "id": "e9302ec6-7a81-4be2-8838-914e30a26a26",
+      "name": "Call OBJECT-1 Webhook1",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {
+    "Schedule Trigger": [
+      {
+        "json": {
+          "timestamp": "2025-12-24T04:00:16.008+11:00",
+          "Readable date": "December 24th 2025, 4:00:16 am",
+          "Readable time": "4:00:16 am",
+          "Day of week": "Wednesday",
+          "Year": "2025",
+          "Month": "December",
+          "Day of month": "24",
+          "Hour": "04",
+          "Minute": "00",
+          "Second": "16",
+          "Timezone": "Australia/Melbourne (UTC+11:00)"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch Due FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch Due FATObjects": {
+      "main": [
+        [
+          {
+            "node": "Fetch Due FATObjects (Neo4j HTTP Request)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Due FATObjects (Neo4j HTTP Request)": {
+      "main": [
+        [
+          {
+            "node": "Parse Neo4j Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Neo4j Response": {
+      "main": [
+        [
+          {
+            "node": "Has Items to Scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Items to Scan": {
+      "main": [
+        [
+          {
+            "node": "Split Into Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log No Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Items": {
+      "main": [
+        [
+          {
+            "node": "Loop Through FATObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare OBJECT-1 Request": {
+      "main": [
+        [
+          {
+            "node": "Call OBJECT-1 Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OBJECT-1 Webhook": {
+      "main": [
+        [
+          {
+            "node": "Process Scan Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Scan Result": {
+      "main": [
+        [
+          {
+            "node": "Prepare Neo4j Freshness Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Freshness Update": {
+      "main": [
+        [
+          {
+            "node": "Update Neo4j Freshness (HTTP Request)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Neo4j Freshness (HTTP Request)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Queue Entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Queue Entry": {
+      "main": [
+        [
+          {
+            "node": "Write to change_detection_queue (Supabase HTTP Request)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to change_detection_queue (Supabase HTTP Request)": {
+      "main": [
+        [
+          {
+            "node": "Log Scan Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Scan Complete": {
+      "main": [
+        [
+          {
+            "node": "Loop Through FATObjects",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Final Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Through FATObjects": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepare OBJECT-1 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "33ccae84-727f-4ced-8612-01226117c66f",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "etknVcX_KrlKPihsOmqh_",
+  "tags": []
+}

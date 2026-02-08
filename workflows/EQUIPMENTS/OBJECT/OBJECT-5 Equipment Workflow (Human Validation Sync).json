@@ -1,0 +1,678 @@
+{
+  "name": "OBJECT-5 Equipment Workflow (Human Validation Sync)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "c69488e5-0bda-49f3-a732-ecf611b08917",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -48,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e664c63-414c-438e-8c63-d2b86b2c1236",
+              "leftValue": "={{ $json.queue_entry_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        368,
+        80
+      ],
+      "id": "802e5731-20ee-49b4-9ac7-78dc22bbc4bd",
+      "name": "IF - Has Items to Process?"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// OBJECT-5 Equipment: Prepare Neo4j query to activate FATObject\n// ============================================================\n\nconst validatorType = $json.status === 'auto_approved' \n  ? 'auto' \n  : ($json.curator_id || 'curator');\n\nconst cypherPayload = {\n  statement: `\n    MATCH (obj:FATObject:Equipment {asset_id: $asset_id})\n    WHERE obj.status = 'classified'\n    SET obj.status = 'active',\n        obj.lifecycle_status = 'active',\n        obj.validated_at = datetime(),\n        obj.validated_by = $validator_type\n    \n    WITH obj\n    \n    MATCH (obj)-[r:CLASSIFIED_AS]->(:Standard)\n    SET r.validation_state = 'VALIDATED',\n        r.validated_at = datetime(),\n        r.validated_by = $validator_type\n    \n    RETURN obj.asset_id AS asset_id,\n           obj.status AS new_status,\n           count(r) AS relationships_validated\n  `,\n  parameters: {\n    asset_id: $json.asset_id,\n    validator_type: validatorType\n  }\n};\n\nreturn {\n  queue_entry_id: $json.queue_entry_id,\n  asset_id: $json.asset_id,\n  queue: $json.queue,\n  status: $json.status,\n  confidence: $json.confidence,\n  curator_id: $json.curator_id,\n  neo4j_payload: cypherPayload,\n  validator_type: validatorType\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        832
+      ],
+      "id": "7a7e4445-109e-4666-9ffd-a4dbe42fb935",
+      "name": "Prepare Neo4j Activation Query"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// OBJECT-5 Equipment: Prepare Qdrant scroll request\n// ============================================================\n\nconst values = $json.data?.values || [];\n\nif (values.length === 0) {\n  const upstream = $('Prepare Neo4j Activation Query').item.json;\n  return {\n    queue_entry_id: upstream.queue_entry_id,\n    asset_id: upstream.asset_id,\n    error: true,\n    error_message: \"Neo4j activation failed - Equipment FATObject not found with status=classified\",\n    skipped: true,\n    qdrant_scroll_request: {\n      filter: { must: [{ key: \"asset_id\", match: { value: \"SKIP\" } }] },\n      limit: 1,\n      with_payload: false,\n      with_vector: false\n    }\n  };\n}\n\nconst inputData = $('Prepare Neo4j Activation Query').item.json;\nconst newStatus = values[0][1];\nconst relationshipsValidated = values[0][2];\n\nconst qdrantScrollRequest = {\n  filter: {\n    must: [{\n      key: \"asset_id\",\n      match: { value: inputData.asset_id }\n    }]\n  },\n  limit: 1,\n  with_payload: true,\n  with_vector: false\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  status: inputData.status,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: true,\n  new_status: newStatus,\n  relationships_validated: relationshipsValidated,\n  qdrant_scroll_request: qdrantScrollRequest,\n  error: false\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        832
+      ],
+      "id": "7bb7b1af-6393-4e60-9d1b-ecc22704984d",
+      "name": "Prepare Qdrant Point Lookup"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// OBJECT-5 Equipment: Prepare SAFE Qdrant payload update\n// ============================================================\n\nconst inputData = $('Prepare Qdrant Point Lookup').item.json;\n\nif (inputData.error) {\n  return { ...inputData, skipped: true };\n}\n\nconst points = $json.result?.points || [];\n\nif (points.length === 0) {\n  return {\n    queue_entry_id: inputData.queue_entry_id,\n    asset_id: inputData.asset_id,\n    error: true,\n    error_message: \"Qdrant point not found for equipment\",\n    skipped: true\n  };\n}\n\nconst point = points[0];\nconst pointId = point.id;\nconst existingPayload = point.payload || {};\n\nconst mergedPayload = {\n  ...existingPayload,\n  status: \"active\",\n  validated_at: new Date().toISOString(),\n  validated_by: inputData.validator_type,\n  validation_state: \"VALIDATED\"\n};\n\nconst qdrantUpdatePayload = {\n  payload: mergedPayload,\n  points: [pointId]\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: inputData.neo4j_success,\n  new_status: inputData.new_status,\n  relationships_validated: inputData.relationships_validated,\n  qdrant_point_id: pointId,\n  qdrant_update_payload: qdrantUpdatePayload,\n  error: false\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        832
+      ],
+      "id": "ce69630b-7d94-4735-adda-e7089645e0fa",
+      "name": "Prepare Qdrant Status Update"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_equipment_v1/points/payload",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_update_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1232,
+        832
+      ],
+      "id": "095c7298-a83c-4002-bd7e-575201929213",
+      "name": "Update Qdrant Status",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// OBJECT-5 Equipment: Prepare Supabase update (Normal Path)\n// ============================================================\n\nconst inputData = $('Prepare Qdrant Status Update').item.json;\n\nif (inputData.error) {\n  return {\n    queue_entry_id: inputData.queue_entry_id,\n    asset_id: inputData.asset_id,\n    error: true,\n    error_message: inputData.error_message,\n    skipped: true\n  };\n}\n\nconst supabaseUpdate = {\n  synced: true,\n  synced_at: new Date().toISOString()\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  queue: inputData.queue,\n  confidence: inputData.confidence,\n  validator_type: inputData.validator_type,\n  curator_id: inputData.curator_id,\n  neo4j_success: inputData.neo4j_success,\n  new_status: inputData.new_status,\n  relationships_validated: inputData.relationships_validated,\n  qdrant_point_id: inputData.qdrant_point_id,\n  supabase_update: supabaseUpdate,\n  error: false\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        1680
+      ],
+      "id": "04be7979-c656-4d0c-b844-fe4c67c42438",
+      "name": "Prepare Supabase Sync Update"
+    },
+    {
+      "parameters": {
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "*"
+            },
+            {
+              "name": "asset_id",
+              "value": "like.equipment:*"
+            },
+            {
+              "name": "status",
+              "value": "in.(auto_approved,curator_approved)"
+            },
+            {
+              "name": "synced",
+              "value": "eq.false"
+            },
+            {
+              "name": "order",
+              "value": "created_at.asc"
+            },
+            {
+              "name": "limit",
+              "value": "200"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        160,
+        80
+      ],
+      "id": "591b3125-51f5-4cf0-982b-d72b1fe7eeb1",
+      "name": "Fetch Approved Equipment (Supabase)",
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_equipment_v1/points/scroll",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.qdrant_scroll_request }}",
+        "options": {}
+      },
+      "id": "d13aca72-397f-4610-ad1d-7ee3bbdac5f8",
+      "name": "Fetch Equipment Point (Qdrant)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        832
+      ],
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/validation_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "queue_entry_id",
+              "value": "=eq.{{ $json.queue_entry_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_update }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        176,
+        1680
+      ],
+      "id": "4bfb981a-08cc-4fd9-ad80-b49601f199b1",
+      "name": "Update Queue Synced Status",
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// OBJECT-5 Equipment: Final Output Summary\n// ============================================================\n\nconst inputData = $json;\n\nif (inputData.error || inputData.skipped) {\n  console.log(`⚠️ SKIPPED: ${inputData.asset_id} - ${inputData.error_message}`);\n  return {\n    asset_id: inputData.asset_id,\n    queue_entry_id: inputData.queue_entry_id,\n    status: \"skipped\",\n    error: true,\n    error_message: inputData.error_message || \"Skipped - already active\",\n    metadata: {\n      asset_type: \"equipment\",\n      workflow: \"OBJECT-5_Equipment\",\n      version: \"v1.0\",\n      completed_at: new Date().toISOString()\n    }\n  };\n}\n\nconst supabaseRecord = Array.isArray($json) ? $json[0] : $json;\n\nconsole.log(`\\n============================================================`);\nconsole.log(`✅ ACTIVATION COMPLETE: ${inputData.asset_id}`);\nconsole.log(`============================================================`);\nconsole.log(`   Previous Status: classified`);\nconsole.log(`   New Status: ${inputData.new_status || 'active'}`);\nconsole.log(`   Validator: ${inputData.validator_type}`);\nconsole.log(`   Relationships Validated: ${inputData.relationships_validated}`);\nconsole.log(`============================================================\\n`);\n\nreturn {\n  asset_id: inputData.asset_id,\n  previous_status: \"classified\",\n  new_status: inputData.new_status || \"active\",\n  lifecycle_status: \"active\",\n  validation: {\n    queue: inputData.queue,\n    confidence: inputData.confidence,\n    validator_type: inputData.validator_type,\n    curator_id: inputData.curator_id || null,\n    synced: true,\n    synced_at: supabaseRecord?.synced_at || new Date().toISOString()\n  },\n  storage: {\n    neo4j: { status: \"success\", relationships_validated: inputData.relationships_validated },\n    qdrant: { status: \"success\", point_id: inputData.qdrant_point_id },\n    supabase: { status: \"success\", queue_entry_id: inputData.queue_entry_id }\n  },\n  metadata: {\n    asset_type: \"equipment\",\n    workflow: \"OBJECT-5_Equipment\",\n    workflow_name: \"Equipment Human Validation Sync Engine\",\n    version: \"v1.0\",\n    completed_at: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        1680
+      ],
+      "id": "e508440e-e5fa-453b-9d7e-4de55658453a",
+      "name": "Final Output"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        144,
+        832
+      ],
+      "id": "b5273b34-8d23-498a-baf5-75f1eca2a52f",
+      "name": "Activate FATObject (Neo4j)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        608,
+        80
+      ],
+      "id": "434b6949-29e6-4e97-8650-60fa589047b7",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e664c63-414c-438e-8c63-d2b86b2c1236",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        528,
+        784
+      ],
+      "id": "726b384d-4d7d-4bd3-a200-0ae6cbee4517",
+      "name": "If Neo4j Activation Failed"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ============================================================\n// OBJECT-5 Equipment: Prepare Supabase update for SKIPPED items\n// This handles the error path where Neo4j activation was skipped\n// ============================================================\n\nconst inputData = $json;\n\nconst supabaseUpdate = {\n  synced: true,\n  synced_at: new Date().toISOString()\n};\n\nreturn {\n  queue_entry_id: inputData.queue_entry_id,\n  asset_id: inputData.asset_id,\n  error: true,\n  error_message: inputData.error_message || \"Skipped - already active\",\n  skipped: true,\n  supabase_update: supabaseUpdate\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        1872
+      ],
+      "id": "d1d5264f-8fab-412e-aadb-e13150985db4",
+      "name": "Prepare Skipped Supabase Update"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -128
+      ],
+      "id": "bc5f6cc6-06f7-4825-a2ba-0540711f76a6",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "content": "## OBJECT-5 Equipment: Human Validation Sync (v1.0)\n\n**Purpose:** Activates approved equipment in Neo4j and Qdrant\n\n**Flow:**\n1. Fetch approved equipment from validation_queue (asset_type=equipment)\n2. Activate FATObject:Equipment in Neo4j (status → active)\n3. Update Qdrant point payload (status → active)\n4. Mark queue entry as synced\n\n**Triggers:**\n- Schedule: Every 5 minutes\n- Manual: Click execute",
+        "height": 464,
+        "width": 608,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -848,
+        -352
+      ],
+      "typeVersion": 1,
+      "id": "709671a4-de48-4365-998a-6cb91b843682",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "# Fetch Approved Equipment\n\n## Note: Polls validation_queue for equipment items with auto_approved or curator_approved status that haven't been synced yet.",
+        "height": 640,
+        "width": 1696,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -144,
+        -320
+      ],
+      "typeVersion": 1,
+      "id": "67617290-3c59-4772-b391-34380bcb677f",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# Activate in Neo4j & Qdrant\n\n## Note: Sets Equipment FATObject status to \"active\" in Neo4j, validates CLASSIFIED_AS relationships, then updates Qdrant payload.",
+        "height": 752,
+        "width": 1744,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -144,
+        352
+      ],
+      "typeVersion": 1,
+      "id": "93e6abf0-9b00-47c2-b36c-737c66649ed5",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "# Mark as Synced\n\n## Note: Updates validation_queue entry with synced=true so it won't be processed again.",
+        "height": 928,
+        "width": 1808
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -144,
+        1120
+      ],
+      "typeVersion": 1,
+      "id": "e3670d22-0ee9-440a-a592-7a119313c55e",
+      "name": "Sticky Note2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Approved Equipment (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Fetch Approved Equipment (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Items to Process?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Neo4j Activation Query": {
+      "main": [
+        [
+          {
+            "node": "Activate FATObject (Neo4j)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Point Lookup": {
+      "main": [
+        [
+          {
+            "node": "If Neo4j Activation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Status Update": {
+      "main": [
+        [
+          {
+            "node": "Update Qdrant Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Qdrant Status": {
+      "main": [
+        [
+          {
+            "node": "Prepare Supabase Sync Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Approved Equipment (Supabase)": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Items to Process?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Equipment Point (Qdrant)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Status Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Supabase Sync Update": {
+      "main": [
+        [
+          {
+            "node": "Update Queue Synced Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Queue Synced Status": {
+      "main": [
+        [
+          {
+            "node": "Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activate FATObject (Neo4j)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Point Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepare Neo4j Activation Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Output": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Neo4j Activation Failed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Skipped Supabase Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Equipment Point (Qdrant)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Skipped Supabase Update": {
+      "main": [
+        [
+          {
+            "node": "Update Queue Synced Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "f5949103-833e-4ca8-b47e-e3adad24e0ba",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "ylurRUhysddBZVtBq-N0F",
+  "tags": []
+}

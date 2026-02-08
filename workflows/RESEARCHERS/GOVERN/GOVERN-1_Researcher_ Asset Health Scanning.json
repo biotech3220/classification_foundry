@@ -1,5 +1,5 @@
 {
-  "name": "GOVERN-1: Asset Health Scanning",
+  "name": "GOVERN-1_Researcher: Asset Health Scanning",
   "nodes": [
     {
       "parameters": {
@@ -15,10 +15,10 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
       "position": [
-        -480,
-        -32
+        -864,
+        224
       ],
-      "id": "c9cc5264-4068-4823-bd06-32a8c9fd9402",
+      "id": "6914b0ce-a111-407c-bf89-e3654bafa062",
       "name": "Schedule Trigger"
     },
     {
@@ -28,16 +28,16 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -272,
-        -32
+        -656,
+        224
       ],
-      "id": "0ad05e24-841c-40e9-85e0-b7f214aad27e",
+      "id": "d536ae47-2c2e-4a1e-b5ff-7e6eee1c1724",
       "name": "Prepare Fetch Due FATObjects"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendHeaders": true,
@@ -57,10 +57,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -96,
-        -32
+        -480,
+        224
       ],
-      "id": "3e0bccd0-a0c1-4b15-885d-8cf37bbca482",
+      "id": "b65f8da0-17da-4e85-9949-09a22c10332a",
       "name": "Fetch Due FATObjects (Neo4j HTTP Request)",
       "credentials": {
         "httpBasicAuth": {
@@ -76,10 +76,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        144,
-        -32
+        -240,
+        224
       ],
-      "id": "9fbdce5c-5367-4d56-80d5-e3276e8e75c3",
+      "id": "5707292d-e285-422e-ab54-4265a38489a6",
       "name": "Parse Neo4j Response"
     },
     {
@@ -110,10 +110,10 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        352,
-        -32
+        -32,
+        224
       ],
-      "id": "740ac18e-d583-4583-bf02-110b49cdfce1",
+      "id": "4bd59548-dba9-456a-b6dd-f15bec095bb6",
       "name": "Has Items to Scan"
     },
     {
@@ -123,10 +123,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        656,
-        144
+        272,
+        400
       ],
-      "id": "1dcc0143-df9b-435b-9615-d6846e55aac2",
+      "id": "cb548f5d-1cc4-415a-9d20-a8584f30e043",
       "name": "Log No Items"
     },
     {
@@ -136,10 +136,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        640,
-        -48
+        256,
+        208
       ],
-      "id": "0502a132-3a51-46d6-886d-68f14803edb3",
+      "id": "e4c7bb39-14a7-44cc-8023-6b418b2bfa15",
       "name": "Split Into Items"
     },
     {
@@ -149,10 +149,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -512,
-        352
+        -896,
+        608
       ],
-      "id": "9e5bc1ad-dc7e-4c67-83cb-d6bec39f91f6",
+      "id": "695067dc-82f1-4591-aaaa-7b04193aae92",
       "name": "Prepare OBJECT-1 Request"
     },
     {
@@ -178,10 +178,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        -304,
-        352
+        -688,
+        608
       ],
-      "id": "4a7d1188-8dab-44b2-9aaa-363b4da4ca2d",
+      "id": "35e729f6-700b-4ee2-88bc-2ef8e9c534fc",
       "name": "Call OBJECT-1 Webhook",
       "onError": "continueRegularOutput"
     },
@@ -192,10 +192,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -96,
-        352
+        -480,
+        608
       ],
-      "id": "a5c1c5b7-f1fa-4f37-856d-edf01dd96fc9",
+      "id": "f8d82ff5-ab47-4afc-9cc7-b1bd635ce513",
       "name": "Process Scan Result"
     },
     {
@@ -205,16 +205,16 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        112,
-        352
+        -272,
+        608
       ],
-      "id": "34f4d8c1-6b3a-4317-8ddc-e754eeeec370",
+      "id": "5fc7cf1a-fd44-4c33-873d-28e5a67c261e",
       "name": "Prepare Neo4j Freshness Update"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://8b9cbf46.databases.neo4j.io/db/neo4j/query/v2",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendHeaders": true,
@@ -234,10 +234,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        368,
-        352
+        -16,
+        608
       ],
-      "id": "f0f8f616-ae93-451f-a269-3fd55bfde5ec",
+      "id": "c78f9a57-a433-442d-8b54-4c12231a413e",
       "name": "Update Neo4j Freshness (HTTP Request)",
       "credentials": {
         "httpBasicAuth": {
@@ -253,10 +253,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        576,
-        352
+        192,
+        608
       ],
-      "id": "d9c41a1c-a27b-44b5-ae30-a737c4a00097",
+      "id": "fe931234-e77b-4a2b-867a-92c26cd0058c",
       "name": "Prepare Queue Entry"
     },
     {
@@ -288,10 +288,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        832,
-        352
+        448,
+        608
       ],
-      "id": "84f4a2c3-a5bc-4986-b174-d4c93b0984d6",
+      "id": "b65bde21-8c67-4d9f-84a1-e8fac37ff731",
       "name": "Write to change_detection_queue (Supabase HTTP Request)",
       "credentials": {
         "qdrantRestApi": {
@@ -311,10 +311,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1088,
-        352
+        704,
+        608
       ],
-      "id": "a6c8fb1a-bfc2-4768-8f37-0d5b9e0161a4",
+      "id": "14d91ef7-f66d-4098-b51f-ec01bd490da8",
       "name": "Log Scan Complete"
     },
     {
@@ -324,10 +324,10 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        848,
-        -48
+        464,
+        208
       ],
-      "id": "fbb20623-48d4-4029-bf67-5418e83385d6",
+      "id": "c9577ddc-7ae5-48cf-b241-6eca518ee48d",
       "name": "Loop Through FATObjects"
     },
     {
@@ -337,10 +337,10 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1280,
-        352
+        896,
+        608
       ],
-      "id": "62fead58-828b-4d04-99ad-3d2e66df657f",
+      "id": "0b0c4db6-a5be-48f6-9752-4e0b33f62056",
       "name": "Final Summary"
     },
     {
@@ -366,10 +366,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
       "position": [
-        256,
-        848
+        -128,
+        1104
       ],
-      "id": "8fd6018b-dc69-4647-9d1f-ca051e5f0708",
+      "id": "8df7330e-a862-4f0d-9e3e-a24873459fac",
       "name": "Call OBJECT-1 Webhook1",
       "onError": "continueRegularOutput"
     }
@@ -577,7 +577,7 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "0fe7e214-4c97-4b73-b0a7-e7735a7c1118",
+  "versionId": "a27b38c5-2ce7-463a-8581-7a4c9c5cca3d",
   "meta": {
     "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
   },

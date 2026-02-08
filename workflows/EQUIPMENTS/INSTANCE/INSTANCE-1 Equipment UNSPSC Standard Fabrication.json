@@ -1,0 +1,390 @@
+{
+  "name": "INSTANCE-1 Equipment UNSPSC Standard Fabrication",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        416,
+        -160
+      ],
+      "id": "8b6111aa-655e-48ee-862e-b34fa0c11ef9",
+      "name": "Start"
+    },
+    {
+      "parameters": {
+        "jsCode": "// INSTANCE-1: Equipment UNSPSC Standard Fabrication\n// Input: CSV data with columns:\n// Segment, Segment_Name, Family, Family_Name, Class, Class_Name, Commodity, Commodity_Name, Unit_Operations, OECD_FOS\n\n// PASTE YOUR CSV DATA HERE as a JavaScript array\n// Or connect this to a \"Read CSV\" node\nconst csvData = [\n  // Example row - replace with your actual data or use Read CSV node\n  // { Segment: 23000000, Segment_Name: \"Industrial Manufacturing...\", Family: 23150000, ... }\n];\n\n// If no data pasted, return instructions\nif (csvData.length === 0) {\n  return [{\n    json: {\n      error: \"No CSV data provided\",\n      instructions: \"Either paste CSV data in this node, or replace this node with a 'Read Binary File' + 'Spreadsheet File' node to read the CSV\"\n    }\n  }];\n}\n\n// Extract unique hierarchy levels\nconst segments = new Map();\nconst families = new Map();\nconst classes = new Map();\nconst commodities = [];\n\nfor (const row of csvData) {\n  // Segments\n  const segCode = String(row.Segment);\n  if (!segments.has(segCode)) {\n    segments.set(segCode, {\n      code: segCode,\n      name: row.Segment_Name,\n      level: 'segment'\n    });\n  }\n  \n  // Families\n  const famCode = String(row.Family);\n  if (!families.has(famCode)) {\n    families.set(famCode, {\n      code: famCode,\n      name: row.Family_Name,\n      level: 'family',\n      segment_code: segCode\n    });\n  }\n  \n  // Classes\n  const clsCode = String(row.Class);\n  if (!classes.has(clsCode)) {\n    classes.set(clsCode, {\n      code: clsCode,\n      name: row.Class_Name,\n      level: 'class',\n      family_code: famCode\n    });\n  }\n  \n  // Commodities (all rows)\n  commodities.push({\n    code: String(row.Commodity),\n    name: row.Commodity_Name,\n    level: 'commodity',\n    class_code: clsCode,\n    unit_operations: row.Unit_Operations || '',\n    oecd_fos: String(row.OECD_FOS || '')\n  });\n}\n\nreturn [{\n  json: {\n    segments: Array.from(segments.values()),\n    families: Array.from(families.values()),\n    classes: Array.from(classes.values()),\n    commodities: commodities,\n    counts: {\n      segments: segments.size,\n      families: families.size,\n      classes: classes.size,\n      commodities: commodities.length\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        -160
+      ],
+      "id": "8e6fb22b-01f8-4974-9082-2e53ffe4b19a",
+      "name": "Parse CSV Data",
+      "notes": "Extracts unique segments, families, classes, and all commodities from CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// Build Cypher to create all hierarchy nodes\nconst cypher = {\n  statement: `\n    // Create Segments\n    UNWIND $segments AS seg\n    MERGE (s:Standard:UNSPSC {code: seg.code})\n    SET s.name = seg.name,\n        s.level = seg.level,\n        s.asset_id = 'standard:unspsc:' + seg.code,\n        s.taxonomy = 'unspsc',\n        s.standard_version = 'UNSPSC_v24',\n        s.status = 'active',\n        s.created_at = datetime(),\n        s.updated_at = datetime()\n    \n    WITH count(*) as seg_count\n    \n    // Create Families\n    UNWIND $families AS fam\n    MERGE (f:Standard:UNSPSC {code: fam.code})\n    SET f.name = fam.name,\n        f.level = fam.level,\n        f.segment_code = fam.segment_code,\n        f.asset_id = 'standard:unspsc:' + fam.code,\n        f.taxonomy = 'unspsc',\n        f.standard_version = 'UNSPSC_v24',\n        f.status = 'active',\n        f.created_at = datetime(),\n        f.updated_at = datetime()\n    \n    WITH count(*) as fam_count\n    \n    // Create Classes\n    UNWIND $classes AS cls\n    MERGE (c:Standard:UNSPSC {code: cls.code})\n    SET c.name = cls.name,\n        c.level = cls.level,\n        c.family_code = cls.family_code,\n        c.asset_id = 'standard:unspsc:' + cls.code,\n        c.taxonomy = 'unspsc',\n        c.standard_version = 'UNSPSC_v24',\n        c.status = 'active',\n        c.created_at = datetime(),\n        c.updated_at = datetime()\n    \n    RETURN 'Hierarchy nodes created' as result\n  `,\n  parameters: {\n    segments: data.segments,\n    families: data.families,\n    classes: data.classes\n  }\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypher,\n    counts: data.counts,\n    commodities: data.commodities\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -160
+      ],
+      "id": "f7d35a57-2523-4b70-9e16-1fd9e94990bb",
+      "name": "Prepare Hierarchy Nodes"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1136,
+        -160
+      ],
+      "id": "00ab6e25-f3cc-4ea8-9ef0-5b81f2b7b081",
+      "name": "Create Hierarchy Nodes",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prevData = $('Prepare Hierarchy Nodes').first().json;\nconst commodities = prevData.commodities;\n\n// Batch commodities into groups of 100\nconst BATCH_SIZE = 100;\nconst batches = [];\n\nfor (let i = 0; i < commodities.length; i += BATCH_SIZE) {\n  batches.push(commodities.slice(i, i + BATCH_SIZE));\n}\n\nconsole.log(`Created ${batches.length} batches of commodities`);\n\nreturn batches.map((batch, idx) => ({\n  json: {\n    batch_number: idx + 1,\n    total_batches: batches.length,\n    commodities: batch\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        -160
+      ],
+      "id": "36f6732c-ae23-4684-a7eb-ee22d57c589a",
+      "name": "Batch Commodities"
+    },
+    {
+      "parameters": {
+        "jsCode": "const batch = $input.first().json;\n\nconst cypher = {\n  statement: `\n    UNWIND $commodities AS com\n    MERGE (c:Standard:UNSPSC {code: com.code})\n    SET c.name = com.name,\n        c.level = com.level,\n        c.class_code = com.class_code,\n        c.commodity_code = com.code,\n        c.commodity_name = com.name,\n        c.unit_operations = com.unit_operations,\n        c.oecd_fos = com.oecd_fos,\n        c.asset_id = 'standard:unspsc:' + com.code,\n        c.taxonomy = 'unspsc',\n        c.standard_version = 'UNSPSC_v24',\n        c.status = 'active',\n        c.created_at = datetime(),\n        c.updated_at = datetime()\n    RETURN count(*) as created\n  `,\n  parameters: {\n    commodities: batch.commodities\n  }\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypher,\n    batch_number: batch.batch_number,\n    total_batches: batch.total_batches\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        -160
+      ],
+      "id": "941c0b2b-8568-438a-88b8-241702c9db75",
+      "name": "Prepare Commodity Batch"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1856,
+        -160
+      ],
+      "id": "f0278b66-56dd-41b2-8a32-d3514685ee00",
+      "name": "Create Commodity Nodes",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create all [:BELONGS_TO] relationships\nconst cypher = {\n  statement: `\n    // Commodity -> Class\n    MATCH (com:Standard:UNSPSC {level: 'commodity'})\n    MATCH (cls:Standard:UNSPSC {level: 'class', code: com.class_code})\n    MERGE (com)-[r1:BELONGS_TO]->(cls)\n    \n    WITH count(r1) as com_cls_count\n    \n    // Class -> Family\n    MATCH (cls:Standard:UNSPSC {level: 'class'})\n    MATCH (fam:Standard:UNSPSC {level: 'family', code: cls.family_code})\n    MERGE (cls)-[r2:BELONGS_TO]->(fam)\n    \n    WITH com_cls_count, count(r2) as cls_fam_count\n    \n    // Family -> Segment\n    MATCH (fam:Standard:UNSPSC {level: 'family'})\n    MATCH (seg:Standard:UNSPSC {level: 'segment', code: fam.segment_code})\n    MERGE (fam)-[r3:BELONGS_TO]->(seg)\n    \n    RETURN {\n      commodity_to_class: com_cls_count,\n      class_to_family: cls_fam_count,\n      family_to_segment: count(r3)\n    } as relationship_counts\n  `,\n  parameters: {}\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypher\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        -160
+      ],
+      "id": "d3816a56-8960-4ae8-a49b-122a9dd0ec67",
+      "name": "Prepare BELONGS_TO Relationships"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2336,
+        -160
+      ],
+      "id": "460554cc-4fe9-4e4e-bc35-a82e0f470108",
+      "name": "Create BELONGS_TO Relationships",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verification query\nconst cypher = {\n  statement: `\n    MATCH (n:Standard:UNSPSC)\n    WITH n.level as level, count(*) as count\n    ORDER BY count DESC\n    WITH collect({level: level, count: count}) as node_counts\n    \n    MATCH (:Standard:UNSPSC)-[r:BELONGS_TO]->(:Standard:UNSPSC)\n    WITH node_counts, count(r) as relationship_count\n    \n    RETURN {\n      nodes: node_counts,\n      belongs_to_relationships: relationship_count\n    } as summary\n  `,\n  parameters: {}\n};\n\nreturn [{\n  json: {\n    neo4j_payload: cypher\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2576,
+        -160
+      ],
+      "id": "4f025e04-b877-4ab5-b073-d91c5d0f4cf8",
+      "name": "Prepare Verification"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2816,
+        -160
+      ],
+      "id": "1ebeb8d5-e76f-4e77-97bc-ce71ff58733d",
+      "name": "Verify Results",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\n// Parse Neo4j response\nconst result = Array.isArray(response) ? response[0] : response;\nconst summary = result?.data?.values?.[0]?.[0] || {};\n\nconsole.log('\\n========================================');\nconsole.log('INSTANCE-1 COMPLETE: UNSPSC Standards');\nconsole.log('========================================');\n\nif (summary.nodes) {\n  console.log('\\nNode counts:');\n  for (const item of summary.nodes) {\n    console.log(`  ${item.level}: ${item.count}`);\n  }\n}\n\nconsole.log(`\\n[:BELONGS_TO] relationships: ${summary.belongs_to_relationships}`);\nconsole.log('========================================\\n');\n\nreturn [{\n  json: {\n    status: 'INSTANCE-1 COMPLETE',\n    summary: summary\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        -160
+      ],
+      "id": "e14bd0b3-24da-4851-afdd-9172bf85a762",
+      "name": "Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV Data": {
+      "main": [
+        [
+          {
+            "node": "Prepare Hierarchy Nodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Hierarchy Nodes": {
+      "main": [
+        [
+          {
+            "node": "Create Hierarchy Nodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Hierarchy Nodes": {
+      "main": [
+        [
+          {
+            "node": "Batch Commodities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Commodities": {
+      "main": [
+        [
+          {
+            "node": "Prepare Commodity Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Commodity Batch": {
+      "main": [
+        [
+          {
+            "node": "Create Commodity Nodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Commodity Nodes": {
+      "main": [
+        [
+          {
+            "node": "Prepare BELONGS_TO Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare BELONGS_TO Relationships": {
+      "main": [
+        [
+          {
+            "node": "Create BELONGS_TO Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create BELONGS_TO Relationships": {
+      "main": [
+        [
+          {
+            "node": "Prepare Verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Verification": {
+      "main": [
+        [
+          {
+            "node": "Verify Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Results": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "0803f140-8309-4642-a9e9-f71c2081add6",
+  "meta": {
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "3BIEFs-gVcCjRGoSWEb97",
+  "tags": [
+    {
+      "updatedAt": "2026-02-03T00:03:00.810Z",
+      "createdAt": "2026-02-03T00:03:00.810Z",
+      "id": "c3sCnpq4H5Xan5xf",
+      "name": "equipment instance"
+    }
+  ]
+}

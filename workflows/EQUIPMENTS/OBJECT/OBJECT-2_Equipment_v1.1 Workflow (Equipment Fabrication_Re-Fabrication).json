@@ -1,0 +1,1625 @@
+{
+  "name": "OBJECT-2_Equipment_v1.1 Workflow (Equipment Fabrication/Re-Fabrication)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "equipment-refab-trigger",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "25da0b9d-47fa-498f-8e70-80edd4424561",
+      "name": "Webhook Trigger (Refab)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -3760,
+        4048
+      ],
+      "webhookId": "equipment-refab-trigger"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "8ec92993-9615-4fe5-96a9-4f9cdedecc9a",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -3744,
+        3840
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge Inputs - Entry point normalization for Equipment\n// Detects mode from input source and sets execution context\n\nconst inputData = $input.first().json;\nconst payload = inputData.body || inputData;\n\nlet executionContext;\n\nif (payload.mode === 'refabrication') {\n  executionContext = {\n    mode: 'refabrication',\n    fat_asset_id: payload.asset_id,\n    thin_asset_id: payload.asset_id.replace(/^fat:/, 'thin:'),\n    new_version: payload.new_version || 'v2.0',\n    previous_version: payload.previous_version || 'v1.0',\n    refabrication_reason: payload.refabrication_reason || 'change_detected',\n    changed_fields: payload.changed_fields || [],\n    source_queue_entry_id: payload.source_queue_entry_id || null,\n    requires_fresh_scrape: payload.requires_fresh_scrape || false\n  };\n} else {\n  executionContext = {\n    mode: 'normal',\n    fat_asset_id: null,\n    thin_asset_id: null,\n    new_version: 'v1.0',\n    previous_version: null,\n    refabrication_reason: null,\n    changed_fields: [],\n    source_queue_entry_id: null,\n    requires_fresh_scrape: false\n  };\n}\n\nreturn [{ json: executionContext }];"
+      },
+      "id": "6fad5c4a-ab2a-472c-8c25-ef7bbc026623",
+      "name": "Merge Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3488,
+        4000
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "normal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "eq-route-normal"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "normal"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "refabrication",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "eq-route-refab"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "refabrication"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7b7ccf4a-ca67-4ada-9f82-cbd1c4ac22c2",
+      "name": "Route by Mode",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -3264,
+        4000
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Fetch ThinObjects - Normal Mode (Equipment)\n// Version: v1.3.0 - INCLUDES MANUFACTURER/MODEL\n// FIX: Added manufacturer, model, serial_number to query\n// ============================================================\n\nconst executionContext = $input.first().json;\nconst batchSize = 40;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject:Equipment)\n        WHERE thin.status = $status\n          AND thin.object_type = $object_type\n          AND thin.operational_status <> 'OUT_OF_SCOPE'\n          AND NOT EXISTS((thin)<-[:FABRICATED_FROM]-(:FATObject))\n        RETURN {\n          object_id: thin.asset_id,\n          equipment_id: thin.equipment_id,\n          equipment_name: thin.equipment_name,\n          location: thin.location,\n          facility_id: thin.facility_id,\n          operational_status: thin.operational_status,\n          notes: thin.notes,\n          reference_unspsc_code: thin.reference_unspsc_code,\n          reference_unspsc_name: thin.reference_unspsc_name,\n          reference_oecd_fos: thin.reference_oecd_fos,\n          unit_operations: thin.unit_operations,\n          reference_classification: thin.reference_classification,\n          field_hashes: thin.field_hashes,\n          source_metadata: thin.source_metadata,\n          data_completeness: thin.data_completeness,\n          created_at: thin.created_at,\n          lca_parameters: thin.lca_parameters,\n          manufacturer: thin.manufacturer,\n          model: thin.model,\n          serial_number: thin.serial_number\n        } as thin_object\n        ORDER BY thin.equipment_id ASC\n        LIMIT $limit\n      `,\n      parameters: {\n        status: \"raw\",\n        object_type: \"equipment\",\n        limit: batchSize\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3008,
+        3952
+      ],
+      "id": "8ca68e3d-6be0-4c49-948c-32a9eae3ac8d",
+      "name": "Prepare Fetch ThinObjects"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2768,
+        3952
+      ],
+      "id": "5190053c-f924-4417-b879-3447c181c10d",
+      "name": "Fetch ThinObjects",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Set Status Fabricating - Equipment\n// Parses Neo4j response and prepares status update\n\nconst response = $input.first().json;\nconst executionContext = $('Prepare Fetch ThinObjects').first().json.execution_context;\n\nif (!response.data || !response.data.values || response.data.values.length === 0) {\n  return [{\n    json: {\n      execution_context: executionContext,\n      neo4j_payload: null,\n      thin_objects: [],\n      skipped: true,\n      message: 'No ThinObject:Equipment found with status raw'\n    }\n  }];\n}\n\nconst thinObjects = response.data.values.map(row => row[0]);\nconst objectIds = thinObjects.map(obj => obj.object_id);\n\nconsole.log(`Found ${thinObjects.length} ThinObject:Equipment nodes to fabricate`);\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        UNWIND $object_ids AS object_id\n        MATCH (thin:ThinObject:Equipment {asset_id: object_id})\n        SET thin.status = $new_status\n        RETURN thin.asset_id as updated_id\n      `,\n      parameters: {\n        object_ids: objectIds,\n        new_status: \"fabricating\"\n      }\n    },\n    thin_objects: thinObjects\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2528,
+        3952
+      ],
+      "id": "006d1708-5fae-41ea-8e7c-3b116e83bbd5",
+      "name": "Prepare Set Status Fabricating"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2288,
+        3952
+      ],
+      "id": "c47dc7e1-9ea4-4fcf-9019-317f29dc2b68",
+      "name": "Set Status: Fabricating",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split ThinObjects - Normal Mode (Equipment)\nconst prepareData = $('Prepare Set Status Fabricating').first().json;\nconst thinObjects = prepareData.thin_objects;\nconst executionContext = prepareData.execution_context;\n\nreturn thinObjects.map(obj => ({ \n  json: {\n    ...obj,\n    execution_context: executionContext\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        3856
+      ],
+      "id": "949bb633-437c-475b-b56c-ce861abef3ab",
+      "name": "Split ThinObjects"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Fetch ThinObject - Refabrication Mode (Equipment)\n\nconst executionContext = $input.first().json;\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject:Equipment {asset_id: $thin_asset_id})\n        WHERE thin.object_type = $object_type\n        RETURN {\n          object_id: thin.asset_id,\n          equipment_id: thin.equipment_id,\n          equipment_name: thin.equipment_name,\n          location: thin.location,\n          facility_id: thin.facility_id,\n          operational_status: thin.operational_status,\n          notes: thin.notes,\n          reference_unspsc_code: thin.reference_unspsc_code,\n          reference_unspsc_name: thin.reference_unspsc_name,\n          reference_oecd_fos: thin.reference_oecd_fos,\n          unit_operations: thin.unit_operations,\n          reference_classification: thin.reference_classification,\n          field_hashes: thin.field_hashes,\n          source_metadata: thin.source_metadata,\n          data_completeness: thin.data_completeness,\n          created_at: thin.created_at,\n          lca_parameters: thin.lca_parameters\n        } as thin_object\n        LIMIT 1\n      `,\n      parameters: {\n        thin_asset_id: executionContext.thin_asset_id,\n        object_type: \"equipment\"\n      }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3024,
+        4224
+      ],
+      "id": "6e7a45c0-d744-45af-b4b5-8339ec8861c0",
+      "name": "Prepare Fetch ThinObject (Refab)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2784,
+        4224
+      ],
+      "id": "7f62e244-a501-4aee-902a-39fb4d8fc824",
+      "name": "Fetch ThinObject (Refab)",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Set Status Refabricating - Equipment\n\nconst response = $input.first().json;\nconst executionContext = $('Prepare Fetch ThinObject (Refab)').first().json.execution_context;\n\nif (!response.data || !response.data.values || response.data.values.length === 0) {\n  return [{\n    json: {\n      execution_context: executionContext,\n      neo4j_payload: null,\n      thin_objects: [],\n      skipped: true,\n      message: `ThinObject not found: ${executionContext.thin_asset_id}`\n    }\n  }];\n}\n\nconst thinObjects = response.data.values.map(row => row[0]);\nconst objectIds = thinObjects.map(obj => obj.object_id);\n\nreturn [{\n  json: {\n    execution_context: executionContext,\n    neo4j_payload: {\n      statement: `\n        UNWIND $object_ids AS object_id\n        MATCH (thin:ThinObject:Equipment {asset_id: object_id})\n        SET thin.status = $new_status\n        SET thin.refabrication_started_at = timestamp()\n        SET thin.refabrication_version = $new_version\n        RETURN thin.asset_id as updated_id\n      `,\n      parameters: {\n        object_ids: objectIds,\n        new_status: \"refabricating\",\n        new_version: executionContext.new_version\n      }\n    },\n    thin_objects: thinObjects\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2544,
+        4224
+      ],
+      "id": "5aeb85d7-d046-474c-be5e-f6708900f7b4",
+      "name": "Prepare Set Status (Refab)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2304,
+        4224
+      ],
+      "id": "d07a89d8-b49f-4241-b276-e3151b8f1164",
+      "name": "Set Status: Refabricating",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split ThinObjects - Refab Mode (Equipment)\nconst prepareData = $('Prepare Set Status (Refab)').first().json;\nconst thinObjects = prepareData.thin_objects;\nconst executionContext = prepareData.execution_context;\n\nreturn thinObjects.map(obj => ({ \n  json: {\n    ...obj,\n    execution_context: executionContext\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        4224
+      ],
+      "id": "51f0f701-32a6-429b-a7d1-4761fcff9b35",
+      "name": "Split ThinObjects (Refab)"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1824,
+        4000
+      ],
+      "id": "e88e5fb9-510b-4a25-8353-39a0b6da12d5",
+      "name": "Loop Through Objects"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Pass 1: Structural Unification - Equipment\n// FIXED v1.2: Read manufacturer/model from ThinObject instead of hardcoding null\n// ThinObject now has these fields from OBJECT-1 (Perplexity enrichment + seed CSV)\n\nconst thinObject = $input.first().json;\nconst executionContext = thinObject.execution_context;\n\n// Parse reference_classification if it's a JSON string\nlet refClassification = {};\ntry {\n  if (typeof thinObject.reference_classification === 'string') {\n    refClassification = JSON.parse(thinObject.reference_classification);\n  } else if (typeof thinObject.reference_classification === 'object' && thinObject.reference_classification) {\n    refClassification = thinObject.reference_classification;\n  }\n} catch (e) {\n  console.log('Could not parse reference_classification');\n}\n\n// Parse unit_operations if string\nlet unitOps = [];\ntry {\n  if (typeof thinObject.unit_operations === 'string') {\n    unitOps = JSON.parse(thinObject.unit_operations);\n  } else if (Array.isArray(thinObject.unit_operations)) {\n    unitOps = thinObject.unit_operations;\n  }\n} catch (e) {\n  unitOps = [];\n}\n\n// Parse field_hashes if string\nlet fieldHashes = {};\ntry {\n  if (typeof thinObject.field_hashes === 'string') {\n    fieldHashes = JSON.parse(thinObject.field_hashes);\n  } else if (typeof thinObject.field_hashes === 'object' && thinObject.field_hashes) {\n    fieldHashes = thinObject.field_hashes;\n  }\n} catch (e) {}\n\n// Parse source_metadata if string\nlet sourceMeta = {};\ntry {\n  if (typeof thinObject.source_metadata === 'string') {\n    sourceMeta = JSON.parse(thinObject.source_metadata);\n  } else if (typeof thinObject.source_metadata === 'object' && thinObject.source_metadata) {\n    sourceMeta = thinObject.source_metadata;\n  }\n} catch (e) {}\n\n// ===== FIX v1.2: Extract manufacturer/model from ThinObject =====\n// Priority: top-level fields > lca_parameters > null\nlet manufacturer = thinObject.manufacturer || null;\nlet model = thinObject.model || null;\nlet serialNumber = thinObject.serial_number || null;\n\n// Fallback: check lca_parameters for manufacturer/model\nif (!manufacturer || !model) {\n  let lcaParams = {};\n  try {\n    if (typeof thinObject.lca_parameters === 'string') {\n      lcaParams = JSON.parse(thinObject.lca_parameters);\n    } else if (typeof thinObject.lca_parameters === 'object' && thinObject.lca_parameters) {\n      lcaParams = thinObject.lca_parameters;\n    }\n  } catch (e) {}\n  \n  if (!manufacturer && lcaParams.manufacturer) {\n    manufacturer = lcaParams.manufacturer;\n  }\n  if (!model && lcaParams.model) {\n    model = lcaParams.model;\n  }\n}\n\n// Normalize \"Unknown\" / empty strings to null for downstream logic\nif (manufacturer && manufacturer.toLowerCase() === 'unknown') manufacturer = null;\nif (model && model.toLowerCase() === 'unknown') model = null;\n\n// Build unified equipment object\nconst unified = {\n  object_id: thinObject.object_id,\n  equipment_id: thinObject.equipment_id,\n  equipment_name: thinObject.equipment_name,\n  location: thinObject.location,\n  facility_id: thinObject.facility_id,\n  operational_status: thinObject.operational_status,\n  notes: thinObject.notes || '',\n  \n  // Classification references\n  reference_unspsc_code: thinObject.reference_unspsc_code,\n  reference_unspsc_name: thinObject.reference_unspsc_name,\n  reference_oecd_fos: thinObject.reference_oecd_fos,\n  unit_operations: unitOps,\n  reference_classification: refClassification,\n  \n  // Metadata\n  field_hashes: fieldHashes,\n  source_metadata: sourceMeta,\n  data_completeness: thinObject.data_completeness || 90,\n  lca_parameters: thinObject.lca_parameters,\n  \n  // FIX v1.2: Pass through from ThinObject (no longer null)\n  manufacturer: manufacturer,\n  model: model,\n  serial_number: serialNumber,\n  \n  execution_context: executionContext\n};\n\nconsole.log(`✅ Unified Equipment: ${unified.equipment_name} (${unified.equipment_id})`);\nconsole.log(`   UNSPSC: ${unified.reference_unspsc_code} - ${unified.reference_unspsc_name}`);\nconsole.log(`   Manufacturer: ${manufacturer || 'NOT SET — will use LLM'}`);\nconsole.log(`   Model: ${model || 'NOT SET — will use LLM'}`);\nconsole.log(`   Unit Operations: ${unitOps.join(', ')}`);\n\nreturn [{ json: unified }];"
+      },
+      "id": "814825dd-7735-49d9-bafc-aeaff7ea1d3f",
+      "name": "Pass 1: Unification",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -1584,
+        4000
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare LLM Manufacturer Identification Prompt\n// Version: v1.2.0 (Equipment OBJECT-2) - SUPPLIER-AWARE\n// FIX: Check if manufacturer already exists from ThinObject.\n//      Only call LLM if manufacturer is null/missing.\n// ============================================================\n\nconst inputData = $input.first().json;\nconst equipmentName = inputData.equipment_name || '';\nconst notes = inputData.notes || '';\nconst existingManufacturer = inputData.manufacturer || null;\nconst existingModel = inputData.model || null;\n\n// Check existing LCA data (used later to decide if SCRAPING is needed)\nlet existingLca = {};\ntry {\n  existingLca = typeof inputData.lca_parameters === 'string' \n    ? JSON.parse(inputData.lca_parameters) \n    : (inputData.lca_parameters || {});\n} catch (e) {}\n\nconst hasWeight = existingLca.weight_kg !== null && existingLca.weight_kg !== undefined;\nconst hasCapacity = existingLca.batch_capacity_L !== null && existingLca.batch_capacity_L !== undefined;\nconst hasGoodLcaData = hasWeight || hasCapacity;\n\n// ===== FIX v1.2: Skip LLM if manufacturer already known =====\nif (existingManufacturer) {\n  console.log(`⏭️ Skipping LLM — manufacturer already known: ${existingManufacturer}`);\n  console.log(`   Model: ${existingModel || 'Unknown'}`);\n  console.log(`   Source: ThinObject (OBJECT-1 enrichment)`);\n  \n  return [{\n    json: {\n      ...inputData,\n      has_existing_lca: hasGoodLcaData,\n      skip_llm_manufacturer: true,\n      llm_prompt: null\n    }\n  }];\n}\n\n// Manufacturer unknown — build LLM prompt\nconsole.log(`🔍 Preparing LLM manufacturer identification for: ${equipmentName}`);\nconsole.log(`   Existing LCA: weight=${hasWeight}, capacity=${hasCapacity}`);\n\nconst prompt = `Given this laboratory/processing equipment name: \"${equipmentName}\"\nAdditional context/notes: ${notes}\n\nIdentify the manufacturer and model if possible. Use your knowledge of scientific equipment brands.\n\nExamples:\n- \"Retsch AS200 Sieve Shaker\" → {\"manufacturer\": \"Retsch\", \"model\": \"AS200\", \"equipment_type\": \"sieve shaker\"}\n- \"Buchi Rotavapor R-300\" → {\"manufacturer\": \"Buchi\", \"model\": \"R-300\", \"equipment_type\": \"rotary evaporator\"}\n- \"Lyovapor\" → {\"manufacturer\": \"Buchi\", \"model\": \"Lyovapor\", \"equipment_type\": \"freeze dryer\"}\n- \"Iatroscan\" → {\"manufacturer\": \"Mitsubishi Chemical\", \"model\": \"Iatroscan MK-6\", \"equipment_type\": \"TLC-FID analyzer\"}\n- \"50L Rotavap\" → {\"manufacturer\": \"Buchi\", \"model\": \"Unknown\", \"equipment_type\": \"rotary evaporator\"}\n- \"Sieve Shakers\" → {\"manufacturer\": \"Unknown\", \"model\": \"Unknown\", \"equipment_type\": \"sieve shaker\"}\n- \"Filter Press\" → {\"manufacturer\": \"Unknown\", \"model\": \"Unknown\", \"equipment_type\": \"filter press\"}\n\nIMPORTANT:\n- If a supplier/manufacturer name appears in the notes or context, USE IT DIRECTLY\n- If the equipment name IS a brand/product name (like Lyovapor, Iatroscan), identify the parent manufacturer\n- If the equipment name is generic (like \"Sieve Shakers\", \"Filter Press\") AND no supplier in notes, return \"Unknown\"\n- Common lab equipment brands: Buchi, Retsch, Thermo Fisher, Agilent, Waters, Shimadzu, Sartorius, Eppendorf, IKA, Mettler Toledo, PerkinElmer, Heidolph, Labconco, GEA, Alfa Laval, Cuddon, Macfuge, IOPAK, Mixquip, Filquip, Lemitec, Hanningfield, Agridry, Rowe Scientific, InVitro Technologies, Green Eco Technologies\n\nReturn ONLY valid JSON: {\"manufacturer\": \"...\", \"model\": \"...\", \"equipment_type\": \"...\"}`;\n\nreturn [{\n  json: {\n    ...inputData,\n    has_existing_lca: hasGoodLcaData,\n    skip_llm_manufacturer: false,\n    llm_prompt: prompt\n  }\n}];"
+      },
+      "id": "37b730eb-5636-4eb4-b09d-9009124fa9d4",
+      "name": "Prepare Mfr ID Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1344,
+        4000
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"openai/gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.llm_prompt) }}\n    }\n  ],\n  \"temperature\": 0.1,\n  \"max_tokens\": 200\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "0d184e7b-fd26-44dc-ad59-648c4b3f1544",
+      "name": "LLM: Identify Manufacturer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -3904,
+        4528
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Parse LLM Manufacturer Response & Resolve Domain\n// Version: v1.2.0 (Equipment OBJECT-2) - BYPASS FIX\n// PURPOSE: Parse LLM response and lookup manufacturer domain\n// FIX: Check if bypassed (manufacturer already identified) and pass through\n// ============================================================\n\nconst llmResponse = $input.first().json;\nconst prevData = $('Prepare Mfr ID Prompt').first().json;\nconst hasExistingLca = prevData.has_existing_lca || false;\n\n// ===== FIX v1.2: Check if this is a bypass =====\n// When Bypass LLM sends data, it already has manufacturer_identification set\nif (llmResponse.manufacturer_identification?.identification_method === 'thinobject_passthrough') {\n  console.log(`⏭️ Bypass detected — passing through existing manufacturer_identification`);\n  console.log(`   Equipment: ${llmResponse.equipment_name}`);\n  console.log(`   Manufacturer: ${llmResponse.manufacturer_identification.manufacturer}`);\n  console.log(`   Domain: ${llmResponse.manufacturer_identification.domain || 'NOT IN LOOKUP'}`);\n  console.log(`   Should scrape: ${llmResponse.manufacturer_identification.should_scrape}`);\n  \n  // Pass through unchanged - manufacturer_identification already set correctly\n  return [{ json: llmResponse }];\n}\n\n// ===== Normal LLM parsing path =====\n\n// Manufacturer domain lookup table (40+ manufacturers)\nconst manufacturerDomains = {\n  // Analytical\n  'retsch': 'retsch.com',\n  'buchi': 'buchi.com',\n  'büchi': 'buchi.com',\n  'thermo fisher': 'thermofisher.com',\n  'thermo scientific': 'thermofisher.com',\n  'agilent': 'agilent.com',\n  'waters': 'waters.com',\n  'shimadzu': 'shimadzu.com',\n  'perkinelmer': 'perkinelmer.com',\n  'sartorius': 'sartorius.com',\n  'mettler toledo': 'mt.com',\n  'eppendorf': 'eppendorf.com',\n  'ika': 'ika.com',\n  'heidolph': 'heidolph-instruments.com',\n  'labconco': 'labconco.com',\n  'gea': 'gea.com',\n  'alfa laval': 'alfalaval.com',\n  'mitsubishi chemical': 'iatroscan.com',\n  'mitsubishi': 'iatroscan.com',\n  'beckman coulter': 'beckman.com',\n  'bruker': 'bruker.com',\n  'cytiva': 'cytiva.com',\n  'memmert': 'memmert.com',\n  'binder': 'binder-world.com',\n  'yamato': 'yamato-scientific.com',\n  'armfield': 'armfield.co.uk',\n  'cuddon': 'cuddonfreezedry.com',\n  'labplant': 'labplant.com',\n  'macfuge': 'rousselet-robatel.com',\n  'iopak': 'iopak.com',\n  'mixquip': 'mixquip.com.au',\n  'sp scientific': 'spscientific.com',\n  'flottweg': 'flottweg.com',\n  'apeks': 'apekssupercritical.com',\n  'watson-marlow': 'watson-marlow.com',\n  'ankom': 'ankom.com',\n  'foss': 'foss.com',\n  'parr': 'parrinst.com',\n  'lee industries': 'leeindustries.com',\n  'cole-parmer': 'coleparmer.com',\n  'fisher scientific': 'fishersci.com',\n  'millipore': 'emdmillipore.com',\n  'fritsch': 'fritsch.de',\n  'endecotts': 'endecotts.com',\n  // Deakin BioFactory suppliers\n  'filquip': 'filquip.com.au',\n  'rowe scientific': 'rowescientific.com.au',\n  'agridry': 'agridry.com.au',\n  'agridry systems': 'agridry.com.au',\n  'hanningfield': 'hanningfield.com',\n  'hanningfield process systems': 'hanningfield.com',\n  'lemitec': 'lemitec.com',\n  'lemitec gmbh': 'lemitec.com',\n  'invitro': 'invitrotech.com.au',\n  'invitro technologies': 'invitrotech.com.au',\n  'green eco technologies': 'greenecotechnologies.com.au',\n  'process plant network': 'processplantnetwork.com.au',\n  'nts america': 'nts-america.com',\n  'nts america corporation': 'nts-america.com',\n  'servizi industriali': 'servizi-industriali.com',\n  'autemi': 'autemi.com',\n  'pacific': 'pacificequipment.com',\n  'sterlitech': 'sterlitech.com',\n  'sterlitech corporation': 'sterlitech.com',\n  'usa lab': 'usalab.com',\n  'toption': 'toptionlab.com',\n  'mach technologies': 'machtechnologies.com',\n  'mi-t-m': 'mitm.com',\n  'mingyi': 'mingyi.com',\n  'aurora pro sci': 'auroraprosci.com',\n  'labnics': 'labnics.com',\n  'wastemaster': 'wastemaster.com',\n  'biolab scientific': 'biolabscientific.com',\n  'linbel': 'linbel.com',\n  'cuddon': 'cuddonfreezedry.com'\n};\n\n// Parse LLM response\nlet manufacturer = null;\nlet model = null;\nlet equipmentType = null;\nlet parseError = null;\n\ntry {\n  const content = llmResponse.choices?.[0]?.message?.content || '';\n  \n  // Clean and parse JSON from LLM response\n  let cleanedContent = content\n    .replace(/```json\\s*/g, '')\n    .replace(/```\\s*/g, '')\n    .trim();\n  \n  const jsonMatch = cleanedContent.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    manufacturer = parsed.manufacturer || null;\n    model = parsed.model || null;\n    equipmentType = parsed.equipment_type || null;\n  }\n} catch (e) {\n  parseError = e.message;\n  console.log(`⚠️ Failed to parse LLM response: ${e.message}`);\n}\n\n// Normalize manufacturer for lookup\nconst mfrLower = (manufacturer || '').toLowerCase().trim();\nconst isUnknown = !manufacturer || manufacturer === 'Unknown' || manufacturer === 'unknown';\n\n// Lookup domain\nlet domain = null;\nif (!isUnknown) {\n  domain = manufacturerDomains[mfrLower] || null;\n  \n  // Try partial match if exact match fails\n  if (!domain) {\n    for (const [key, value] of Object.entries(manufacturerDomains)) {\n      if (mfrLower.includes(key) || key.includes(mfrLower)) {\n        domain = value;\n        break;\n      }\n    }\n  }\n}\n\n// Decision: should we scrape?\n// Skip scraping if: manufacturer unknown OR domain not found OR already has LCA data\nconst shouldScrape = !isUnknown && domain !== null && !hasExistingLca;\n\nconsole.log(`🔍 LLM Manufacturer Identification: ${prevData.equipment_name}`);\nconsole.log(`   Manufacturer: ${manufacturer || 'Unknown'}`);\nconsole.log(`   Model: ${model || 'Unknown'}`);\nconsole.log(`   Equipment Type: ${equipmentType || 'Unknown'}`);\nconsole.log(`   Domain: ${domain || 'NOT IN LOOKUP TABLE'}`);\nconsole.log(`   Has existing LCA: ${hasExistingLca}`);\nconsole.log(`   Should scrape: ${shouldScrape ? 'YES' : 'NO'}`);\nif (!shouldScrape) {\n  const reason = hasExistingLca ? 'has_existing_lca' : (isUnknown ? 'manufacturer_unknown' : 'domain_not_found');\n  console.log(`   Skip reason: ${reason}`);\n}\n\nreturn [{\n  json: {\n    ...prevData,\n    manufacturer_identification: {\n      equipment_name: prevData.equipment_name,\n      manufacturer: isUnknown ? null : manufacturer,\n      model: model === 'Unknown' ? null : model,\n      equipment_type: equipmentType,\n      domain: domain,\n      should_scrape: shouldScrape,\n      skip_reason: !shouldScrape ? (hasExistingLca ? 'has_existing_lca' : (isUnknown ? 'manufacturer_unknown' : 'domain_not_found')) : null,\n      identification_method: 'llm_extraction',\n      llm_parse_error: parseError\n    }\n  }\n}];"
+      },
+      "id": "14ae7f7f-010e-4244-a739-862034f757ee",
+      "name": "Parse LLM & Resolve Domain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3328,
+        4464
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.manufacturer_identification.should_scrape }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    },
+                    "id": "route-scrape-yes"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "scrape"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.manufacturer_identification.should_scrape }}",
+                    "rightValue": false,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    },
+                    "id": "route-scrape-no"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "skip"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9170b189-50cd-4391-8d78-01061ad7fc65",
+      "name": "Route: Need Scrape?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -3136,
+        4464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Construct Manufacturer URL for Crawl4AI\n// Version: v1.0.0\n// PURPOSE: Build search URL for manufacturer website\n// ============================================================\n\nconst inputData = $input.first().json;\nconst mfrId = inputData.manufacturer_identification;\n\nconst domain = mfrId.domain;\nconst model = mfrId.model || '';\nconst equipmentName = mfrId.equipment_name;\nconst manufacturer = mfrId.manufacturer;\n\n// Build search URL (most reliable approach)\n// Direct product page URLs vary too much between manufacturers\nconst searchUrl = `https://www.${domain}/search?q=${encodeURIComponent(equipmentName)}`;\n\n// Alternative: Google site search (fallback)\nconst googleSearchUrl = `https://www.google.com/search?q=site:${domain}+${encodeURIComponent(equipmentName)}+specifications`;\n\nconsole.log(`🔗 URL Construction: ${manufacturer}`);\nconsole.log(`   Search URL: ${searchUrl}`);\n\nreturn [{\n  json: {\n    ...inputData,\n    manufacturer_scrape: {\n      target_url: searchUrl,\n      fallback_url: googleSearchUrl,\n      manufacturer: manufacturer,\n      model: model,\n      domain: domain\n    }\n  }\n}];"
+      },
+      "id": "d3fcb10f-32a6-4670-90c6-bae07eb873fa",
+      "name": "Construct Search URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2848,
+        4448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://134.199.152.159:8002/scrape",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.manufacturer_scrape.target_url }}"
+            },
+            {
+              "name": "extraction_prompt",
+              "value": "Extract technical specifications for this laboratory/processing equipment. Find and return these values if present: manufacturer (string), model (string), weight_kg (number), dimensions_mm (object with length/width/height), capacity_l or batch_capacity_l (number in liters), power_kw (number), throughput_kg_hr (number), operating_temp_min_c (number), operating_temp_max_c (number). Convert all units to metric. Return JSON with these fields, use null if not found."
+            },
+            {
+              "name": "equipment_name",
+              "value": "={{ $json.equipment_name }}"
+            },
+            {
+              "name": "model_hint",
+              "value": "={{ $json.manufacturer_identification.model }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "3c382f7f-1212-49f3-b86d-22c1ecbbaa16",
+      "name": "Crawl4AI: Scrape Manufacturer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -2608,
+        4448
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Parse & Merge Manufacturer LCA Specs\n// Version: v1.0.0\n// PURPOSE: Extract specs from Crawl4AI and merge with existing LCA\n// ============================================================\n\nconst crawlResponse = $input.first().json;\n\n// Get original data from Construct Search URL node\nlet prevData;\ntry {\n  prevData = $('Construct Search URL').first().json;\n} catch (e) {\n  // Fallback if node reference fails\n  prevData = crawlResponse;\n}\n\n// Parse existing LCA parameters\nlet existingLca = {};\ntry {\n  existingLca = typeof prevData.lca_parameters === 'string'\n    ? JSON.parse(prevData.lca_parameters)\n    : (prevData.lca_parameters || {});\n} catch (e) {\n  existingLca = {};\n}\n\n// Handle scrape failure\nif (!crawlResponse.success && !crawlResponse.extracted_content && !crawlResponse.data) {\n  console.log(`⚠️ Manufacturer scrape failed for ${prevData.equipment_name}`);\n  return [{\n    json: {\n      ...prevData,\n      lca_parameters: JSON.stringify(existingLca),\n      manufacturer_scrape_result: {\n        success: false,\n        error: crawlResponse.error || 'No data returned',\n        source: 'manufacturer_scrape_failed'\n      }\n    }\n  }];\n}\n\n// Extract specifications from Crawl4AI response\nconst extractedData = crawlResponse.extracted_content || crawlResponse.data || crawlResponse || {};\n\n// Parse and validate specifications\nfunction parseNumeric(value) {\n  if (value === null || value === undefined) return null;\n  if (typeof value === 'number') return value;\n  const parsed = parseFloat(String(value).replace(/[^\\d.-]/g, ''));\n  return isNaN(parsed) ? null : parsed;\n}\n\nconst scrapedSpecs = {\n  manufacturer: extractedData.manufacturer || prevData.manufacturer_identification?.manufacturer || null,\n  model: extractedData.model || prevData.manufacturer_identification?.model || null,\n  weight_kg: parseNumeric(extractedData.weight_kg || extractedData.weight),\n  dimensions_mm: extractedData.dimensions_mm || extractedData.dimensions || null,\n  batch_capacity_L: parseNumeric(extractedData.capacity_l || extractedData.batch_capacity_l || extractedData.capacity_L),\n  power_kw: parseNumeric(extractedData.power_kw || extractedData.power),\n  throughput_kg_hr: parseNumeric(extractedData.throughput_kg_hr || extractedData.throughput),\n  operating_temperature_min_c: parseNumeric(extractedData.operating_temp_min_c || extractedData.temp_min),\n  operating_temperature_max_c: parseNumeric(extractedData.operating_temp_max_c || extractedData.temp_max)\n};\n\n// Merge: Scraped data takes priority over existing Perplexity data\nconst mergedLca = {\n  ...existingLca,\n  // Override with scraped values if they exist\n  manufacturer: scrapedSpecs.manufacturer || existingLca.manufacturer,\n  model: scrapedSpecs.model || existingLca.model,\n  weight_kg: scrapedSpecs.weight_kg !== null ? scrapedSpecs.weight_kg : existingLca.weight_kg,\n  dimensions_mm: scrapedSpecs.dimensions_mm || existingLca.dimensions_mm,\n  batch_capacity_L: scrapedSpecs.batch_capacity_L !== null ? scrapedSpecs.batch_capacity_L : existingLca.batch_capacity_L,\n  power_kw: scrapedSpecs.power_kw !== null ? scrapedSpecs.power_kw : existingLca.power_kw,\n  throughput_kg_hr: scrapedSpecs.throughput_kg_hr !== null ? scrapedSpecs.throughput_kg_hr : existingLca.throughput_kg_hr,\n  operating_temperature_min_c: scrapedSpecs.operating_temperature_min_c !== null ? scrapedSpecs.operating_temperature_min_c : existingLca.operating_temperature_min_c,\n  operating_temperature_max_c: scrapedSpecs.operating_temperature_max_c !== null ? scrapedSpecs.operating_temperature_max_c : existingLca.operating_temperature_max_c,\n  // Metadata\n  _data_sources: [...(existingLca._data_sources || ['perplexity']), 'manufacturer_website'],\n  _manufacturer_scrape_at: new Date().toISOString()\n};\n\n// Calculate what we gained\nconst scrapedFields = Object.entries(scrapedSpecs)\n  .filter(([k, v]) => v !== null && k !== 'manufacturer' && k !== 'model')\n  .map(([k]) => k);\n\nconsole.log(`✅ Manufacturer Scrape Complete: ${prevData.equipment_name}`);\nconsole.log(`   Manufacturer: ${mergedLca.manufacturer || 'Unknown'}`);\nconsole.log(`   Model: ${mergedLca.model || 'Unknown'}`);\nconsole.log(`   Weight: ${mergedLca.weight_kg !== null ? mergedLca.weight_kg + ' kg' : 'N/A'}`);\nconsole.log(`   Capacity: ${mergedLca.batch_capacity_L !== null ? mergedLca.batch_capacity_L + ' L' : 'N/A'}`);\nconsole.log(`   New fields from scrape: ${scrapedFields.length > 0 ? scrapedFields.join(', ') : 'none'}`);\n\nreturn [{\n  json: {\n    ...prevData,\n    lca_parameters: JSON.stringify(mergedLca),\n    manufacturer: mergedLca.manufacturer,\n    model: mergedLca.model,\n    manufacturer_scrape_result: {\n      success: true,\n      fields_scraped: scrapedFields,\n      source: 'manufacturer_website'\n    }\n  }\n}];"
+      },
+      "id": "746f7586-4285-441b-965d-60993c942f5f",
+      "name": "Parse & Merge LCA Specs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2752,
+        4816
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through for items that skip manufacturer scraping\n// Just passes data unchanged to Prepare LLM Prompt\n\nconst inputData = $input.first().json;\n\nconsole.log(`⏭️ Skipping manufacturer scrape for ${inputData.equipment_name}`);\nconsole.log(`   Reason: ${inputData.manufacturer_identification?.skip_reason || 'unknown'}`);\n\nreturn [{ json: inputData }];"
+      },
+      "id": "bdd7adfa-155b-43a8-b4ed-d49f3b432a8b",
+      "name": "Skip Manufacturer Scrape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3216,
+        5040
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================================\n// Prepare LLM Prompt - Equipment Enrichment\n// Version: v1.2.0 - FULL LCA SPECS\n// FIX: Include ALL LCA fields for better scale classification\n// ============================================================\n\nconst unifiedObject = $input.first().json;\nconst executionContext = unifiedObject.execution_context;\n\n// Parse LCA parameters for inclusion in prompt\nlet lcaSpecs = {};\ntry {\n  lcaSpecs = typeof unifiedObject.lca_parameters === 'string'\n    ? JSON.parse(unifiedObject.lca_parameters)\n    : (unifiedObject.lca_parameters || {});\n} catch (e) {\n  lcaSpecs = {};\n}\n\n// ===== FIX v1.2: Include ALL LCA fields =====\nconst lcaLines = [];\n\n// Weight (critical for scale)\nif (lcaSpecs.weight_kg != null) {\n  lcaLines.push(`Weight: ${lcaSpecs.weight_kg} kg`);\n}\n\n// Capacity - BOTH L and kg (was missing batch_capacity_kg!)\nif (lcaSpecs.batch_capacity_L != null) {\n  lcaLines.push(`Batch Capacity: ${lcaSpecs.batch_capacity_L} L`);\n}\nif (lcaSpecs.batch_capacity_kg != null) {\n  lcaLines.push(`Batch Capacity: ${lcaSpecs.batch_capacity_kg} kg`);\n}\n\n// Throughput - BOTH kg/hr and L/hr (was missing throughput_L_hr!)\nif (lcaSpecs.throughput_kg_hr != null) {\n  lcaLines.push(`Throughput: ${lcaSpecs.throughput_kg_hr} kg/hr`);\n}\nif (lcaSpecs.throughput_L_hr != null) {\n  lcaLines.push(`Throughput: ${lcaSpecs.throughput_L_hr} L/hr`);\n}\n\n// Dimensions\nif (lcaSpecs.dimensions_mm) {\n  const dims = typeof lcaSpecs.dimensions_mm === 'string' \n    ? lcaSpecs.dimensions_mm \n    : JSON.stringify(lcaSpecs.dimensions_mm);\n  lcaLines.push(`Dimensions: ${dims}`);\n}\n\n// Power/Energy\nif (lcaSpecs.power_kw != null) {\n  lcaLines.push(`Power: ${lcaSpecs.power_kw} kW`);\n}\nif (lcaSpecs.energy_consumption_kwh != null) {\n  lcaLines.push(`Energy Consumption: ${lcaSpecs.energy_consumption_kwh} kWh`);\n}\n\n// Operating conditions\nif (lcaSpecs.operating_temperature_min_c != null) {\n  lcaLines.push(`Operating Temp Min: ${lcaSpecs.operating_temperature_min_c}°C`);\n}\nif (lcaSpecs.operating_temperature_max_c != null) {\n  lcaLines.push(`Operating Temp Max: ${lcaSpecs.operating_temperature_max_c}°C`);\n}\nif (lcaSpecs.operating_pressure_bar != null) {\n  lcaLines.push(`Operating Pressure: ${lcaSpecs.operating_pressure_bar} bar`);\n}\n\n// Water usage\nif (lcaSpecs.water_usage_L_hr != null) {\n  lcaLines.push(`Water Usage: ${lcaSpecs.water_usage_L_hr} L/hr`);\n}\n\n// Voltage\nif (lcaSpecs.voltage) {\n  lcaLines.push(`Voltage: ${lcaSpecs.voltage}`);\n}\n\n// Certifications\nif (lcaSpecs.certifications && lcaSpecs.certifications.length > 0) {\n  lcaLines.push(`Certifications: ${lcaSpecs.certifications.join(', ')}`);\n}\n\nconst lcaText = lcaLines.length > 0 \n  ? lcaLines.join('\\n') \n  : 'No technical specifications available';\n\n// Log what we're sending\nconsole.log(`📋 Preparing LLM prompt for: ${unifiedObject.equipment_name}`);\nconsole.log(`   LCA specs found: ${lcaLines.length} fields`);\nif (lcaLines.length > 0) {\n  console.log(`   Fields: ${lcaLines.map(l => l.split(':')[0]).join(', ')}`);\n}\n\nconst prompt = `You are an equipment classification specialist for marine bioproducts processing.\nGiven the following equipment information, provide enriched classification data.\n\nEQUIPMENT: ${unifiedObject.equipment_name}\nEQUIPMENT ID: ${unifiedObject.equipment_id}\nMANUFACTURER: ${unifiedObject.manufacturer || lcaSpecs.manufacturer || 'Unknown'}\nMODEL: ${unifiedObject.model || lcaSpecs.model || 'Unknown'}\nLOCATION: ${unifiedObject.location}\nSTATUS: ${unifiedObject.operational_status}\nNOTES: ${unifiedObject.notes}\n\nTECHNICAL SPECIFICATIONS (MEASURED VALUES):\n${lcaText}\n\nREFERENCE UNSPSC: ${unifiedObject.reference_unspsc_code} - ${unifiedObject.reference_unspsc_name}\nUNIT OPERATIONS: ${(unifiedObject.unit_operations || []).join(', ')}\nOECD FOS: ${unifiedObject.reference_oecd_fos}\n\nSCALE CLASSIFICATION GUIDANCE:\nUse the TECHNICAL SPECIFICATIONS above - these are MEASURED values that override assumptions.\n\nBENCH SCALE (laboratory/R&D):\n- Weight < 100 kg\n- Batch capacity < 10 L or < 5 kg\n- Throughput < 10 kg/hr or < 20 L/hr\n- Examples: analytical instruments, small centrifuges, lab freeze dryers\n\nPILOT SCALE (process development):\n- Weight 100-500 kg\n- Batch capacity 10-100 L or 5-50 kg\n- Throughput 10-100 kg/hr or 20-200 L/hr\n- Examples: pilot reactors, medium centrifuges, pilot spray dryers\n\nPRODUCTION SCALE (commercial manufacturing):\n- Weight > 500 kg\n- Batch capacity > 100 L or > 50 kg\n- Throughput > 100 kg/hr or > 200 L/hr\n- Examples: industrial decanters, production freeze dryers, large extractors\n\nCRITICAL RULES:\n1. If TECHNICAL SPECIFICATIONS show weight/capacity/throughput, USE THOSE VALUES.\n2. If NO specs available, classify based on equipment type:\n   - Analytical instruments (analyzers, spectrometers) → bench\n   - Generic processing equipment → pilot (default)\n   - Only use \"production\" if you have measured specs to support it\n3. Storage equipment (freezers, fridges) without capacity specs → bench\n4. Support equipment (forklifts, packaging) → classify as pilot unless specs say otherwise\n\nOUTPUT FORMAT (JSON):\n{\n  \"equipment_complexity\": \"single-purpose | multi-function | platform\",\n  \"capabilities\": [\"capability1\", \"capability2\"],\n  \"applications\": [\"application1\", \"application2\"],\n  \"operational_parameters\": {\"param1\": \"value1\"},\n  \"scale\": \"bench | pilot | production\",\n  \"scale_rationale\": \"Brief explanation citing specific specs used\",\n  \"inferred_manufacturer\": \"string or null (only if not already provided above)\",\n  \"inferred_model\": \"string or null (only if not already provided above)\",\n  \"technical_description\": \"A 2-3 sentence technical description of this equipment and its role in marine bioproducts processing\"\n}\n\nCRITICAL: \n1. Respond ONLY with valid JSON. No text outside the JSON structure.\n2. In scale_rationale, cite the specific measurements you used (e.g., \"Weight 1900kg exceeds 500kg threshold\").\n3. If no specs available, state \"No measured specs - defaulting to [bench/pilot] based on equipment type\".`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    object_id: unifiedObject.object_id,\n    unified_data: unifiedObject,\n    execution_context: executionContext\n  }\n}];"
+      },
+      "id": "f8085b54-71b6-44cc-a255-e6c7be12df61",
+      "name": "Prepare LLM Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -2256,
+        5056
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}"
+      },
+      "id": "d1e7e38f-72bd-48bb-a0de-270ca2ce5b81",
+      "name": "Pass 2: LLM Enrichment",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        -2016,
+        5056
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "maxTokens": 4096,
+          "temperature": 0.3
+        }
+      },
+      "id": "9890143b-d1ba-4c16-b868-86360f3cdbcd",
+      "name": "OpenRouter Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -2016,
+        5280
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse LLM Response - Equipment Version\n// Simpler than researcher: extract equipment-specific enrichment fields\n// UPDATED v1.1: Preserves manufacturer scrape data\n\nconst llmResponse = $input.first().json.text;\nconst preparedData = $('Prepare LLM Prompt').first().json;\nconst unifiedObject = preparedData.unified_data;\nconst objectId = preparedData.object_id;\nconst executionContext = preparedData.execution_context;\n\n// Clean and parse LLM JSON\nlet cleanedResponse = llmResponse\n  .replace(/```json\\s*/g, '')\n  .replace(/```\\s*/g, '')\n  .trim();\n\nconst jsonMatch = cleanedResponse.match(/\\{[\\s\\S]*\\}/);\nif (jsonMatch) {\n  cleanedResponse = jsonMatch[0];\n}\n\ncleanedResponse = cleanedResponse\n  .replace(/,\\s*\\]/g, ']')\n  .replace(/,\\s*\\}/g, '}')\n  .replace(/\\n/g, ' ')\n  .replace(/\\r/g, '')\n  .replace(/\\t/g, ' ')\n  .replace(/\\s+/g, ' ');\n\nlet enrichmentData;\nlet parseError = null;\n\ntry {\n  enrichmentData = JSON.parse(cleanedResponse);\n} catch (e) {\n  parseError = e.message;\n  try {\n    let aggressiveCleaned = cleanedResponse\n      .replace(/[\\x00-\\x1F\\x7F]/g, '')\n      .replace(/\\\\n/g, ' ')\n      .replace(/\\\\t/g, ' ');\n    enrichmentData = JSON.parse(aggressiveCleaned);\n    parseError = null;\n  } catch (e2) {\n    parseError = `First: ${e.message}; Second: ${e2.message}`;\n    enrichmentData = null;\n  }\n}\n\n// Extract enrichment fields with defaults\nconst enrichment = {\n  equipment_complexity: enrichmentData?.equipment_complexity || 'single-purpose',\n  capabilities: enrichmentData?.capabilities || [],\n  applications: enrichmentData?.applications || [],\n  operational_parameters: enrichmentData?.operational_parameters || {},\n  scale: enrichmentData?.scale || 'bench',\n  scale_rationale: enrichmentData?.scale_rationale || '',\n  inferred_manufacturer: enrichmentData?.inferred_manufacturer || null,\n  inferred_model: enrichmentData?.inferred_model || null,\n  technical_description: enrichmentData?.technical_description || ''\n};\n\nif (parseError) {\n  enrichment._llm_parse_error = parseError;\n  console.log(`⚠️ LLM parse error for ${unifiedObject.equipment_name}: ${parseError}`);\n}\n\n// Build enriched object\n// Manufacturer from scraping takes priority over LLM inference\nconst enrichedObject = {\n  ...unifiedObject,\n  object_id: objectId,\n  enrichment: enrichment,\n  \n  // Apply manufacturer: scrape > existing > LLM inference\n  manufacturer: unifiedObject.manufacturer || enrichment.inferred_manufacturer,\n  model: unifiedObject.model || enrichment.inferred_model,\n  \n  enriched_at: new Date().toISOString(),\n  execution_context: executionContext\n};\n\nconsole.log(`✅ Enriched ${unifiedObject.equipment_name}: complexity=${enrichment.equipment_complexity}, scale=${enrichment.scale}`);\nconsole.log(`   Scale rationale: ${enrichment.scale_rationale || 'none provided'}`);\nconsole.log(`   Capabilities: ${enrichment.capabilities.length}, Applications: ${enrichment.applications.length}`);\nif (enrichedObject.manufacturer) console.log(`   Manufacturer: ${enrichedObject.manufacturer}`);\n\nreturn [{ json: enrichedObject }];"
+      },
+      "id": "76f4d83d-8a53-486c-8fed-9716aab50095",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -1728,
+        5056
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Pass 3: Build Relationships - Equipment\n// Creates graph relationships for FABRICATED_FROM and HOSTED_BY\n\nconst enrichedObject = $input.first().json;\nconst executionContext = enrichedObject.execution_context;\n\n// Build relationship array\nconst relationships = [];\n\n// FABRICATED_FROM relationship (ThinObject -> FATObject)\nconst thinId = enrichedObject.object_id;\nconst fatId = thinId.replace(/^thin:/, 'fat:');\n\nrelationships.push({\n  type: 'FABRICATED_FROM',\n  from: fatId,\n  to: thinId,\n  properties: {\n    fabricated_at: new Date().toISOString(),\n    version: executionContext.new_version || 'v1.0'\n  }\n});\n\n// HOSTED_BY relationship (Equipment -> Facility)\nif (enrichedObject.facility_id) {\n  relationships.push({\n    type: 'HOSTED_BY',\n    from: fatId,\n    to: `facility:${enrichedObject.facility_id}`,\n    properties: {\n      location: enrichedObject.location\n    }\n  });\n}\n\nconsole.log(`✅ Built ${relationships.length} relationships for ${enrichedObject.equipment_name}`);\n\nreturn [{\n  json: {\n    ...enrichedObject,\n    graph_relationships: relationships\n  }\n}];"
+      },
+      "id": "bc366cea-89fe-464c-9f6f-9e22da5c2ab7",
+      "name": "Pass 3: Build Relationships",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -3984,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Pass 4: Generate ICF Views - Equipment\n// Creates Dense View, Embedding View, Graph View + provenance\n// UPDATED v1.2: Now reads LCA from BOTH lca_parameters JSON AND direct properties\n\nconst enrichedObject = $input.first().json;\nconst executionContext = enrichedObject.execution_context || {};\n\n// Checksum computation\nfunction computeChecksum(obj) {\n  const str = JSON.stringify(obj);\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  return 'sha256:' + Math.abs(hash).toString(16).padStart(16, '0');\n}\n\nfunction estimateTokens(text) {\n  return Math.ceil(text.length / 4);\n}\n\n// Transform ID: thin:equipment:eq_001 -> fat:equipment:eq_001\nconst thinObjectId = enrichedObject.object_id;\nconst fatObjectId = thinObjectId.replace(/^thin:/, 'fat:');\n\n// Also create a slug-based asset_id for schema compliance\nconst slug = enrichedObject.equipment_name.toLowerCase()\n  .replace(/[^a-z0-9]+/g, '-')\n  .replace(/^-|-$/g, '');\nconst assetId = `equipment:${slug}`;\n\nconst enrichment = enrichedObject.enrichment || {};\nconst isRefabrication = executionContext.mode === 'refabrication';\nconst version = executionContext.new_version || 'v1.0';\nconst previousVersion = executionContext.previous_version || null;\n\n// ===== PARSE LCA PARAMETERS =====\n// Read from JSON field first\nconst lcaRaw = enrichedObject.lca_parameters || '{}';\nlet lca = {};\ntry {\n  lca = typeof lcaRaw === 'string' ? JSON.parse(lcaRaw) : lcaRaw;\n} catch (e) {\n  console.log(`⚠️ Failed to parse lca_parameters for ${enrichedObject.equipment_name}: ${e.message}`);\n  lca = {};\n}\n\n// ===== MERGE LCA: Direct properties take priority over JSON =====\n// This handles both sources: lca_parameters JSON AND direct lca_* properties\nconst specs = {\n  manufacturer: enrichedObject.manufacturer || lca.manufacturer || enrichment.inferred_manufacturer || null,\n  model: enrichedObject.model || lca.model || enrichment.inferred_model || null,\n  batch_capacity_kg: enrichedObject.lca_batch_capacity_kg || lca.batch_capacity_kg || null,\n  batch_capacity_L: enrichedObject.lca_batch_capacity_L || lca.batch_capacity_L || null,\n  throughput_kg_hr: enrichedObject.lca_throughput_kg_hr || lca.throughput_kg_hr || null,\n  throughput_L_hr: enrichedObject.lca_throughput_L_hr || lca.throughput_L_hr || null,\n  energy_kwh: lca.energy_consumption_kwh || null,\n  dimensions_mm: lca.dimensions_mm || null,\n  weight_kg: enrichedObject.lca_weight_kg || lca.weight_kg || null,\n  temp_min: lca.operating_temperature_min_c || null,\n  temp_max: lca.operating_temperature_max_c || null,\n  pressure_bar: lca.operating_pressure_bar || null,\n  voltage: lca.voltage || null,\n  certifications: lca.certifications || []\n};\n\nconsole.log(`📊 LCA Sources for ${enrichedObject.equipment_name}:`);\nconsole.log(`   Direct props: throughput_kg_hr=${enrichedObject.lca_throughput_kg_hr}, batch_L=${enrichedObject.lca_batch_capacity_L}`);\nconsole.log(`   JSON parsed: throughput_kg_hr=${lca.throughput_kg_hr}, batch_L=${lca.batch_capacity_L}`);\nconsole.log(`   Final specs: throughput_kg_hr=${specs.throughput_kg_hr}, batch_L=${specs.batch_capacity_L}`);\n\n// Build formatted specs section (only non-null values)\nconst specLines = [];\nif (specs.batch_capacity_L) specLines.push(`- Batch Capacity: ${specs.batch_capacity_L} L`);\nif (specs.batch_capacity_kg) specLines.push(`- Batch Capacity: ${specs.batch_capacity_kg} kg`);\nif (specs.throughput_L_hr) specLines.push(`- Throughput: ${specs.throughput_L_hr} L/hr`);\nif (specs.throughput_kg_hr) specLines.push(`- Throughput: ${specs.throughput_kg_hr} kg/hr`);\nif (specs.energy_kwh) specLines.push(`- Energy Consumption: ${specs.energy_kwh} kWh`);\nif (specs.dimensions_mm) specLines.push(`- Dimensions: ${specs.dimensions_mm}`);\nif (specs.weight_kg) specLines.push(`- Weight: ${specs.weight_kg} kg`);\nif (specs.temp_min !== null && specs.temp_min !== undefined && specs.temp_max !== null && specs.temp_max !== undefined) {\n  specLines.push(`- Operating Temperature: ${specs.temp_min}°C to ${specs.temp_max}°C`);\n} else if (specs.temp_max !== null && specs.temp_max !== undefined) {\n  specLines.push(`- Max Operating Temperature: ${specs.temp_max}°C`);\n} else if (specs.temp_min !== null && specs.temp_min !== undefined) {\n  specLines.push(`- Min Operating Temperature: ${specs.temp_min}°C`);\n}\nif (specs.pressure_bar) specLines.push(`- Operating Pressure: ${specs.pressure_bar} bar`);\nif (specs.voltage) specLines.push(`- Voltage: ${specs.voltage}`);\nif (specs.certifications.length > 0) specLines.push(`- Certifications: ${specs.certifications.join(', ')}`);\n\nconst formattedSpecs = specLines.length > 0 \n  ? specLines.join('\\n') \n  : null;\n\n// Build scale evidence from numeric specs\nconst scaleEvidence = [];\nif (specs.weight_kg) {\n  if (specs.weight_kg < 50) scaleEvidence.push(`lightweight (${specs.weight_kg}kg)`);\n  else if (specs.weight_kg < 500) scaleEvidence.push(`medium weight (${specs.weight_kg}kg)`);\n  else scaleEvidence.push(`heavy industrial (${specs.weight_kg}kg)`);\n}\nif (specs.batch_capacity_L) {\n  if (specs.batch_capacity_L < 10) scaleEvidence.push(`small capacity (${specs.batch_capacity_L}L)`);\n  else if (specs.batch_capacity_L < 100) scaleEvidence.push(`pilot capacity (${specs.batch_capacity_L}L)`);\n  else scaleEvidence.push(`production capacity (${specs.batch_capacity_L}L)`);\n}\nif (specs.batch_capacity_kg) {\n  if (specs.batch_capacity_kg < 5) scaleEvidence.push(`small batch (${specs.batch_capacity_kg}kg)`);\n  else if (specs.batch_capacity_kg < 50) scaleEvidence.push(`pilot batch (${specs.batch_capacity_kg}kg)`);\n  else scaleEvidence.push(`production batch (${specs.batch_capacity_kg}kg)`);\n}\nif (specs.throughput_L_hr) {\n  if (specs.throughput_L_hr < 10) scaleEvidence.push(`low throughput (${specs.throughput_L_hr} L/hr)`);\n  else if (specs.throughput_L_hr < 100) scaleEvidence.push(`pilot throughput (${specs.throughput_L_hr} L/hr)`);\n  else scaleEvidence.push(`production throughput (${specs.throughput_L_hr} L/hr)`);\n}\nif (specs.throughput_kg_hr) {\n  if (specs.throughput_kg_hr < 10) scaleEvidence.push(`low throughput (${specs.throughput_kg_hr} kg/hr)`);\n  else if (specs.throughput_kg_hr < 100) scaleEvidence.push(`pilot throughput (${specs.throughput_kg_hr} kg/hr)`);\n  else scaleEvidence.push(`production throughput (${specs.throughput_kg_hr} kg/hr)`);\n}\nconst scaleIndicators = scaleEvidence.length > 0 ? scaleEvidence.join(', ') : null;\n\n// ===== DENSE VIEW (Equipment-specific) =====\nconst manufacturer = specs.manufacturer || 'Unknown';\nconst model = specs.model || 'Unknown';\n\nconst denseViewSections = [];\ndenseViewSections.push(`EQUIPMENT: ${enrichedObject.equipment_name}`);\ndenseViewSections.push(`EQUIPMENT ID: ${enrichedObject.equipment_id}`);\ndenseViewSections.push(`MANUFACTURER: ${manufacturer}`);\ndenseViewSections.push(`MODEL: ${model}`);\ndenseViewSections.push('');\n\n// Technical description from LLM\nif (enrichment.technical_description) {\n  denseViewSections.push('DESCRIPTION:');\n  denseViewSections.push(enrichment.technical_description);\n  denseViewSections.push('');\n}\n\n// Specifications from LCA parameters\ndenseViewSections.push('SPECIFICATIONS:');\nif (formattedSpecs) {\n  denseViewSections.push(formattedSpecs);\n} else {\n  denseViewSections.push(enrichedObject.notes || 'No detailed specifications available');\n}\ndenseViewSections.push('');\n\n// Original notes (preserved for context if different from specs)\nif (enrichedObject.notes && formattedSpecs && enrichedObject.notes !== formattedSpecs) {\n  denseViewSections.push('NOTES:');\n  denseViewSections.push(enrichedObject.notes);\n  denseViewSections.push('');\n}\n\n// Capabilities\nif (enrichment.capabilities && enrichment.capabilities.length > 0) {\n  denseViewSections.push('CAPABILITIES:');\n  enrichment.capabilities.forEach(cap => denseViewSections.push(`- ${cap}`));\n  denseViewSections.push('');\n}\n\n// Applications\nif (enrichment.applications && enrichment.applications.length > 0) {\n  denseViewSections.push('APPLICATIONS:');\n  enrichment.applications.forEach(app => denseViewSections.push(`- ${app}`));\n  denseViewSections.push('');\n}\n\n// Operational Parameters\nif (enrichment.operational_parameters && Object.keys(enrichment.operational_parameters).length > 0) {\n  denseViewSections.push('OPERATIONAL PARAMETERS:');\n  Object.entries(enrichment.operational_parameters).forEach(([key, value]) => {\n    denseViewSections.push(`- ${key}: ${value}`);\n  });\n  denseViewSections.push('');\n}\n\ndenseViewSections.push(`SCALE: ${enrichment.scale || 'bench'}`);\nif (enrichment.scale_rationale) {\n  denseViewSections.push(`SCALE RATIONALE: ${enrichment.scale_rationale}`);\n}\nif (scaleIndicators) {\n  denseViewSections.push(`SCALE EVIDENCE: ${scaleIndicators}`);\n}\ndenseViewSections.push(`COMPLEXITY: ${enrichment.equipment_complexity || 'single-purpose'}`);\ndenseViewSections.push(`OPERATIONAL STATUS: ${enrichedObject.operational_status}`);\ndenseViewSections.push(`LOCATION: ${enrichedObject.location}`);\ndenseViewSections.push('');\n\n// Classification references\ndenseViewSections.push('CLASSIFICATION REFERENCES:');\ndenseViewSections.push(`UNSPSC: ${enrichedObject.reference_unspsc_code} - ${enrichedObject.reference_unspsc_name}`);\ndenseViewSections.push(`OECD FOS: ${enrichedObject.reference_oecd_fos}`);\ndenseViewSections.push(`UNIT OPERATIONS: ${(enrichedObject.unit_operations || []).join(', ')}`);\n\nconst denseText = denseViewSections.join('\\n');\nconst denseTokens = estimateTokens(denseText);\n\n// ===== EMBEDDING VIEW (300-600 tokens) =====\nconst embeddingText = `\nEquipment: ${enrichedObject.equipment_name}\nManufacturer: ${manufacturer}\nModel: ${model}\nScale: ${enrichment.scale || 'bench'}\nComplexity: ${enrichment.equipment_complexity || 'single-purpose'}\n${scaleIndicators ? `Scale Evidence: ${scaleIndicators}` : ''}\n\nCapabilities: ${(enrichment.capabilities || []).join(', ')}\n\nApplications: ${(enrichment.applications || []).join(', ')}\n\nUnit Operations: ${(enrichedObject.unit_operations || []).join(', ')}\n\n${specs.batch_capacity_L ? `Batch Capacity: ${specs.batch_capacity_L} L` : ''}\n${specs.batch_capacity_kg ? `Batch Capacity: ${specs.batch_capacity_kg} kg` : ''}\n${specs.throughput_L_hr ? `Throughput: ${specs.throughput_L_hr} L/hr` : ''}\n${specs.throughput_kg_hr ? `Throughput: ${specs.throughput_kg_hr} kg/hr` : ''}\n${specs.weight_kg ? `Weight: ${specs.weight_kg} kg` : ''}\n\nUNSPSC Classification: ${enrichedObject.reference_unspsc_code} - ${enrichedObject.reference_unspsc_name}\nOECD Field of Science: ${enrichedObject.reference_oecd_fos}\n\nOperational Status: ${enrichedObject.operational_status}\nFacility: Deakin BioFactory, ${enrichedObject.location}\n\n${enrichment.technical_description || ''}\n`.trim().replace(/\\n{3,}/g, '\\n\\n');\n\nconst embeddingTokens = estimateTokens(embeddingText);\n\nconst embeddingView = {\n  text: embeddingText,\n  token_count: embeddingTokens,\n  vector: null\n};\n\n// ===== GRAPH VIEW =====\nconst graphView = {\n  relationships: enrichedObject.graph_relationships || []\n};\n\n// ===== Dense View Object (for Qdrant payload) =====\nconst denseView = {\n  equipment_id: enrichedObject.equipment_id,\n  equipment_name: enrichedObject.equipment_name,\n  manufacturer: manufacturer,\n  model: model,\n  scale: enrichment.scale || 'bench',\n  scale_evidence: scaleIndicators,\n  scale_rationale: enrichment.scale_rationale || null,\n  equipment_complexity: enrichment.equipment_complexity || 'single-purpose',\n  capabilities: enrichment.capabilities || [],\n  applications: enrichment.applications || [],\n  operational_parameters: enrichment.operational_parameters || {},\n  batch_capacity_L: specs.batch_capacity_L || null,\n  batch_capacity_kg: specs.batch_capacity_kg || null,\n  throughput_L_hr: specs.throughput_L_hr || null,\n  throughput_kg_hr: specs.throughput_kg_hr || null,\n  weight_kg: specs.weight_kg || null,\n  energy_kwh: specs.energy_kwh || null,\n  operational_status: enrichedObject.operational_status,\n  location: enrichedObject.location,\n  facility_id: enrichedObject.facility_id,\n  reference_unspsc_code: enrichedObject.reference_unspsc_code,\n  reference_unspsc_name: enrichedObject.reference_unspsc_name,\n  reference_oecd_fos: enrichedObject.reference_oecd_fos,\n  unit_operations: enrichedObject.unit_operations || [],\n  data_completeness: enrichedObject.data_completeness || 90\n};\n\n// Determine data sources\nconst dataSources = ['csv_inventory'];\nif (lca._data_sources) {\n  dataSources.push(...lca._data_sources.filter(s => s !== 'csv_inventory'));\n} else if (specLines.length > 0) {\n  dataSources.push('perplexity_lca');\n}\nif (enrichedObject.manufacturer_scrape_result?.success) {\n  if (!dataSources.includes('manufacturer_website')) {\n    dataSources.push('manufacturer_website');\n  }\n}\n\n// ===== FAT OBJECT =====\nconst fatObject = {\n  asset_id: assetId,\n  fat_object_id: fatObjectId,\n  asset_type: 'equipment',\n  display_name: enrichedObject.equipment_name,\n  equipment_id: enrichedObject.equipment_id,\n  manufacturer: manufacturer,\n  model: model,\n  serial_number: enrichedObject.serial_number || null,\n  operational_status: enrichedObject.operational_status,\n  scale: enrichment.scale || 'bench',\n  scale_evidence: scaleIndicators,\n  scale_rationale: enrichment.scale_rationale || null,\n  equipment_complexity: enrichment.equipment_complexity || 'single-purpose',\n  capabilities: enrichment.capabilities || [],\n  applications: enrichment.applications || [],\n  operational_parameters: JSON.stringify(enrichment.operational_parameters || {}),\n  batch_capacity_L: specs.batch_capacity_L || null,\n  batch_capacity_kg: specs.batch_capacity_kg || null,\n  throughput_L_hr: specs.throughput_L_hr || null,\n  throughput_kg_hr: specs.throughput_kg_hr || null,\n  weight_kg: specs.weight_kg || null,\n  location: enrichedObject.location,\n  facility_id: enrichedObject.facility_id,\n  version: version,\n  dense_text: denseText,\n  creation_mode: isRefabrication ? 'refabrication' : 'initial_ingest',\n  \n  views: {\n    dense: denseView,\n    embedding: embeddingView,\n    graph: graphView\n  },\n  \n  provenance: {\n    source_thin_object: thinObjectId,\n    enrichment_timestamp: new Date().toISOString(),\n    enriched_by: isRefabrication ? 'gen2_equipment_refabrication_v1.2' : 'gen2_equipment_fabrication_v1.2',\n    enrichment_model: 'gpt-4o',\n    embedding_model: 'text-embedding-3-large',\n    embedding_dimensions: 3072,\n    data_sources: dataSources,\n    field_hashes: enrichedObject.field_hashes || {},\n    checksum: computeChecksum(denseView),\n    is_refabrication: isRefabrication,\n    previous_version: previousVersion,\n    refabrication_reason: executionContext.refabrication_reason || null,\n    changed_fields: executionContext.changed_fields || [],\n    source_queue_entry_id: executionContext.source_queue_entry_id || null,\n    dense_view_tokens: denseTokens,\n    embedding_view_tokens: embeddingTokens,\n    lca_parameters_included: specLines.length > 0,\n    manufacturer_scraped: enrichedObject.manufacturer_scrape_result?.success || false\n  },\n  \n  execution_context: executionContext\n};\n\nconsole.log(`Generated ICF for ${enrichedObject.equipment_name}:`);\nconsole.log(`   Dense: ${denseTokens} tokens, Embedding: ${embeddingTokens} tokens`);\nconsole.log(`   Asset ID: ${assetId}`);\nconsole.log(`   Manufacturer: ${manufacturer}, Model: ${model}`);\nconsole.log(`   Scale: ${enrichment.scale} - ${enrichment.scale_rationale || 'no rationale'}`);\nconsole.log(`   LCA: throughput_kg_hr=${specs.throughput_kg_hr}, batch_L=${specs.batch_capacity_L}, weight=${specs.weight_kg}`);\nif (scaleIndicators) console.log(`   Scale Evidence: ${scaleIndicators}`);\nconsole.log(`   Data Sources: ${dataSources.join(', ')}`);\n\nreturn [{ json: fatObject }];"
+      },
+      "id": "67d0937f-b803-4990-90cd-c588ce542ade",
+      "name": "Pass 4: Generate ICF",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -3744,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openRouterApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "openai/text-embedding-3-large"
+            },
+            {
+              "name": "input",
+              "value": "={{ $json.views.embedding.text }}"
+            },
+            {
+              "name": "dimensions",
+              "value": "={{ 3072 }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ee2a7089-619a-4980-af2c-1c71135a82fe",
+      "name": "Generate Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -3504,
+        5920
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "1srwGILgkvMmHRRn",
+          "name": "OpenRouter account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge Embedding into FAT Object\nconst embeddingResponse = $input.first().json;\nconst fatObject = $('Pass 4: Generate ICF').first().json;\n\nconst embedding = embeddingResponse.data?.[0]?.embedding || [];\n\nfatObject.views.embedding.vector = embedding;\nfatObject.provenance.embedding_generated_at = new Date().toISOString();\n\nconsole.log(`✅ Embedding generated: ${embedding.length} dimensions`);\n\nreturn [{ json: fatObject }];"
+      },
+      "id": "e8592039-9790-441e-bf95-1e7c2754f2fc",
+      "name": "Merge Embedding",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3264,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "content": "# Multi-Pass Processing (Equipment) v1.1\n\n## Pass 1 formats CSV data → NEW: LLM Identifies Manufacturer → Lookup Domain → Crawl4AI Scrape (if manufacturer found) → Pass 2 LLM enriches → Pass 3 builds relationships → Pass 4 generates ICF views → creates embedding.\n\n## NEW in v1.1: \n- LLM-based manufacturer identification (gpt-4o-mini)\n- Domain lookup table for known manufacturers\n- Manufacturer website scraping for LCA specs (weight, capacity, dimensions)\n- Fallback to Perplexity if manufacturer unknown or scraping fails",
+        "height": 3208,
+        "width": 5328,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -4448,
+        3648
+      ],
+      "typeVersion": 1,
+      "id": "a4811108-d434-4948-b91b-c095096ce314",
+      "name": "Sticky Note - Mfr Scraping"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Prepare Store Neo4j - Equipment FATObject\n// Version: v1.2.0 - FIXED: Added LCA fields & scale evidence\n// ============================================================\n\nconst fatObject = $input.first().json;\nconst executionContext = fatObject.execution_context || {};\n\nconst statement = `\n  MERGE (fat:FATObject:Equipment {asset_id: $asset_id})\n  SET fat.asset_type = 'equipment',\n      fat.display_name = $display_name,\n      fat.equipment_name = $equipment_name,\n      fat.equipment_id = $equipment_id,\n      fat.manufacturer = $manufacturer,\n      fat.model = $model,\n      fat.serial_number = $serial_number,\n      fat.operational_status = $operational_status,\n      fat.scale = $scale,\n      fat.scale_evidence = $scale_evidence,\n      fat.scale_rationale = $scale_rationale,\n      fat.equipment_complexity = $equipment_complexity,\n      fat.capabilities = $capabilities,\n      fat.applications = $applications,\n      fat.operational_parameters = $operational_parameters,\n      fat.lca_batch_capacity_L = $batch_capacity_L,\n      fat.lca_batch_capacity_kg = $batch_capacity_kg,\n      fat.lca_throughput_L_hr = $throughput_L_hr,\n      fat.lca_throughput_kg_hr = $throughput_kg_hr,\n      fat.lca_weight_kg = $weight_kg,\n      fat.dense_text = $dense_text,\n      fat.version = $version,\n      fat.creation_mode = $creation_mode,\n      fat.provenance = $provenance,\n      fat.status = 'fabricated',\n      fat.fabricated_at = datetime(),\n      fat.location = $location,\n      fat.facility_id = $facility_id,\n      fat.updated_at = datetime(),\n      fat.last_scanned_at = datetime(),\n      fat.next_source_scan = datetime() + duration({days: 180}),\n      fat.source_freshness_score = 1.0,\n      fat.scan_status = 'current',\n      fat.scan_interval = 180\n\n  WITH fat\n\n  OPTIONAL MATCH (thin:ThinObject:Equipment {asset_id: $thin_asset_id})\n  FOREACH (_ IN CASE WHEN thin IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (fat)-[:FABRICATED_FROM]->(thin)\n  )\n\n  WITH fat\n\n  OPTIONAL MATCH (f:Facility {facility_id: $facility_id})\n  FOREACH (_ IN CASE WHEN f IS NOT NULL THEN [1] ELSE [] END |\n    MERGE (fat)-[:HOSTED_BY]->(f)\n  )\n\n  RETURN fat.asset_id AS created_asset_id,\n         fat.status AS status,\n         fat.fabricated_at AS fabricated_at\n`;\n\nconst parameters = {\n  asset_id: fatObject.asset_id,\n  thin_asset_id: fatObject.provenance.source_thin_object,\n  display_name: fatObject.display_name,\n  equipment_name: fatObject.display_name,\n  equipment_id: fatObject.equipment_id,\n  manufacturer: fatObject.manufacturer || 'Unknown',\n  model: fatObject.model || 'Unknown',\n  serial_number: fatObject.serial_number || null,\n  operational_status: fatObject.operational_status,\n  scale: fatObject.scale,\n  scale_evidence: fatObject.scale_evidence || null,\n  scale_rationale: fatObject.scale_rationale || null,\n  equipment_complexity: fatObject.equipment_complexity,\n  capabilities: fatObject.capabilities,\n  applications: fatObject.applications,\n  operational_parameters: fatObject.operational_parameters,\n  batch_capacity_L: fatObject.batch_capacity_L || null,\n  batch_capacity_kg: fatObject.batch_capacity_kg || null,\n  throughput_L_hr: fatObject.throughput_L_hr || null,\n  throughput_kg_hr: fatObject.throughput_kg_hr || null,\n  weight_kg: fatObject.weight_kg || null,\n  dense_text: fatObject.dense_text,\n  version: fatObject.version,\n  creation_mode: fatObject.creation_mode,\n  provenance: JSON.stringify(fatObject.provenance),\n  location: fatObject.location,\n  facility_id: fatObject.facility_id\n};\n\nreturn [{\n  json: {\n    neo4j_payload: {\n      statement: statement,\n      parameters: parameters\n    },\n    fat_object: fatObject,\n    execution_context: executionContext\n  }\n}];"
+      },
+      "id": "4b6b83d0-8f08-4cca-932c-ca91a1e9c1e5",
+      "name": "Prepare Store Neo4j",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3024,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2784,
+        5920
+      ],
+      "id": "2a7da6ac-d433-4325-aed0-32eaa3b15545",
+      "name": "Store in Neo4j",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Qdrant Payload - Equipment FATObject\n\nconst fatObject = $('Merge Embedding').first().json;\nconst executionContext = fatObject.execution_context || {};\n\nfunction stringToUUID(str) {\n  let hash = 0;\n  for (let i = 0; i < str.length; i++) {\n    const char = str.charCodeAt(i);\n    hash = ((hash << 5) - hash) + char;\n    hash = hash & hash;\n  }\n  const hex = Math.abs(hash).toString(16).padStart(8, '0');\n  const len = str.length.toString(16).padStart(4, '0');\n  let hash2 = 0;\n  for (let i = str.length - 1; i >= 0; i--) {\n    hash2 = ((hash2 << 3) + hash2) + str.charCodeAt(i);\n  }\n  const hex2 = Math.abs(hash2).toString(16).padStart(12, '0');\n  return `${hex}-${len}-4000-8000-${hex2}`.substring(0, 36);\n}\n\nconst isRefabrication = executionContext.mode === 'refabrication';\nconst pointIdSource = isRefabrication \n  ? `${fatObject.asset_id}:${fatObject.version}` \n  : fatObject.asset_id;\nconst pointId = stringToUUID(pointIdSource);\n\nconst qdrantPayload = {\n  id: pointId,\n  vector: fatObject.views.embedding.vector,\n  payload: {\n    asset_id: fatObject.asset_id,\n    version: fatObject.version,\n    entity_type: 'equipment',\n    equipment_id: fatObject.equipment_id,\n    display_name: fatObject.display_name,\n    manufacturer: fatObject.manufacturer || 'Unknown',\n    model: fatObject.model || 'Unknown',\n    scale: fatObject.scale,\n    equipment_complexity: fatObject.equipment_complexity,\n    capabilities: fatObject.capabilities || [],\n    applications: fatObject.applications || [],\n    operational_status: fatObject.operational_status,\n    location: fatObject.location,\n    reference_unspsc_code: fatObject.views.dense.reference_unspsc_code,\n    reference_unspsc_name: fatObject.views.dense.reference_unspsc_name,\n    reference_oecd_fos: fatObject.views.dense.reference_oecd_fos,\n    unit_operations: fatObject.views.dense.unit_operations || [],\n    status: 'fabricated',\n    fabricated_at: fatObject.provenance.enrichment_timestamp,\n    is_refabrication: isRefabrication,\n    previous_version: fatObject.provenance.previous_version || null\n  }\n};\n\nreturn [{\n  json: {\n    fat_object: fatObject,\n    qdrant_payloads: [qdrantPayload],\n    execution_context: executionContext\n  }\n}];"
+      },
+      "id": "6858389b-ca0e-4989-b091-2fea273822e3",
+      "name": "Prepare Qdrant Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2544,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "https://3d3d355d-350c-4fd3-a844-17ca2599c7c0.europe-west3-0.gcp.cloud.qdrant.io/collections/objects_equipment_v1/points?wait=true",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "qdrantRestApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"points\": $json.qdrant_payloads } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2304,
+        5920
+      ],
+      "id": "64ae2d17-7255-403d-bc87-f66e0a34ff05",
+      "name": "Store in Qdrant",
+      "credentials": {
+        "qdrantRestApi": {
+          "id": "5kvIJD32UkQxRAis",
+          "name": "Qdrant account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare PostgreSQL Audit Log - Equipment\n\nconst fatObject = $('Merge Embedding').first().json;\nconst executionContext = fatObject.execution_context || {};\nconst isRefabrication = executionContext.mode === 'refabrication';\n\nconst rawCompleteness = fatObject.views?.dense?.data_completeness || 80;\nconst dataCompleteness = rawCompleteness <= 1 \n  ? Math.round(rawCompleteness * 100)\n  : Math.round(rawCompleteness);\n\nconst supabasePayload = [{\n  asset_id: fatObject.asset_id,\n  status: 'fabricated',\n  checksum: fatObject.provenance.checksum,\n  version: fatObject.version,\n  job_id: $execution?.id || null,\n  enriched_by: fatObject.provenance.enriched_by,\n  object_type: 'equipment',\n  data_completeness: dataCompleteness,\n  enrichment_model: fatObject.provenance.enrichment_model,\n  embedding_model: fatObject.provenance.embedding_model,\n  fabricated_at: fatObject.provenance.enrichment_timestamp,\n  is_refabrication: isRefabrication,\n  previous_version: fatObject.provenance.previous_version || null,\n  refabrication_reason: fatObject.provenance.refabrication_reason || null,\n  source_queue_entry_id: fatObject.provenance.source_queue_entry_id || null\n}];\n\nreturn [{\n  json: {\n    fat_object: fatObject,\n    supabase_payload: supabasePayload,\n    total_records: supabasePayload.length,\n    execution_context: executionContext\n  }\n}];"
+      },
+      "id": "d4562cda-2ae9-447f-a0f2-d4176dfb7b17",
+      "name": "Prepare PostgreSQL Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://esgwrqcyhtzcsbepvqhc.supabase.co/rest/v1/fabrication_audit?on_conflict=asset_id,version",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates, return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.supabase_payload }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1824,
+        5920
+      ],
+      "id": "c921b4c9-dba0-426d-b170-a5e4a581d17c",
+      "name": "Store in Supabase(Postgre)",
+      "credentials": {
+        "supabaseApi": {
+          "id": "vTKATqGswB3PHE6S",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare Update ThinObject Status\nconst preparedData = $('Prepare PostgreSQL Payload').first().json;\nconst fatObject = preparedData.fat_object;\n\nreturn [{\n  json: {\n    fat_object: fatObject,\n    neo4j_payload: {\n      statement: `\n        MATCH (thin:ThinObject:Equipment {asset_id: $thin_object_id})\n        SET thin.status = $new_status\n        SET thin.fabricated_at = timestamp()\n        RETURN thin.asset_id as updated_id\n      `,\n      parameters: {\n        thin_object_id: fatObject.provenance.source_thin_object,\n        new_status: 'fabricated'\n      }\n    }\n  }\n}];"
+      },
+      "id": "b6b6e7e2-ff32-4360-bd5a-1243ce554941",
+      "name": "Prepare Update ThinObject Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1584,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://34204fed.databases.neo4j.io/db/neo4j/query/v2",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.neo4j_payload }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1344,
+        5920
+      ],
+      "id": "4846be64-3a31-44a1-95c8-c453f06dfdc3",
+      "name": "Update ThinObject: Fabricated",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "HximmqteOLptnTyu",
+          "name": "Neo4j Gen 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check Mode for Response\nconst fatObject = $('Prepare Update ThinObject Status').first().json.fat_object;\nconst executionContext = fatObject.execution_context;\n\nreturn [{\n  json: {\n    mode: executionContext.mode,\n    fat_object: fatObject,\n    execution_context: executionContext\n  }\n}];"
+      },
+      "id": "83881380-4210-4e0a-9dfb-d542a7057325",
+      "name": "Check Mode for Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "refabrication",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "route-complete-refab"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "refab"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.mode }}",
+                    "rightValue": "normal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "route-complete-normal"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "normal"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "62bbb455-a6b2-4cf1-b932-0dd1cf17060c",
+      "name": "Route Completion",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -864,
+        5920
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, asset_id: $json.fat_object.asset_id, equipment_name: $json.fat_object.display_name, version: $json.fat_object.version }) }}",
+        "options": {}
+      },
+      "id": "9977d151-f41c-492e-b00d-574fef6c91ac",
+      "name": "Respond to Webhook (Refab)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -624,
+        5840
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop Back - Normal Mode\nreturn [{ json: { continue: true } }];"
+      },
+      "id": "bfa54ad8-44be-455a-80cf-2c0e7afa496e",
+      "name": "Loop Back (Normal)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        6000
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b25e39d8-55e1-4408-9c65-512e250f89fe",
+              "leftValue": "={{ $json.skip_llm_manufacturer }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -4176,
+        4512
+      ],
+      "id": "edc5530b-8ce3-4db9-9f85-24423d177ea3",
+      "name": "Route: Has Manufacturer?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Bypass LLM: Use Existing Manufacturer\n// Version: v1.2.0\n// PURPOSE: When manufacturer already known from ThinObject,\n//          skip LLM and format data for downstream compatibility\n// ============================================================\n\nconst inputData = $input.first().json;\nconst hasExistingLca = inputData.has_existing_lca || false;\n\n// Manufacturer domain lookup table (same as Parse LLM & Resolve Domain)\nconst manufacturerDomains = {\n  'retsch': 'retsch.com',\n  'buchi': 'buchi.com',\n  'büchi': 'buchi.com',\n  'thermo fisher': 'thermofisher.com',\n  'thermo scientific': 'thermofisher.com',\n  'agilent': 'agilent.com',\n  'waters': 'waters.com',\n  'shimadzu': 'shimadzu.com',\n  'perkinelmer': 'perkinelmer.com',\n  'sartorius': 'sartorius.com',\n  'mettler toledo': 'mt.com',\n  'eppendorf': 'eppendorf.com',\n  'ika': 'ika.com',\n  'heidolph': 'heidolph-instruments.com',\n  'labconco': 'labconco.com',\n  'gea': 'gea.com',\n  'alfa laval': 'alfalaval.com',\n  'mitsubishi chemical': 'iatroscan.com',\n  'mitsubishi': 'iatroscan.com',\n  'beckman coulter': 'beckman.com',\n  'bruker': 'bruker.com',\n  'cytiva': 'cytiva.com',\n  'memmert': 'memmert.com',\n  'binder': 'binder-world.com',\n  'yamato': 'yamato-scientific.com',\n  'armfield': 'armfield.co.uk',\n  'cuddon': 'cuddonfreezedry.com',\n  'labplant': 'labplant.com',\n  'macfuge': 'rousselet-robatel.com',\n  'iopak': 'iopak.com',\n  'mixquip': 'mixquip.com.au',\n  'sp scientific': 'spscientific.com',\n  'flottweg': 'flottweg.com',\n  'apeks': 'apekssupercritical.com',\n  'watson-marlow': 'watson-marlow.com',\n  'ankom': 'ankom.com',\n  'foss': 'foss.com',\n  'parr': 'parrinst.com',\n  'lee industries': 'leeindustries.com',\n  'cole-parmer': 'coleparmer.com',\n  'fisher scientific': 'fishersci.com',\n  'millipore': 'emdmillipore.com',\n  'fritsch': 'fritsch.de',\n  'endecotts': 'endecotts.com',\n  // NEW: Suppliers from Deakin BioFactory inventory\n  'filquip': 'filquip.com.au',\n  'rowe scientific': 'rowescientific.com.au',\n  'agridry': 'agridry.com.au',\n  'hanningfield': 'hanningfield.com',\n  'lemitec': 'lemitec.com',\n  'invitro technologies': 'invitrotech.com.au',\n  'green eco technologies': 'greenecotechnologies.com.au',\n  'process plant network': 'processplantnetwork.com.au'\n};\n\nconst manufacturer = inputData.manufacturer;\nconst model = inputData.model || null;\nconst mfrLower = manufacturer.toLowerCase().trim();\n\n// Lookup domain\nlet domain = manufacturerDomains[mfrLower] || null;\nif (!domain) {\n  for (const [key, value] of Object.entries(manufacturerDomains)) {\n    if (mfrLower.includes(key) || key.includes(mfrLower)) {\n      domain = value;\n      break;\n    }\n  }\n}\n\nconst shouldScrape = domain !== null && !hasExistingLca;\n\nconsole.log(`⏭️ Bypassed LLM — Using ThinObject manufacturer for: ${inputData.equipment_name}`);\nconsole.log(`   Manufacturer: ${manufacturer}`);\nconsole.log(`   Model: ${model || 'Unknown'}`);\nconsole.log(`   Domain: ${domain || 'NOT IN LOOKUP TABLE'}`);\nconsole.log(`   Should scrape: ${shouldScrape ? 'YES' : 'NO'}`);\n\nreturn [{\n  json: {\n    ...inputData,\n    manufacturer_identification: {\n      equipment_name: inputData.equipment_name,\n      manufacturer: manufacturer,\n      model: model,\n      equipment_type: null,\n      domain: domain,\n      should_scrape: shouldScrape,\n      skip_reason: !shouldScrape ? (hasExistingLca ? 'has_existing_lca' : 'domain_not_found') : null,\n      identification_method: 'thinobject_passthrough',\n      llm_parse_error: null\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3904,
+        4336
+      ],
+      "id": "e353daae-efae-4ffc-85a9-5f15082ddd62",
+      "name": "Bypass LLM: Use Existing Manufacturer"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Merge Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Merge Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Inputs": {
+      "main": [
+        [
+          {
+            "node": "Route by Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Mode": {
+      "main": [
+        [
+          {
+            "node": "Prepare Fetch ThinObjects",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Fetch ThinObject (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch ThinObjects": {
+      "main": [
+        [
+          {
+            "node": "Fetch ThinObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch ThinObjects": {
+      "main": [
+        [
+          {
+            "node": "Prepare Set Status Fabricating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Set Status Fabricating": {
+      "main": [
+        [
+          {
+            "node": "Set Status: Fabricating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status: Fabricating": {
+      "main": [
+        [
+          {
+            "node": "Split ThinObjects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split ThinObjects": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Fetch ThinObject (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Fetch ThinObject (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch ThinObject (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Set Status (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Set Status (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Set Status: Refabricating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Status: Refabricating": {
+      "main": [
+        [
+          {
+            "node": "Split ThinObjects (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split ThinObjects (Refab)": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Through Objects": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Pass 1: Unification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 1: Unification": {
+      "main": [
+        [
+          {
+            "node": "Prepare Mfr ID Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Mfr ID Prompt": {
+      "main": [
+        [
+          {
+            "node": "Route: Has Manufacturer?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Identify Manufacturer": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM & Resolve Domain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM & Resolve Domain": {
+      "main": [
+        [
+          {
+            "node": "Route: Need Scrape?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Need Scrape?": {
+      "main": [
+        [
+          {
+            "node": "Construct Search URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Manufacturer Scrape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construct Search URL": {
+      "main": [
+        [
+          {
+            "node": "Crawl4AI: Scrape Manufacturer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crawl4AI: Scrape Manufacturer": {
+      "main": [
+        [
+          {
+            "node": "Parse & Merge LCA Specs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Merge LCA Specs": {
+      "main": [
+        [
+          {
+            "node": "Prepare LLM Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Manufacturer Scrape": {
+      "main": [
+        [
+          {
+            "node": "Prepare LLM Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare LLM Prompt": {
+      "main": [
+        [
+          {
+            "node": "Pass 2: LLM Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pass 2: LLM Enrichment",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 2: LLM Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Pass 3: Build Relationships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 3: Build Relationships": {
+      "main": [
+        [
+          {
+            "node": "Pass 4: Generate ICF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass 4: Generate ICF": {
+      "main": [
+        [
+          {
+            "node": "Generate Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Embedding": {
+      "main": [
+        [
+          {
+            "node": "Merge Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Embedding": {
+      "main": [
+        [
+          {
+            "node": "Prepare Store Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Store Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Store in Neo4j",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Neo4j": {
+      "main": [
+        [
+          {
+            "node": "Prepare Qdrant Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Qdrant Payload": {
+      "main": [
+        [
+          {
+            "node": "Store in Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Prepare PostgreSQL Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare PostgreSQL Payload": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase(Postgre)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase(Postgre)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Update ThinObject Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Update ThinObject Status": {
+      "main": [
+        [
+          {
+            "node": "Update ThinObject: Fabricated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update ThinObject: Fabricated": {
+      "main": [
+        [
+          {
+            "node": "Check Mode for Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Mode for Response": {
+      "main": [
+        [
+          {
+            "node": "Route Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Completion": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook (Refab)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Back (Normal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Back (Normal)": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Has Manufacturer?": {
+      "main": [
+        [
+          {
+            "node": "Bypass LLM: Use Existing Manufacturer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM: Identify Manufacturer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bypass LLM: Use Existing Manufacturer": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM & Resolve Domain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "cdf36526-f489-4647-98d7-9c643c28c5a8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bc0e623ae1bb3524870487de3c7fa60f3a571019006cc26dd79ca981250a48aa"
+  },
+  "id": "_iijSYfXSERDuVqhdUIRP",
+  "tags": [
+    {
+      "updatedAt": "2026-02-03T00:03:00.810Z",
+      "createdAt": "2026-02-03T00:03:00.810Z",
+      "id": "c3sCnpq4H5Xan5xf",
+      "name": "equipment instance"
+    }
+  ]
+}
