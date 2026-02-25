@@ -12,3 +12,5 @@ Thumbs.db
 # Backup files
 *.bak
 *.backup
+
+CLEAN-7-FIELDS-ONLY.csv
