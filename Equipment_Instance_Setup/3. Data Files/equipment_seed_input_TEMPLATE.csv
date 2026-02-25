@@ -1,0 +1,34 @@
+equipment_id,equipment_name,manufacturer,model,serial_number,location,facility_id,operational_status,notes
+EQ-001,Iatroscan,,,,Waurn Ponds,facility:deakin-biofactory,operational,TLC-FID for lipid analysis
+EQ-002,Macfuge 260 - Centrifuge Separator,,,,Waurn Ponds,facility:deakin-biofactory,operational,Pilot-scale centrifugal separator
+EQ-003,Filter Press,,,,Waurn Ponds,facility:deakin-biofactory,operational,Plate and frame filtration - GAP REMEDIATED
+EQ-004,Sieve Shakers,,,,Waurn Ponds,facility:deakin-biofactory,operational,Particle size separation
+EQ-005,Dehydrator shipping container,,,,Waurn Ponds,facility:deakin-biofactory,operational,Large-scale dehydration system
+EQ-006,PSS Combi-Unit/Mill head,,,,Waurn Ponds,facility:deakin-biofactory,operational,Size reduction equipment
+EQ-007,Decanter centrifuge,,,,Waurn Ponds,facility:deakin-biofactory,operational,Continuous solid-liquid separation
+EQ-008,IOPAK Basket Centrifuge,,,,Waurn Ponds,facility:deakin-biofactory,operational,Batch centrifugal separation
+EQ-009,Frozen Block Flaker,,,,Waurn Ponds,facility:deakin-biofactory,operational,Frozen material size reduction
+EQ-010,FD80GP Freeze Dry,,,,Waurn Ponds,facility:deakin-biofactory,operational,Production freeze dryer
+EQ-011,FD30 Extraction System F-Series,,,,Waurn Ponds,facility:deakin-biofactory,operational,Supercritical fluid extraction
+EQ-012,Membrane Filtration- Hybrid Skid,,,,Waurn Ponds,facility:deakin-biofactory,operational,Membrane separation system
+EQ-013,20L continuous Rotavap,,,,Waurn Ponds,facility:deakin-biofactory,operational,Solvent evaporation
+EQ-014,Lyovapor,,,,Waurn Ponds,facility:deakin-biofactory,operational,Laboratory lyophiliser
+EQ-015,-80 Freezer,,,,Waurn Ponds,facility:deakin-biofactory,operational,Ultra-low temperature storage
+EQ-016,50L Rotavap,,,,Waurn Ponds,facility:deakin-biofactory,operational,Large-scale solvent evaporation
+EQ-017,Ethanol Extraction Unit (CES-300),,,,Waurn Ponds,facility:deakin-biofactory,operational,Solvent extraction with centrifugal separation
+EQ-018,Environmental Recycling System,,,,Waurn Ponds,facility:deakin-biofactory,operational,Waste treatment/recycling system
+EQ-019,Shipping container with sliding doors for Drying,,,,Waurn Ponds,facility:deakin-biofactory,operational,Container-based drying system
+EQ-020,Jacketed Kettle,,,,Waurn Ponds,facility:deakin-biofactory,operational,Heated mixing vessel
+EQ-021,Peristaltic pump and silicone tubing,,,,Waurn Ponds,facility:deakin-biofactory,operational,Fluid transfer
+EQ-022,Fibre Analyser,,,,Waurn Ponds,facility:deakin-biofactory,operational,Dietary fibre analysis
+EQ-023,Lab scale supercritical (SCF),,,,Waurn Ponds,facility:deakin-biofactory,operational,Laboratory supercritical fluid extraction
+EQ-024,Wastemaster,,,,Waurn Ponds,facility:deakin-biofactory,operational,Waste management system
+EQ-025,Pilot Scale Homogenizer,,,,Waurn Ponds,facility:deakin-biofactory,operational,High-pressure homogenisation
+EQ-026,"Freeze Dryer (KA), Vacuum oven and drying ovens",,,,Waurn Ponds,facility:deakin-biofactory,operational,Combined drying systems
+EQ-027,Vacuum Ovens,,,,Waurn Ponds,facility:deakin-biofactory,operational,Low-temperature vacuum drying
+EQ-028,Convection Ovens,,,,Waurn Ponds,facility:deakin-biofactory,operational,Convective drying
+EQ-029,10L Hydrothermal Reactor,,,,Waurn Ponds,facility:deakin-biofactory,operational,Hydrothermal processing reactor
+EQ-030,Paper making machine,,,,Waurn Ponds,facility:deakin-biofactory,operational,Fibre sheet forming - specialised
+EQ-031,Forklift,,,,Waurn Ponds,facility:deakin-biofactory,operational,Material handling
+EQ-032,Packaging equipment,,,,Waurn Ponds,facility:deakin-biofactory,operational,Product packaging
+EQ-035,Mixquip series - drum mixing units,,,,Waurn Ponds,facility:deakin-biofactory,operational,Drum-mounted mixers

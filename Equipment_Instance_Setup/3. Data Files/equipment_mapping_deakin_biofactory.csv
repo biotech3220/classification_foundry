@@ -1,0 +1,36 @@
+equipment_id,equipment_name,unspsc_code,unspsc_name,coverage_status,unit_operations,oecd_fos,notes
+EQ-001,Iatroscan,41115701,Gas chromatograph,COVERED,lipid_analysis;chromatography,1.4,TLC-FID for lipid analysis
+EQ-002,Macfuge 260 - Centrifuge Separator,40161701,Centrifuges,COVERED,solid_liquid_separation,2.4,Pilot-scale centrifugal separator
+EQ-003,Filter Press,41104910,Laboratory multi sheet or press filters,COVERED,solid_liquid_separation,2.4,Plate and frame filtration - GAP REMEDIATED
+EQ-004,Sieve Shakers,41105002,Sieve shakers,COVERED,sieving,2.4,Particle size separation
+EQ-005,Dehydrator shipping container,41104507,Drying cabinets or ovens,COVERED,drying,2.4,Large-scale dehydration system
+EQ-006,PSS Combi-Unit/Mill head,41101702,Laboratory mills,COVERED,size_reduction,2.4,Size reduction equipment
+EQ-007,Decanter centrifuge,40161701,Centrifuges,COVERED,solid_liquid_separation,2.4,Continuous solid-liquid separation
+EQ-008,IOPAK Basket Centrifuge,40161701,Centrifuges,COVERED,solid_liquid_separation,2.4,Batch centrifugal separation
+EQ-009,Frozen Block Flaker,41101707,Laboratory crushers or pulverizers,COVERED,size_reduction,2.4,Frozen material size reduction
+EQ-010,FD80GP Freeze Dry,24131604,Freeze drying equipment,COVERED,freeze_drying,2.9,Production freeze dryer
+EQ-011,FD30 Extraction System F-Series,41104018,Solid phase extraction preparations,COVERED,extraction,2.4,Supercritical fluid extraction
+EQ-012,Membrane Filtration- Hybrid Skid,40161507,Filter membranes,COVERED,membrane_separation,2.4,Membrane separation system
+EQ-013,20L continuous Rotavap,41104803,Laboratory evaporators,COVERED,evaporation,2.4,Solvent evaporation
+EQ-014,Lyovapor,41104707,Lyophilizers or freeze dryers,COVERED,freeze_drying,2.9,Laboratory lyophiliser
+EQ-015,-80 Freezer,41104302,Ultra low and cryogenic freezers,COVERED,cooling;storage,2.4,Ultra-low temperature storage
+EQ-016,50L Rotavap,41104803,Laboratory evaporators,COVERED,evaporation,2.4,Large-scale solvent evaporation
+EQ-017,Ethanol Extraction Unit (CES-300),41104018,Solid phase extraction preparations,COVERED,extraction;solid_liquid_separation,2.4,Solvent extraction with centrifugal separation
+EQ-018,Environmental Recycling System,41103211,Laboratory wastewater treatment equipment,COVERED,waste_treatment,2.4,Waste treatment/recycling system
+EQ-019,Shipping container with sliding doors for Drying,41104507,Drying cabinets or ovens,COVERED,drying,2.4,Container-based drying system
+EQ-020,Jacketed Kettle,41103808,Laboratory heating mantles,COVERED,heating;mixing,2.4,Heated mixing vessel
+EQ-021,Peristaltic pump and silicone tubing,41105102,Peristaltic pumps,COVERED,pumping,2.4,Fluid transfer
+EQ-022,Fibre Analyser,41104808,Crude fiber extractors,COVERED,fibre_analysis,1.4,Dietary fibre analysis
+EQ-023,Lab scale supercritical (SCF),41115723,Supercritical fluid chromatograph,COVERED,extraction,2.4,Laboratory supercritical fluid extraction
+EQ-024,Wastemaster,41103211,Laboratory wastewater treatment equipment,COVERED,waste_treatment,2.4,Waste management system
+EQ-025,Pilot Scale Homogenizer,41101504,Homogenizers,COVERED,homogenisation,2.4,High-pressure homogenisation
+EQ-026,"Freeze Dryer (KA), Vacuum oven and drying ovens",41104707,Lyophilizers or freeze dryers,COVERED,freeze_drying;drying,2.9,Combined drying systems
+EQ-027,Vacuum Ovens,41104509,Vacuum ovens,COVERED,drying,2.4,Low-temperature vacuum drying
+EQ-028,Convection Ovens,41104501,Laboratory mechanical convection ovens,COVERED,drying,2.4,Convective drying
+EQ-029,10L Hydrothermal Reactor,41103505,Reactors,COVERED,chemical_reaction;pretreatment,2.4,Hydrothermal processing reactor
+EQ-030,Paper making machine,23151815,Sheet or pulp mold systems,COVERED,formulation,2.9,Fibre sheet forming - specialised
+EQ-031,Forklift,24101601,Forklifts,COVERED,conveying,2.4,Material handling
+EQ-032,Packaging equipment,23152903,Packaging vacuum,COVERED,packaging,2.4,Product packaging
+EQ-033,UTE with Refrigeration Box,,,OUT_OF_SCOPE,cooling;storage,2.4,Cold chain transport - vehicle
+EQ-034,GATOR,,,OUT_OF_SCOPE,,,Utility vehicle
+EQ-035,Mixquip series - drum mixing units,23191001,Continuous mixers,COVERED,mixing,2.4,Drum-mounted mixers
