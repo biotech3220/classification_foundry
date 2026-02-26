@@ -1,342 +1,101 @@
-# Foundry Researcher Instance — Production Readiness Runbook v1.1
+Production Readiness Gap Analysis
+Beyond the runbook's 5 tasks, here's what the codebase actually needs — organized by severity.
 
-**Purpose:** Execute these tasks — in order — to take the FAT Researcher instance from "functionally complete" to "production-grade validated". Every task has a gate. Do not skip ahead.
-**Authored:** 2026-02-24
-**Revised:** 2026-02-25 (v1.1 — code review corrections)
-**Execute:** Tasks 1-3 are a single session (~half day). Task 4 is a full pipeline re-run + production baseline (~half day). Task 5 updates project memory.
-**Convention:** All code follows `CLAUDE.md` hard rules. No `print()`, async everywhere, signals via `SignalEmitter`.
+CRITICAL (blocks production deployment)
+1. Secrets committed to Git The .env file with all production API keys (OpenRouter, OpenAI, Cohere, Langfuse, Neo4j, Qdrant, Supabase, Scopus, ORCID, SerpAPI) is tracked in the repository. Every key needs rotation and .env needs adding to .gitignore. History should be cleaned with bfg-repo-cleaner.
 
----
+2. Zero test coverage for Foundry 62 pure-logic unit tests exist for GOVERN math functions. That's it. Zero tests for:
 
-## Changes from v1.0
+All 5 OBJECT engines (O1–O5)
+All 7 adapters (ORCID, Scopus, OpenAlex, Scholar, Patents, University, Brave)
+All 11 CRE constraints
+Feedback processor
+API routes (13 endpoints)
+Core infrastructure (database, signals, config, LLM)
+For comparison, BMS has 292 tests across 13 files with comprehensive mocking infrastructure. Foundry has no conftest.py, no async test fixtures, no mock factories.
 
-| Item | v1.0 Claim | Actual State | Impact |
-|------|-----------|--------------|--------|
-| CRE Constraints | "Only CF1 + CF5 implemented, 9 deferred" | **All 11 fully implemented** — `_DEFERRED` list is empty, all registered in `__init__.py` | Task 5 (1 week) deleted, Task 6 merged into Task 4 |
-| Pipeline orchestrator | `python -m scripts.run_pipeline --full` | `--full` flag does not exist — use `--object --govern` | Option A command corrected |
-| Scopus line numbers | `scopus.py:182-225` | `scopus.py:231-273` (shifted ~50 lines) | Documentation only |
-| OpenAlex line count | 214 lines | 213 lines | Documentation only |
-| CSV names | CF2 "Temporal Relevance", CF3 "Geographic Context", etc. | CF2 "Scale", CF3 "Equipment", CF4 "Temporal", etc. | Constraint names corrected in context table |
+3. Health endpoint only checks Supabasehealth.py:18-27 pings Supabase and returns "ok". Neo4j and Qdrant are not checked. A production deployment could report healthy while the graph database is down.
 
----
+HIGH (significant risk in production)
+4. No rate limiting on API Zero rate limiting on any endpoint. The curator approve/reject endpoints are unprotected against brute-force or accidental rapid-fire calls.
 
-## Context: What's Already Done
+5. Ingestion engine CLI doesn't accept a limit The runbook says python -m foundry.object.researchers.ingestion_engine ingest 191 but O1 has no ingest <N> subcommand — it always processes the full CSV. Every other engine (O2–O5) supports limits.
 
-The researcher instance has code written for all 13 workflows. The code review (2026-02-25) confirmed:
+6. No retry logic on 4 of 7 adapters Only Scopus has proper exponential backoff with 429 handling. ORCID has basic timeout. Scholar, Patents, OpenAlex, and Brave have single-attempt calls — one transient failure and the adapter returns nothing.
 
-| Layer | Workflows | Code Status | Data Status |
-|-------|-----------|-------------|-------------|
-| SYSTEM 1-2 | Domain Hub, Constraints | Production-grade | Run, verified |
-| INSTANCE 1-2 | Standards, Crosswalk | Production-grade | Run, verified (2203 standards, 1032+2321 crosswalks) |
-| OBJECT 1-5 | Ingest → Sync | Production-grade | Run, verified (191 researchers, 164 active, 27 pending) |
-| GOVERN 1-4 | Scan, Severity, Refab, Registry | Production-grade (2,843 LOC) | **Written, never tested against live DBs** |
-| Feedback | Processor, Aggregation, Exemplars, Disambiguation, Evaluation | Production-grade | **Written, never tested against live DBs** |
-| API | Health, Curator, Governance (13 endpoints) | Production-grade | **Untested end-to-end** |
-| CRE | **All 11 families** (CF1-CF10, CF12) | Production-grade | All evaluators active in OBJECT-3 Pass 6 |
+7. No LLM call timeouts in O2 Fabrication engine LLM calls via pydantic-ai have no asyncio.wait_for() wrapper. A hanging OpenRouter request blocks a semaphore slot indefinitely. O3's constraint assessment has a 5s timeout (good), but O2 doesn't.
 
-### Adapter improvements — already implemented
+8. PostgreSQL writes have no retry or exception handling Supabase upserts in O1, O2, and O4 are bare — no try/except, no retry. A transient Supabase network error aborts the entire pipeline run.
 
-MEMORY.md lists these as "planned" but the code review confirmed they are **done**:
+9. Untyped adapter outputSourceResult.data is Dict[str, Any] — completely unvalidated. Publications from 4 sources (ORCID, Scopus, OpenAlex, Scholar) merge with different shapes and no Pydantic model enforcing consistent fields.
 
-- Scopus `_fetch_publications()` — done (`foundry/object/researchers/adapters/scopus.py:231-273`, fetches top 50 pubs)
-- ORCID pub cap raised to 200 — done (`orcid.py:23`, `MAX_ORCID_PUBLICATIONS = 200`)
-- ORCID group-level DOI extraction + normalization — done (`orcid.py:139`, `orcid.py:92-101`)
-- OpenAlex adapter — done (`openalex.py`, 213 lines, full implementation with author lookup, works, topics, affiliations, abstract reconstruction)
-- All 7 adapters registered in `foundry/object/researchers/adapters/__init__.py` (ORCID, Scopus, Scholar, Patents, University, OpenAlex, BraveProfile)
+10. Silent duplicate overwrite in O1 If the CSV has two rows with the same email, the second silently overwrites the first in both Neo4j (MERGE) and Supabase (upsert). No warning logged.
 
-### CRE Constraints — all 11 active
+MEDIUM (operational risk over time)
+11. No cross-database drift detection No mechanism to detect that a researcher is active in Neo4j but pending_review in Supabase, or present in Qdrant but deleted from Neo4j. Three stores, zero consistency checks.
 
-v1.0 incorrectly stated only CF1 and CF5 were implemented. All 11 are live:
+12. No deployment artifacts No Dockerfile, no docker-compose, no pyproject.toml for Foundry. No lock file for deterministic dependency resolution. Python version requirement (3.12, not 3.14) is undeclared.
 
-| Family | File | Gate Mode | Status |
-|--------|------|-----------|--------|
-| CF1 | `cf1_trl.py` | block | Implemented |
-| CF2 | `cf2_scale.py` | penalise | Implemented |
-| CF3 | `cf3_equipment.py` | penalise | Implemented |
-| CF4 | `cf4_temporal.py` | penalise | Implemented |
-| CF5 | `cf5_regulatory.py` | block | Implemented |
-| CF6 | `cf6_geographic.py` | penalise | Implemented |
-| CF7 | `cf7_ip.py` | penalise | Implemented |
-| CF8 | `cf8_readiness.py` | penalise | Implemented |
-| CF9 | `cf9_team.py` | penalise | Implemented |
-| CF10 | `cf10_output.py` | penalise | Implemented |
-| CF12 | `cf12_inference.py` | penalise | Implemented |
+13. No database migration infrastructure One manual SQL file exists (scripts/migrations/001_govern_tables.sql). No Alembic, no migration runner, no tracking of which migrations have been applied.
 
-OBJECT-3 Pass 6 (`classification_engine.py:861-905`) calls `assess_entity()` which evaluates all 11. `_DEFERRED` list in `__init__.py` is empty.
+14. No SQL CHECK constraintsvalidation_queue.status is VARCHAR(50) — no enum. confidence is DECIMAL(5,4) — no range check. correct_codes is VARCHAR(10)[] — no validation against ANZSRC standards.
 
-### Entity-type namespace refactor
+15. No Neo4j uniqueness constraints Indexes exist on asset_id, but no CONSTRAINT ... IS UNIQUE. MERGE prevents duplicates at the application level, but the database doesn't enforce it.
 
-The codebase was refactored into entity-type namespaces. Correct paths:
-- `foundry/object/researchers/` — O1, O2, O3 engines + adapters + models
-- `foundry/object/` — O4 (routing_engine.py), O5 (sync_engine.py) remain here (domain-agnostic)
-- `foundry/instance/researchers/` — standard_fabrication.py
-- `foundry/instance/` — crosswalk_engine.py remains here (reusable)
-- Adapters at `foundry/object/researchers/adapters/`
-- Backward-compatible re-exports in `foundry/object/__init__.py` and `foundry/instance/__init__.py`
+16. Logging is plain-text, hardcoded to INFO No structured/JSON logging. No configurable log level. No log rotation. Each CLI entry point re-configures logging.basicConfig() independently.
 
----
+17. No external alert delivery GOVERN-4 generates alerts and stores them in PostgreSQL, but doesn't notify anyone. No Slack webhook, no email, no PagerDuty. Alerts require manual API polling.
 
-## Task 1: Validate GOVERN Engines (Dry-Run)
+18. No audit query API Signals are persisted to Neo4j but there's no /api/v1/audit/{asset_id} or /api/v1/signals endpoint. Tracing a classification decision requires manual Cypher queries + Langfuse SDK access.
 
-**Goal:** Confirm all 4 GOVERN engines execute without errors against live databases in dry-run mode.
-**Time:** 1-2 hours
-**Depends on:** Active venv, live Neo4j/Supabase/Qdrant connections
+LOW (nice-to-have for production maturity)
+19. Stale docstrings — O1/O2/O3 engine files reference old module paths (foundry.object.ingestion_engine instead of foundry.object.researchers.ingestion_engine).
 
-```bash
-cd "/Users/wes.ward/Desktop/antigravity/Foundry 3"
-source .venv/bin/activate
-```
+20. No input validation on researcher CSV — No email format check, no ORCID URL regex, no lat/lng bounds, no dedup at parse time. Blank emails produce colliding asset_ids.
 
-### 1a: GOVERN-1 Scan Engine
+21. No Pydantic range validators — final_confidence has no ge=0, le=1 constraint. status fields have no enum.
 
-```bash
-python -m foundry.govern.scan_engine dry-run
-```
+22. Auth optional in dev mode — If API_KEY env var is unset, all protected endpoints are publicly accessible. Intentional for dev, dangerous if accidentally deployed without it.
 
-**Expected:** Summary showing scan candidates found (active FATObjects where `next_source_scan <= NOW()`), no DB writes. If no entities have `next_source_scan` set, the dry-run may return 0 candidates — that's OK for now (the field gets set on first real scan).
+Recommended Prioritization
 
-**Verify:** No errors, clean exit, signal emission logged.
 
-### 1b: GOVERN-2 Severity Engine
+Priority
 
-```bash
-python -m foundry.govern.severity_engine dry-run
-```
+Items
 
-**Expected:** Summary showing `change_detection_queue` depth. If Task 1a was dry-run only, the queue will be empty — expected. Confirm the engine starts, queries the queue, and exits cleanly.
+Effort
 
-### 1c: GOVERN-3 Refabrication Engine
+Week 1
 
-```bash
-python -m foundry.govern.refabrication_engine dry-run
-```
+Rotate secrets + .gitignore (#1), health check (#3), rate limiting (#4), O1 CLI limit (#5)
 
-**Expected:** Summary showing `refabrication_queue` depth (likely 0). Confirm clean start, query, exit.
+~1 day
 
-### 1d: GOVERN-4 Registry Health
+Week 2
 
-```bash
-python -m foundry.govern.registry_engine dry-run
-```
+Test infrastructure + first 50 tests (#2), adapter retries (#6), LLM timeouts (#7), PG retries (#8)
 
-**Expected:** Full health snapshot printed to logs — freshness distribution, queue depths, pipeline metrics, threshold evaluations. This is the most informative dry-run because it reads from Neo4j and all queue tables. **Save this output** — it's the pre-re-run baseline.
+~3 days
 
-### 1e: API Endpoints
+Week 3
 
-```bash
-# Start API in background
-uvicorn foundry.api.app:app --host 0.0.0.0 --port 8000 &
+SQL constraints (#14), Neo4j constraints (#15), typed adapter output (#9), duplicate detection (#10)
 
-# Test governance endpoints
-curl -s http://localhost:8000/api/v1/governance/freshness | python -m json.tool
-curl -s http://localhost:8000/api/v1/governance/queues | python -m json.tool
-curl -s http://localhost:8000/api/v1/governance/sla | python -m json.tool
-curl -s http://localhost:8000/api/v1/governance/alerts | python -m json.tool
-curl -s http://localhost:8000/api/v1/governance/snapshot/latest | python -m json.tool
+~2 days
 
-# Also test health + curator queue
-curl -s http://localhost:8000/api/v1/health | python -m json.tool
-curl -s http://localhost:8000/api/v1/health/queue-stats | python -m json.tool
-curl -s http://localhost:8000/api/v1/health/classification-quality | python -m json.tool
-curl -s "http://localhost:8000/api/v1/curator/queue?status=pending_review" | python -m json.tool
+Week 4
 
-# Kill background uvicorn
-kill %1
-```
+Audit API (#18), alert webhooks (#17), cross-DB drift check (#11), structured logging (#16)
 
-**Expected:** All endpoints return JSON without 500 errors. Some may return empty results if governance hasn't run in write mode yet — that's fine.
+~2 days
 
-**Gate:** All 4 engines dry-run clean. All API endpoints return valid responses. Fix any errors before proceeding.
+Later
 
----
+Deployment artifacts (#12), migration infra (#13), Pydantic validators (#20-21)
 
-## Task 2: Run GOVERN-1 Live (Small Batch)
+~2 days
 
-**Goal:** Execute a real GOVERN-1 scan against 5 active researchers to populate the change detection pipeline.
-**Time:** 30-60 min (depends on adapter response times)
-**Depends on:** Task 1 passed
 
-```bash
-python -m foundry.govern.scan_engine scan 5
-```
 
-**Expected:**
-- 5 active FATObjects scanned via OBJECT-1 `maintenance_scan()`
-- Neo4j ALM fields updated: `last_scanned_at`, `next_source_scan`, `source_freshness_score`
-- Any detected changes queued to `change_detection_queue`
-- Summary with scan counts and timing
-
-### Then cascade through GOVERN-2 and GOVERN-3
-
-```bash
-# Classify severity of any detected changes
-python -m foundry.govern.severity_engine run 10
-
-# If any changes routed to refabrication queue
-python -m foundry.govern.refabrication_engine run 5
-```
-
-**Note:** GOVERN-3 will call OBJECT-2 in refabrication mode and wait for the new version to reach `status='active'` (which requires OBJECT-3->4->5 to run). For this validation, if GOVERN-3 times out waiting, that's acceptable — it confirms the orchestration logic works. The timeout is 30 minutes.
-
-### Capture health snapshot
-
-```bash
-python -m foundry.govern.registry_engine run
-```
-
-**Gate:** GOVERN-1 successfully scanned live entities. GOVERN-2 processed any detected changes. GOVERN-4 produced a health snapshot with real data. Fix any failures before proceeding.
-
----
-
-## Task 3: Validate Feedback Loop
-
-**Goal:** Confirm the feedback processor runs against existing curator decisions (if any) and writes downstream aggregations.
-**Time:** 30 min
-**Depends on:** Task 1 passed (can run in parallel with Task 2)
-
-### 3a: Check for existing curator decisions
-
-```bash
-python -c "
-from foundry.core.database import get_supabase
-sb = get_supabase()
-result = sb.table('validation_queue').select('status', count='exact').in_('status', ['curator_approved', 'curator_rejected']).execute()
-print(f'Curator decisions: {result.count}')
-result2 = sb.table('validation_queue').select('status', count='exact').eq('status', 'auto_approved').execute()
-print(f'Auto-approved: {result2.count}')
-"
-```
-
-If there are 0 curator decisions, the feedback processor will have nothing to process — that's expected. The 164 auto-approved items don't flow through the feedback loop (only curator decisions do).
-
-### 3b: Run feedback processor (dry-run first)
-
-```bash
-python -m foundry.feedback.processor dry-run
-python -m foundry.feedback.processor run
-```
-
-**Expected:** Processor reports watermark position, number of new decisions processed, aggregation writes (code_stats, calibration bands, adapter_quality). If 0 curator decisions exist, it will process 0 and exit cleanly.
-
-**Gate:** Feedback processor runs without errors. If curator decisions exist, aggregations are written to Supabase and exemplars/disambiguation to Qdrant/Neo4j.
-
----
-
-## Task 4: Full Pipeline Re-Run + Production Baseline (O1 -> O5)
-
-**Goal:** Re-run the entire OBJECT pipeline for all 191 researchers with the improved adapters (Scopus publications, ORCID 200-cap, OpenAlex, group-level DOIs) and all 11 CRE constraints active. Capture the production baseline.
-**Time:** 2-4 hours (191 researchers x 7 adapters + LLM calls)
-**Depends on:** Tasks 1-3 passed
-
-### Important: Both adapters AND constraints are already improved
-
-The code already has:
-- `scopus.py` — `_fetch_publications()` fetching top 50 publications with titles, DOIs, dates, citation counts
-- `orcid.py` — 200-pub cap, group-level DOI extraction, DOI normalization
-- `openalex.py` — full adapter with author lookup, works, topics, affiliations, abstract reconstruction
-- All 11 CRE constraint evaluators active in OBJECT-3 Pass 6
-
-These improvements have never been run against the full 191-researcher dataset. This re-run will produce richer ThinObjects -> richer FATObjects -> higher classification confidence with the full constraint battery.
-
-### Execute
-
-```bash
-# Option A: Use the pipeline orchestrator
-python scripts/run_pipeline.py --object --limit 191
-
-# Option B: Run each stage manually for visibility (RECOMMENDED)
-python -m foundry.object.researchers.ingestion_engine ingest 191
-python -m foundry.object.researchers.fabrication_engine fabricate 191
-python -m foundry.object.researchers.classification_engine classify 191
-python -m foundry.object.routing_engine route 191
-python -m foundry.object.sync_engine sync 200
-```
-
-**Note:** Option B is recommended for the first re-run — it gives visibility into each stage and lets you stop if something goes wrong.
-
-### Measure results + capture production baseline
-
-After the re-run, capture the production baseline:
-
-```bash
-python -c "
-from foundry.core.database import get_supabase
-sb = get_supabase()
-
-# Auto-approve rate
-total = sb.table('validation_queue').select('*', count='exact').execute()
-auto = sb.table('validation_queue').select('*', count='exact').eq('status', 'auto_approved').execute()
-pending = sb.table('validation_queue').select('*', count='exact').eq('status', 'pending_review').execute()
-print(f'Total: {total.count}')
-print(f'Auto-approved: {auto.count} ({auto.count/total.count*100:.1f}%)')
-print(f'Pending review: {pending.count}')
-
-# Confidence stats
-from statistics import mean
-rows = sb.table('object_classifications').select('final_confidence').execute()
-confs = [r['final_confidence'] for r in rows.data]
-print(f'Avg confidence: {mean(confs):.4f}')
-print(f'Min: {min(confs):.4f}, Max: {max(confs):.4f}')
-"
-```
-
-### Capture GOVERN-4 health snapshot + feedback baseline
-
-```bash
-# Run GOVERN-4 for definitive health snapshot
-python -m foundry.govern.registry_engine run
-
-# Run feedback processor
-python -m foundry.feedback.processor run
-```
-
-### Record these metrics (the production baseline):
-
-- Total researchers: ___
-- Auto-approved: ___ (___%)
-- Pending review: ___
-- Avg confidence: ___
-- Min/Max confidence: ___/___
-- Constraints evaluated: 11/11
-- GOVERN-4 health status: ___
-
-**Target:** >90% auto-approve rate (was 85.9% with metrics-only Scopus, 50-cap ORCID, and only 2 active constraints).
-
-**Gate:** Pipeline completes without errors for all 191 researchers. Auto-approve rate measured and recorded. GOVERN-4 health snapshot captured. If rate is still <90%, investigate which researchers are below threshold and why.
-
----
-
-## Task 5: Update MEMORY.md
-
-**Goal:** Bring the project memory up to date so future sessions start from accurate state.
-**Time:** 30 min
-**Depends on:** Task 4 passed
-
-Update these sections in `/Users/wes.ward/.claude/projects/-Users-wes-ward-Desktop-antigravity-Foundry-3/memory/MEMORY.md`:
-
-1. **File Structure** — update paths to reflect entity-type namespace refactor (`foundry/object/researchers/`, etc.)
-2. **Current Data State** — update metrics from Task 4 production baseline
-3. **PLANNED: Phase 1 Adapter Improvements** — mark as DONE (Scopus pubs, ORCID 200-cap, OpenAlex all implemented)
-4. **Observability Implementation Phases** — update to reflect that GOVERN, feedback, and observability are implemented
-5. **Constraint Families** — update to reflect all 11 are active (not just CF1 + CF5)
-6. **Add section:** "GOVERN Layer — Validated" with dry-run and live-run results
-7. **Remove stale entries** that reference old paths or planned work that's now complete
-
----
-
-## Completion Criteria
-
-All 5 tasks done means:
-
-- [ ] GOVERN 1-4 validated (dry-run + small live batch)
-- [ ] Feedback processor validated
-- [ ] API endpoints returning valid responses
-- [ ] Full pipeline re-run with improved adapters + all 11 constraints (production baseline)
-- [ ] Auto-approve rate measured (target: >90%)
-- [ ] GOVERN-4 health snapshot captured
-- [ ] MEMORY.md updated to reflect current state
-
-**After completion:** The FAT Researcher instance is production-grade. Next workstreams:
-- Curator reviews of pending items (trace links available via API)
-- Equipment instance (OBJECT-2/3 stubs need implementation)
-- BMS Phase 1 (separate silo, independent workstream)
+The runbook tasks (GOVERN dry-run, feedback validation, full re-run, MEMORY update) are still necessary — but they validate the functional pipeline. This list covers the operational infrastructure that separates "it runs" from "it runs reliably in production".
